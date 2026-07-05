@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: white;
+}
+
+@keyframes hero-slide {
+  0% {
+    transform: translateX(0%);
+  }
+
+  28% {
+    transform: translateX(0%);
+  }
+
+  33% {
+    transform: translateX(-100%);
+  }
+
+  61% {
+    transform: translateX(-100%);
+  }
+
+  66% {
+    transform: translateX(-200%);
+  }
+
+  94% {
+    transform: translateX(-200%);
+  }
+
+  100% {
+    transform: translateX(0%);
+  }
+}
+
+.animate-hero-slide {
+  animation: hero-slide 15s infinite;
+}
