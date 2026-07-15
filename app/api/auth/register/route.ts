@@ -1,38 +1,47 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getProfile, registerUser } from "@/app/lib/supabase";
-import type { UserRole } from "@/app/data/products";
-
-const allowedRoles = new Set<UserRole>(["normal", "wholesale"]);
+import { checkRateLimit } from "@/app/lib/rate-limit";
+import { firstIssueMessage, registerInputSchema } from "@/app/lib/validation";
 
 export async function POST(request: NextRequest) {
-  try {
-    const body = (await request.json()) as {
-      email?: string;
-      password?: string;
-      full_name?: string;
-      role?: UserRole;
-    };
+  const rateLimit = checkRateLimit(request, "register");
 
-    if (!body.email || !body.password) {
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many registration attempts. Please try again later." },
+      { status: 429 }
+    );
+  }
+
+  try {
+    const parsed = registerInputSchema.safeParse(
+      await request.json().catch(() => ({}))
+    );
+
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "Email and password are required." },
+        { error: firstIssueMessage(parsed.error) },
         { status: 400 }
       );
     }
 
-    const role = body.role && allowedRoles.has(body.role) ? body.role : "normal";
+    // Role is never accepted from the client: self-registration always
+    // creates a "normal" account. Wholesale/admin roles are granted by an
+    // admin afterwards (see ADMIN_SETUP.md), never chosen at signup.
     const user = await registerUser({
-      email: body.email,
-      password: body.password,
-      fullName: body.full_name,
-      role,
+      email: parsed.data.email,
+      password: parsed.data.password,
+      fullName: parsed.data.full_name,
+      role: "normal",
     });
     const profile = await getProfile(user.id);
 
     return NextResponse.json({ profile, user: profile }, { status: 201 });
   } catch (error) {
+    console.error("[auth.register] failed", error);
+
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Registration failed." },
+      { error: "Unable to create account. Check your details and try again." },
       { status: 400 }
     );
   }

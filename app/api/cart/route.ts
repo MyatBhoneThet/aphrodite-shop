@@ -5,35 +5,36 @@ import {
   clearUserCart,
   getCart,
 } from "@/app/lib/backend";
+import { handleRouteError } from "@/app/lib/errors";
+import { cartItemInputSchema, firstIssueMessage } from "@/app/lib/validation";
 
 export async function GET(request: NextRequest) {
   try {
     const user = await authenticate(request);
     return NextResponse.json(await getCart(user));
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return handleRouteError("cart.list", error);
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const user = await authenticate(request);
-    const body = (await request.json()) as {
-      product_id?: number;
-      productId?: number;
-      quantity?: number;
-    };
+    const parsed = cartItemInputSchema.safeParse(await request.json().catch(() => ({})));
 
-    return NextResponse.json(
-      await addCartItem(user, Number(body.product_id ?? body.productId), body.quantity)
-    );
+    if (!parsed.success) {
+      return NextResponse.json({ error: firstIssueMessage(parsed.error) }, { status: 400 });
+    }
+
+    const productId = parsed.data.product_id ?? parsed.data.productId;
+
+    if (!productId) {
+      return NextResponse.json({ error: "product_id is required." }, { status: 400 });
+    }
+
+    return NextResponse.json(await addCartItem(user, productId, parsed.data.quantity));
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to add item.";
-
-    return NextResponse.json(
-      { error: message },
-      { status: message === "Unauthorized" ? 401 : 400 }
-    );
+    return handleRouteError("cart.add", error);
   }
 }
 
@@ -41,7 +42,7 @@ export async function DELETE(request: NextRequest) {
   try {
     const user = await authenticate(request);
     return NextResponse.json(await clearUserCart(user));
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return handleRouteError("cart.clear", error);
   }
 }

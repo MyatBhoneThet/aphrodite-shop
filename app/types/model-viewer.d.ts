@@ -1,4 +1,4 @@
-import type { DetailedHTMLProps, HTMLAttributes } from "react";
+import type { DetailedHTMLProps, HTMLAttributes, CSSProperties } from "react";
 
 declare global {
   namespace JSX {
@@ -12,11 +12,13 @@ declare global {
         alt?: string;
         ar?: boolean | string;
         "camera-controls"?: boolean | string;
+        "disable-zoom"?: boolean | string;
         "auto-rotate"?: boolean | string;
         "shadow-intensity"?: string;
         exposure?: string;
         "environment-image"?: string;
         "interaction-prompt"?: string;
+        style?: CSSProperties;
       };
     }
   }

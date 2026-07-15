@@ -55,8 +55,12 @@ export default function Navbar({
         <div className="flex items-center gap-3 text-sm">
           <LanguageSwitcher language={language} setLanguage={setLanguage} />
 
-          <span>♡ {wishlistCount}</span>
-          <span>🛒 {cartCount}</span>
+          <Link href="/wishlist" className="hover:text-red-600">
+            ♡ {wishlistCount}
+          </Link>
+          <Link href="/cart" className="hover:text-red-600">
+            🛒 {cartCount}
+          </Link>
 
           {currentUser ? (
             <div className="flex items-center gap-2">
@@ -70,7 +74,7 @@ export default function Navbar({
 
               {currentUser.role === "admin" && (
                 <Link
-                  href="/admin"
+                  href="/admin/dashboard"
                   className="rounded-full bg-zinc-900 px-4 py-2 text-white"
                 >
                   Admin

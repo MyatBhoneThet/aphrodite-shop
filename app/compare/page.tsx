@@ -5,20 +5,15 @@ import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Product, UserRole } from "../data/products";
-import { authHeaders, getAccessToken } from "../lib/client-auth";
-
-type CurrentUser = {
-  id?: string;
-  email: string;
-  role: UserRole;
-};
+import { formatCurrency } from "../lib/format";
+import { useCurrentUser } from "../lib/useCurrentUser";
 
 function ComparePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const primaryId = Number(searchParams.get("primary"));
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const { user: currentUser } = useCurrentUser();
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -28,23 +23,6 @@ function ComparePageContent() {
     products.find((product) => product.id === selectedIds[0]) ??
     products.find((product) => product.type === "laptop") ??
     products[0];
-
-  useEffect(() => {
-    async function loadSession() {
-      const token = getAccessToken();
-
-      if (!token) return;
-
-      const response = await fetch("/api/auth/me", {
-        headers: authHeaders(),
-      });
-      const data = (await response.json()) as { user: CurrentUser | null };
-
-      setCurrentUser(response.ok ? data.user : null);
-    }
-
-    loadSession();
-  }, []);
 
   useEffect(() => {
     async function loadProducts() {
@@ -133,8 +111,7 @@ function ComparePageContent() {
     },
     {
       label: "Price",
-      value: (product: Product) =>
-        `฿${getDisplayPrice(product).toLocaleString()}`,
+      value: (product: Product) => formatCurrency(getDisplayPrice(product)),
     },
     {
       label: "Processor",
@@ -314,7 +291,7 @@ function ComparePageContent() {
               </p>
 
               <p className="mt-4 text-2xl font-bold">
-                ฿{getDisplayPrice(product).toLocaleString()}
+                {formatCurrency(getDisplayPrice(product))}
               </p>
 
               {userRole === "wholesale" && product.wholesalePrice && (

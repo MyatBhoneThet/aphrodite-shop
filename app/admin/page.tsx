@@ -5,14 +5,9 @@
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { Product, ProductType, UserRole } from "../data/products";
-import { authHeaders, clearStoredAuth, getAccessToken } from "../lib/client-auth";
-
-type CurrentUser = {
-  id?: string;
-  email: string;
-  full_name?: string | null;
-  role: UserRole;
-};
+import { adminLogout, authHeaders, getAccessToken } from "../lib/client-auth";
+import { formatCurrency, formatDateTime } from "../lib/format";
+import { useCurrentUser } from "../lib/useCurrentUser";
 
 type OrderStatus =
   | "pending"
@@ -133,38 +128,12 @@ function productToForm(product: Product): ProductFormState {
   };
 }
 
-function readStoredUser() {
-  if (typeof window === "undefined") return null;
-
-  try {
-    const raw = localStorage.getItem("aphrodite_user");
-    return raw ? (JSON.parse(raw) as CurrentUser) : null;
-  } catch {
-    return null;
-  }
-}
-
 async function getErrorMessage(response: Response) {
   const data = (await response.json().catch(() => null)) as {
     error?: string;
   } | null;
 
   return data?.error ?? "Request failed.";
-}
-
-function formatMoney(value: number) {
-  return `฿${Number(value || 0).toLocaleString()}`;
-}
-
-function formatDate(value: string) {
-  try {
-    return new Intl.DateTimeFormat("en-GB", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
 }
 
 function parseJsonObject(value: string, label: string) {
@@ -181,32 +150,18 @@ function parseJsonObject(value: string, label: string) {
   }
 }
 
-function makeLinePoints(values: number[]) {
-  const max = Math.max(...values, 1);
-  const width = 320;
-  const height = 120;
-  const left = 10;
-  const bottom = 110;
-  const gap = values.length > 1 ? width / (values.length - 1) : width;
-
-  return values
-    .map((value, index) => {
-      const x = left + index * gap;
-      const y = bottom - (value / max) * height * 0.75;
-      return `${x},${y}`;
-    })
-    .join(" ");
-}
-
 export default function AdminPage() {
-  const [authStatus, setAuthStatus] = useState<
-    "checking" | "ready" | "forbidden"
-  >("checking");
+  const { user: currentUser, status: userStatus } = useCurrentUser();
+  const authStatus: "checking" | "ready" | "forbidden" =
+    userStatus === "checking"
+      ? "checking"
+      : currentUser?.role === "admin"
+      ? "ready"
+      : "forbidden";
 
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [activePanel, setActivePanel] = useState<
-    "dashboard" | "products" | "orders" | "sync"
-  >("dashboard");
+    "products" | "orders" | "sync"
+  >("products");
 
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
@@ -274,52 +229,14 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
-    async function checkAdminAccess() {
-      const savedUser = readStoredUser();
-
-      if (savedUser?.role === "admin") {
-        setCurrentUser(savedUser);
-        setAuthStatus("ready");
+    async function loadOnMount() {
+      if (authStatus === "ready") {
         await loadDashboardData();
-        return;
-      }
-
-      const token = getAccessToken();
-
-      if (!token) {
-        setAuthStatus("forbidden");
-        return;
-      }
-
-      try {
-        const response = await fetch("/api/auth/me", {
-          headers: authHeaders(),
-          cache: "no-store",
-        });
-
-        const data = (await response.json()) as {
-          user?: CurrentUser;
-          profile?: CurrentUser;
-        };
-
-        const user = data.user ?? data.profile;
-
-        if (!response.ok || !user || user.role !== "admin") {
-          setAuthStatus("forbidden");
-          return;
-        }
-
-        localStorage.setItem("aphrodite_user", JSON.stringify(user));
-        setCurrentUser(user);
-        setAuthStatus("ready");
-        await loadDashboardData();
-      } catch {
-        setAuthStatus("forbidden");
       }
     }
 
-    checkAdminAccess();
-  }, [loadDashboardData]);
+    loadOnMount();
+  }, [authStatus, loadDashboardData]);
 
   const filteredProducts = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -333,68 +250,9 @@ export default function AdminPage() {
     );
   }, [products, search]);
 
-  const stats = useMemo(() => {
-    const activeOrders = orders.filter((order) => order.status !== "cancelled");
-    const totalSales = activeOrders.reduce(
-      (sum, order) => sum + Number(order.total_amount || 0),
-      0
-    );
-
-    return {
-      totalSales,
-      orderCount: orders.length,
-      pendingOrders: orders.filter((order) => order.status === "pending").length,
-      productCount: products.length,
-      inStock: products.filter((product) => product.stock === "In Stock")
-        .length,
-      outOfStock: products.filter((product) => product.stock === "Out of Stock")
-        .length,
-      laptopCount: products.filter((product) => product.type === "laptop")
-        .length,
-      accessoryCount: products.filter((product) => product.type === "accessory")
-        .length,
-    };
-  }, [orders, products]);
-
-  const monthlySales = useMemo(() => {
-    const now = new Date();
-
-    return Array.from({ length: 7 }).map((_, index) => {
-      const date = new Date(now.getFullYear(), now.getMonth() - 6 + index, 1);
-      const month = date.toLocaleDateString("en-US", { month: "short" });
-      const year = date.getFullYear();
-
-      const value = orders
-        .filter((order) => {
-          const created = new Date(order.created_at);
-          return (
-            created.getMonth() === date.getMonth() &&
-            created.getFullYear() === date.getFullYear() &&
-            order.status !== "cancelled"
-          );
-        })
-        .reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
-
-      return {
-        label: `${month} ${String(year).slice(2)}`,
-        value,
-      };
-    });
-  }, [orders]);
-
-  const orderStatusSales = useMemo(() => {
-    return orderStatuses.map((status) => ({
-      status,
-      value: orders
-        .filter((order) => order.status === status)
-        .reduce((sum, order) => sum + Number(order.total_amount || 0), 0),
-    }));
-  }, [orders]);
-
   async function handleLogout() {
-    await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
-    clearStoredAuth();
-    window.location.assign("/login");
+    await adminLogout();
+    window.location.assign("/admin/login");
   }
 
   async function handleSaveProduct(event: FormEvent<HTMLFormElement>) {
@@ -577,15 +435,16 @@ export default function AdminPage() {
           <p className="text-5xl">🔒</p>
           <h1 className="mt-4 text-2xl font-bold">Admin access only</h1>
           <p className="mt-3 text-zinc-500">
-            Please login with admin@aphrodite.com and password Admin123456.
+            You need an admin account to view this page. Please login with
+            your admin credentials.
           </p>
 
           <div className="mt-6 flex justify-center gap-3">
             <Link
-              href="/login"
+              href="/admin/login"
               className="rounded-full bg-red-600 px-5 py-2 text-sm font-semibold text-white"
             >
-              Go to Login
+              Go to Admin Login
             </Link>
 
             <Link href="/" className="rounded-full border px-5 py-2 text-sm">
@@ -630,12 +489,13 @@ export default function AdminPage() {
         </div>
 
         <nav className="space-y-1 px-3 text-sm">
-          <SidebarButton
-            active={activePanel === "dashboard"}
-            icon="📊"
-            label="Dashboard"
-            onClick={() => setActivePanel("dashboard")}
-          />
+          <Link
+            href="/admin/dashboard"
+            className="flex items-center gap-3 rounded px-4 py-3 text-white/80 hover:bg-white/10"
+          >
+            <span>📊</span>
+            Overview
+          </Link>
           <SidebarButton
             active={activePanel === "products"}
             icon="💻"
@@ -681,9 +541,12 @@ export default function AdminPage() {
         <header className="sticky top-0 z-30 border-b bg-white shadow-sm">
           <div className="flex min-h-16 items-center justify-between gap-4 px-5 py-3">
             <div>
-              <h1 className="text-xl font-bold">Dashboard</h1>
+              <h1 className="text-xl font-bold">Manage</h1>
               <p className="text-xs text-zinc-500">
-                Home / Aphrodite Admin Panel
+                <Link href="/admin/dashboard" className="hover:underline">
+                  Overview
+                </Link>{" "}
+                / Aphrodite Admin Panel
               </p>
             </div>
 
@@ -715,226 +578,6 @@ export default function AdminPage() {
             >
               {error || message}
             </div>
-          )}
-
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <StatCard
-              title="Total Sales"
-              value={formatMoney(stats.totalSales)}
-              subtitle="More info"
-              color="bg-cyan-600"
-              icon="💰"
-            />
-
-            <StatCard
-              title="Orders"
-              value={String(stats.orderCount)}
-              subtitle={`${stats.pendingOrders} pending orders`}
-              color="bg-green-600"
-              icon="🧾"
-            />
-
-            <StatCard
-              title="Products"
-              value={String(stats.productCount)}
-              subtitle={`${stats.laptopCount} laptops / ${stats.accessoryCount} accessories`}
-              color="bg-yellow-500"
-              icon="💻"
-            />
-
-            <StatCard
-              title="Stock Alert"
-              value={String(stats.outOfStock)}
-              subtitle={`${stats.inStock} in stock`}
-              color="bg-red-600"
-              icon="⚠️"
-            />
-          </section>
-
-          {activePanel === "dashboard" && (
-            <section className="mt-6 grid gap-6 xl:grid-cols-[1.55fr_1fr]">
-              <div className="rounded bg-white shadow">
-                <div className="flex items-center justify-between border-b px-5 py-4">
-                  <div>
-                    <h2 className="font-bold">Sales</h2>
-                    <p className="text-sm text-zinc-500">
-                      Monthly sales overview
-                    </p>
-                  </div>
-
-                  <div className="flex gap-2 text-xs">
-                    <span className="rounded bg-blue-600 px-3 py-2 font-semibold text-white">
-                      Area
-                    </span>
-                    <span className="rounded bg-zinc-100 px-3 py-2 font-semibold">
-                      Donut
-                    </span>
-                  </div>
-                </div>
-
-                <div className="p-5">
-                  <svg viewBox="0 0 350 140" className="h-72 w-full">
-                    <polyline
-                      fill="rgba(14, 165, 233, 0.16)"
-                      stroke="none"
-                      points={`10,130 ${makeLinePoints(
-                        monthlySales.map((item) => item.value)
-                      )} 330,130`}
-                    />
-
-                    <polyline
-                      fill="none"
-                      stroke="#0ea5e9"
-                      strokeWidth="6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      points={makeLinePoints(
-                        monthlySales.map((item) => item.value)
-                      )}
-                    />
-
-                    {[20, 50, 80, 110].map((y) => (
-                      <line
-                        key={y}
-                        x1="10"
-                        y1={y}
-                        x2="340"
-                        y2={y}
-                        stroke="#e5e7eb"
-                        strokeWidth="1"
-                      />
-                    ))}
-                  </svg>
-
-                  <div className="grid grid-cols-7 gap-2 text-center text-xs text-zinc-500">
-                    {monthlySales.map((item) => (
-                      <span key={item.label}>{item.label}</span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded bg-blue-500 text-white shadow">
-                <div className="flex items-center justify-between border-b border-white/20 px-5 py-4">
-                  <h2 className="font-bold">Visitors</h2>
-                  <span className="rounded bg-white/20 px-2 py-1 text-xs">
-                    Map
-                  </span>
-                </div>
-
-                <div className="p-5">
-                  <div className="flex h-52 items-center justify-center rounded bg-white/10 text-center">
-                    <div>
-                      <p className="text-5xl">🌏</p>
-                      <p className="mt-3 text-lg font-bold">
-                        Thailand → Myanmar
-                      </p>
-                      <p className="text-sm text-white/70">
-                        Bangkok stock / Yangon wholesale flow
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-5 grid grid-cols-3 gap-3 text-center text-sm">
-                    <div>
-                      <p className="text-2xl font-bold">{stats.inStock}</p>
-                      <p className="text-white/70">In Stock</p>
-                    </div>
-                    <div>
-                      <p className="text-2xl font-bold">{stats.orderCount}</p>
-                      <p className="text-white/70">Online</p>
-                    </div>
-                    <div>
-                      <p className="text-2xl font-bold">
-                        {formatMoney(stats.totalSales)}
-                      </p>
-                      <p className="text-white/70">Sales</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded bg-white shadow">
-                <div className="border-b px-5 py-4">
-                  <h2 className="font-bold">Direct Chat</h2>
-                </div>
-
-                <div className="space-y-3 p-5 text-sm">
-                  <ChatBubble
-                    name="Aphrodite Admin"
-                    text="Check new product arrivals, serial number and code before selling."
-                  />
-                  <ChatBubble
-                    name="System"
-                    text="Update order status after payment, packing and delivery."
-                    right
-                  />
-                  <ChatBubble
-                    name="Warehouse"
-                    text="Out of stock items should be checked with physical stock."
-                  />
-                </div>
-              </div>
-
-              <div className="rounded bg-white shadow">
-                <div className="border-b px-5 py-4">
-                  <h2 className="font-bold">To Do List</h2>
-                </div>
-
-                <div className="space-y-3 p-5 text-sm">
-                  <Todo text="Check today new orders" />
-                  <Todo text="Update laptop stock status" />
-                  <Todo text="Confirm Bangkok / Yangon delivery expenses" />
-                  <Todo text="Review wholesale customer requests" />
-                </div>
-              </div>
-
-              <div className="rounded bg-white shadow xl:col-span-2">
-                <div className="border-b px-5 py-4">
-                  <h2 className="font-bold">Sales Graph</h2>
-                  <p className="text-sm text-zinc-500">
-                    Sales value by order status
-                  </p>
-                </div>
-
-                <div className="flex h-72 items-end gap-4 p-5">
-                  {orderStatusSales.map((item) => {
-                    const max = Math.max(
-                      ...orderStatusSales.map((statusItem) => statusItem.value),
-                      1
-                    );
-
-                    return (
-                      <div
-                        key={item.status}
-                        className="flex flex-1 flex-col items-center gap-3"
-                      >
-                        <div className="flex h-48 w-full items-end rounded bg-zinc-100 p-2">
-                          <div
-                            className="w-full rounded bg-cyan-500"
-                            style={{
-                              height: `${Math.max(
-                                8,
-                                (item.value / max) * 100
-                              )}%`,
-                            }}
-                          />
-                        </div>
-
-                        <div className="text-center">
-                          <p className="text-xs font-bold capitalize">
-                            {item.status}
-                          </p>
-                          <p className="text-xs text-zinc-500">
-                            {formatMoney(item.value)}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </section>
           )}
 
           {activePanel === "products" && (
@@ -1280,69 +923,6 @@ function SidebarButton({
   );
 }
 
-function StatCard({
-  title,
-  value,
-  subtitle,
-  color,
-  icon,
-}: {
-  title: string;
-  value: string;
-  subtitle: string;
-  color: string;
-  icon: string;
-}) {
-  return (
-    <article className={`overflow-hidden rounded text-white shadow ${color}`}>
-      <div className="flex items-start justify-between p-5">
-        <div>
-          <p className="text-3xl font-bold">{value}</p>
-          <p className="mt-2 text-sm font-semibold">{title}</p>
-        </div>
-
-        <span className="text-5xl opacity-30">{icon}</span>
-      </div>
-
-      <div className="bg-black/10 px-5 py-2 text-center text-xs font-semibold">
-        {subtitle} →
-      </div>
-    </article>
-  );
-}
-
-function ChatBubble({
-  name,
-  text,
-  right,
-}: {
-  name: string;
-  text: string;
-  right?: boolean;
-}) {
-  return (
-    <div className={`flex ${right ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-          right ? "bg-blue-600 text-white" : "bg-zinc-100 text-zinc-700"
-        }`}
-      >
-        <p className="text-xs font-bold">{name}</p>
-        <p className="mt-1">{text}</p>
-      </div>
-    </div>
-  );
-}
-
-function Todo({ text }: { text: string }) {
-  return (
-    <label className="flex items-center gap-3 rounded border p-3">
-      <input type="checkbox" className="h-4 w-4" />
-      <span>{text}</span>
-    </label>
-  );
-}
-
 function ProductsTable({
   products,
   onEdit,
@@ -1392,10 +972,10 @@ function ProductsTable({
               <td className="p-4 capitalize">{product.type}</td>
 
               <td className="p-4">
-                <p className="font-bold">{formatMoney(product.price)}</p>
+                <p className="font-bold">{formatCurrency(product.price)}</p>
                 {product.wholesalePrice && (
                   <p className="text-xs text-zinc-500">
-                    W/S {formatMoney(product.wholesalePrice)}
+                    W/S {formatCurrency(product.wholesalePrice)}
                   </p>
                 )}
               </td>
@@ -1472,7 +1052,7 @@ function OrdersTable({
               <td className="p-4">
                 <p className="font-bold">#{order.id.slice(0, 8)}</p>
                 <p className="text-xs text-zinc-500">
-                  {formatDate(order.created_at)}
+                  {formatDateTime(order.created_at)}
                 </p>
               </td>
 
@@ -1500,7 +1080,7 @@ function OrdersTable({
               </td>
 
               <td className="p-4 font-bold">
-                {formatMoney(order.total_amount)}
+                {formatCurrency(order.total_amount)}
               </td>
 
               <td className="p-4">

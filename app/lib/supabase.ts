@@ -1,4 +1,6 @@
 import type { Product, ProductType, UserRole } from "../data/products";
+import { ADMIN_SESSION_COOKIE, parseCookieHeader } from "./admin-session";
+import { forbidden, notFound, unauthorized } from "./errors";
 
 export type Profile = {
   id: string;
@@ -15,6 +17,7 @@ export type CurrentUser = {
   email: string;
   role: UserRole;
   profile: Profile;
+  accessToken: string;
 };
 
 export type ProductRow = {
@@ -128,12 +131,13 @@ async function readError(response: Response) {
 async function supabaseRest<T>(
   path: string,
   init: RequestInit = {},
-  token = requireSupabaseConfig({ requireServiceRole: true }).serviceRoleKey
+  token = requireSupabaseConfig({ requireServiceRole: true }).serviceRoleKey,
+  apiKey = token
 ) {
   const { url } = requireSupabaseConfig();
   const headers = new Headers(init.headers);
 
-  headers.set("apikey", token);
+  headers.set("apikey", apiKey);
   headers.set("Authorization", `Bearer ${token}`);
   headers.set("Content-Type", "application/json");
 
@@ -156,6 +160,39 @@ async function supabaseRest<T>(
   }
 
   return (await response.json()) as T;
+}
+
+// Returns an exact row count via PostgREST's Content-Range header instead of
+// fetching (and discarding) the actual rows -- `Range: 0-0` still triggers
+// `Prefer: count=exact` to compute the full count, but only transfers at
+// most one row's worth of body.
+async function supabaseCount(
+  path: string,
+  token = requireSupabaseConfig({ requireServiceRole: true }).serviceRoleKey,
+  apiKey = token
+) {
+  const { url } = requireSupabaseConfig();
+  const headers = new Headers();
+
+  headers.set("apikey", apiKey);
+  headers.set("Authorization", `Bearer ${token}`);
+  headers.set("Prefer", "count=exact");
+  headers.set("Range-Unit", "items");
+  headers.set("Range", "0-0");
+
+  const response = await fetch(`${url}/rest/v1/${path}`, {
+    headers,
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+
+  const contentRange = response.headers.get("content-range");
+  const total = contentRange ? Number(contentRange.split("/")[1]) : NaN;
+
+  return Number.isFinite(total) ? total : 0;
 }
 
 async function supabaseAuth<T>(
@@ -272,53 +309,81 @@ export async function loginUser(email: string, password: string) {
 export async function getAuthUser(token: string) {
   const { anonKey } = requireSupabaseConfig();
 
-  const data = await supabaseAuth<AuthUserResponse>(
-    "user",
-    {
-      method: "GET",
-    },
-    token,
-    anonKey
-  );
+  let data: AuthUserResponse;
+
+  try {
+    data = await supabaseAuth<AuthUserResponse>(
+      "user",
+      { method: "GET" },
+      token,
+      anonKey
+    );
+  } catch {
+    // Expired/invalid/malformed token -- a normal, expected condition, not
+    // a server error. Don't leak GoTrue's raw error text; it's just a 401.
+    throw unauthorized();
+  }
 
   const user = data.user ?? (data.id ? { id: data.id, email: data.email } : null);
 
   if (!user) {
-    throw new Error("Unauthorized");
+    throw unauthorized();
   }
 
   return { user };
 }
 
-export async function getProfile(userId: string) {
+export async function getProfile(userId: string, accessToken?: string) {
+  const { anonKey } = requireSupabaseConfig();
   const rows = await supabaseRest<Profile[]>(
-    `profiles?select=*&id=eq.${encodeURIComponent(userId)}&limit=1`
+    `profiles?select=*&id=eq.${encodeURIComponent(userId)}&limit=1`,
+    {},
+    // A profile lookup always targets the caller's own row (RLS: "Users
+    // read own profile" -> id = auth.uid()), so we can safely run it under
+    // the user's own token instead of the service role key. Fall back to
+    // service role only for the pre-authentication case (e.g. right after
+    // login, before the caller has been fully verified elsewhere).
+    accessToken ?? undefined,
+    accessToken ? anonKey : undefined
   );
 
   return rows[0] ?? null;
 }
 
-export async function getProfileByEmail(email: string) {
-  const rows = await supabaseRest<Profile[]>(
-    `profiles?select=*&email=eq.${encodeURIComponent(email)}&limit=1`
+// Requires the "Admins read all profiles" RLS policy (see
+// supabase/schema.sql -- public.is_admin()); the caller must pass an admin's
+// own access token, not the service role key, so this stays covered by RLS
+// like the rest of the admin-scoped queries.
+export async function countCustomers(accessToken: string) {
+  const { anonKey } = requireSupabaseConfig();
+  return supabaseCount(
+    `profiles?select=id&role=neq.admin`,
+    accessToken,
+    anonKey
   );
-
-  return rows[0] ?? null;
 }
 
 export async function requireUserFromRequest(request: Request) {
   const authorization = request.headers.get("authorization");
-  const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+  const bearerToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+  // Admin pages set an httpOnly session cookie (see app/lib/admin-session.ts)
+  // in addition to the bearer token, so admin API routes stay reachable even
+  // if client JS never attaches an Authorization header.
+  const cookieToken = parseCookieHeader(
+    request.headers.get("cookie"),
+    ADMIN_SESSION_COOKIE
+  );
+  const token = bearerToken ?? cookieToken;
 
   if (!token) {
-    throw new Error("Unauthorized");
+    throw unauthorized();
   }
 
   const { user } = await getAuthUser(token);
-  const profile = await getProfile(user.id);
+  const profile = await getProfile(user.id, token);
 
   if (!profile) {
-    throw new Error("Profile not found.");
+    throw notFound("Profile not found.");
   }
 
   return {
@@ -326,20 +391,26 @@ export async function requireUserFromRequest(request: Request) {
     email: profile.email ?? user.email ?? "",
     role: profile.role,
     profile,
+    accessToken: token,
   } satisfies CurrentUser;
 }
 
 export function requireAdmin(user: CurrentUser) {
   if (user.role !== "admin") {
-    throw new Error("Forbidden");
+    throw forbidden();
   }
 }
+
+const DEFAULT_PAGE_SIZE = 24;
+const MAX_PAGE_SIZE = 100;
 
 export async function selectProducts(filters: {
   search?: string | null;
   type?: string | null;
   category?: string | null;
   stock?: string | null;
+  limit?: number | null;
+  offset?: number | null;
 } = {}) {
   const params = new URLSearchParams({
     select: "*",
@@ -350,13 +421,30 @@ export async function selectProducts(filters: {
   if (filters.category) params.set("category", `eq.${filters.category}`);
   if (filters.stock) params.set("stock", `eq.${filters.stock}`);
 
+  const search = filters.search?.trim().toLowerCase();
+
+  // Search still filters client-side (post-fetch), so it can't be combined
+  // with server-side limit/offset without returning incomplete results --
+  // a search request fetches the full filtered set, same as before. Browsing
+  // without a search term is the common case and the one that needs the cap,
+  // so that path is paginated.
+  if (!search) {
+    const limit = Math.min(
+      Math.max(1, filters.limit ?? DEFAULT_PAGE_SIZE),
+      MAX_PAGE_SIZE
+    );
+    const offset = Math.max(0, filters.offset ?? 0);
+
+    params.set("limit", String(limit));
+    params.set("offset", String(offset));
+  }
+
   const { anonKey } = requireSupabaseConfig();
   const rows = await supabaseRest<ProductRow[]>(
     `products?${params.toString()}`,
     {},
     anonKey
   );
-  const search = filters.search?.trim().toLowerCase();
 
   return search
     ? rows.filter((product) =>
@@ -378,15 +466,35 @@ export async function selectProductById(id: number) {
   return rows[0] ?? null;
 }
 
-export async function insertProduct(product: Partial<Product>) {
-  const rows = await supabaseRest<ProductRow[]>("products", {
-    method: "POST",
-    body: JSON.stringify(mapProductToRow(product)),
-  });
+export async function countProducts(stock?: "In Stock" | "Out of Stock") {
+  const { anonKey } = requireSupabaseConfig();
+  const params = new URLSearchParams({ select: "id" });
+
+  if (stock) params.set("stock", `eq.${stock}`);
+
+  return supabaseCount(`products?${params.toString()}`, anonKey);
+}
+
+export async function insertProduct(product: Partial<Product>, accessToken: string) {
+  const { anonKey } = requireSupabaseConfig();
+  const rows = await supabaseRest<ProductRow[]>(
+    "products",
+    {
+      method: "POST",
+      body: JSON.stringify(mapProductToRow(product)),
+    },
+    accessToken,
+    anonKey
+  );
 
   return rows[0];
 }
 
+// Bulk sync from the Google Sheet is a service-level job, not a single
+// admin's own write, and merge-duplicates across many rows is not something
+// the per-row RLS policies are designed to authorize efficiently -- this one
+// intentionally keeps using the service_role key (see ADMIN_SETUP.md / the
+// admin `requireAdmin()` gate in the route handler for the actual auth check).
 export async function upsertProducts(products: Partial<Product>[]) {
   return supabaseRest<ProductRow[]>("products", {
     method: "POST",
@@ -397,102 +505,161 @@ export async function upsertProducts(products: Partial<Product>[]) {
   });
 }
 
-export async function updateProduct(id: number, product: Partial<Product>) {
-  const rows = await supabaseRest<ProductRow[]>(`products?id=eq.${id}`, {
-    method: "PATCH",
-    body: JSON.stringify(mapProductToRow(product)),
-  });
+export async function updateProduct(
+  id: number,
+  product: Partial<Product>,
+  accessToken: string
+) {
+  const { anonKey } = requireSupabaseConfig();
+  const rows = await supabaseRest<ProductRow[]>(
+    `products?id=eq.${id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(mapProductToRow(product)),
+    },
+    accessToken,
+    anonKey
+  );
 
   return rows[0] ?? null;
 }
 
-export async function deleteProduct(id: number) {
-  await supabaseRest(`products?id=eq.${id}`, {
-    method: "DELETE",
-  });
+export async function deleteProduct(id: number, accessToken: string) {
+  const { anonKey } = requireSupabaseConfig();
+  await supabaseRest(
+    `products?id=eq.${id}`,
+    { method: "DELETE" },
+    accessToken,
+    anonKey
+  );
 }
 
-export async function selectCart(userId: string) {
+// Cart/wishlist rows are always scoped to the calling user's own account, so
+// every one of these runs under the caller's own access token (not the
+// service_role key) -- PostgREST then executes as `authenticated` and the
+// "Users manage own cart" / "Users manage own wishlist" RLS policies in
+// supabase/schema.sql are the real enforcement boundary, not just the
+// `user_id=eq.` filter below.
+export async function selectCart(userId: string, accessToken: string) {
+  const { anonKey } = requireSupabaseConfig();
   return supabaseRest<CartItemRow[]>(
     `cart_items?select=*,products(*)&user_id=eq.${encodeURIComponent(
       userId
-    )}&order=created_at.asc`
+    )}&order=created_at.asc`,
+    {},
+    accessToken,
+    anonKey
   );
 }
 
 export async function upsertCartItem(
   userId: string,
   productId: number,
-  quantity: number
+  quantity: number,
+  accessToken: string
 ) {
-  const rows = await supabaseRest<CartItemRow[]>("cart_items", {
-    method: "POST",
-    headers: {
-      Prefer: "resolution=merge-duplicates,return=representation",
+  const { anonKey } = requireSupabaseConfig();
+  const rows = await supabaseRest<CartItemRow[]>(
+    "cart_items",
+    {
+      method: "POST",
+      headers: {
+        Prefer: "resolution=merge-duplicates,return=representation",
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        product_id: productId,
+        quantity,
+      }),
     },
-    body: JSON.stringify({
-      user_id: userId,
-      product_id: productId,
-      quantity,
-    }),
-  });
+    accessToken,
+    anonKey
+  );
 
   return rows[0];
 }
 
-export async function updateCartItem(userId: string, id: string, quantity: number) {
+export async function updateCartItem(
+  userId: string,
+  id: string,
+  quantity: number,
+  accessToken: string
+) {
+  const { anonKey } = requireSupabaseConfig();
   const rows = await supabaseRest<CartItemRow[]>(
     `cart_items?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}`,
     {
       method: "PATCH",
       body: JSON.stringify({ quantity }),
-    }
+    },
+    accessToken,
+    anonKey
   );
 
   return rows[0] ?? null;
 }
 
-export async function deleteCartItem(userId: string, id: string) {
+export async function deleteCartItem(userId: string, id: string, accessToken: string) {
+  const { anonKey } = requireSupabaseConfig();
   await supabaseRest(
     `cart_items?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}`,
-    {
-      method: "DELETE",
-    }
+    { method: "DELETE" },
+    accessToken,
+    anonKey
   );
 }
 
-export async function clearCart(userId: string) {
-  await supabaseRest(`cart_items?user_id=eq.${encodeURIComponent(userId)}`, {
-    method: "DELETE",
-  });
+export async function clearCart(userId: string, accessToken: string) {
+  const { anonKey } = requireSupabaseConfig();
+  await supabaseRest(
+    `cart_items?user_id=eq.${encodeURIComponent(userId)}`,
+    { method: "DELETE" },
+    accessToken,
+    anonKey
+  );
 }
 
-export async function selectWishlist(userId: string) {
+export async function selectWishlist(userId: string, accessToken: string) {
+  const { anonKey } = requireSupabaseConfig();
   return supabaseRest<WishlistItemRow[]>(
     `wishlist_items?select=*,products(*)&user_id=eq.${encodeURIComponent(
       userId
-    )}&order=created_at.asc`
+    )}&order=created_at.asc`,
+    {},
+    accessToken,
+    anonKey
   );
 }
 
-export async function insertWishlistItem(userId: string, productId: number) {
-  const rows = await supabaseRest<WishlistItemRow[]>("wishlist_items", {
-    method: "POST",
-    body: JSON.stringify({
-      user_id: userId,
-      product_id: productId,
-    }),
-  });
+export async function insertWishlistItem(
+  userId: string,
+  productId: number,
+  accessToken: string
+) {
+  const { anonKey } = requireSupabaseConfig();
+  const rows = await supabaseRest<WishlistItemRow[]>(
+    "wishlist_items",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        user_id: userId,
+        product_id: productId,
+      }),
+    },
+    accessToken,
+    anonKey
+  );
 
   return rows[0];
 }
 
-export async function deleteWishlistItem(userId: string, id: string) {
+export async function deleteWishlistItem(userId: string, id: string, accessToken: string) {
+  const { anonKey } = requireSupabaseConfig();
   await supabaseRest(
     `wishlist_items?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}`,
-    {
-      method: "DELETE",
-    }
+    { method: "DELETE" },
+    accessToken,
+    anonKey
   );
 }
 
@@ -500,50 +667,140 @@ export function orderSelect() {
   return "*,profiles(email,full_name,role),order_items(*,products(*))";
 }
 
-export async function selectOrders(user: CurrentUser) {
+// Orders run under the caller's own access token, not the service role key.
+// The "Owners or admins read/update orders" RLS policies re-derive the same
+// ownership/admin check from auth.uid() server-side, so this is real
+// defense-in-depth rather than just the `user_id=eq.` filter below.
+export async function selectOrders(
+  user: CurrentUser,
+  pagination: { limit?: number | null; offset?: number | null } = {}
+) {
+  const { anonKey } = requireSupabaseConfig();
   const ownerFilter =
     user.role === "admin" ? "" : `&user_id=eq.${encodeURIComponent(user.id)}`;
+  const limit = Math.min(
+    Math.max(1, pagination.limit ?? DEFAULT_PAGE_SIZE),
+    MAX_PAGE_SIZE
+  );
+  const offset = Math.max(0, pagination.offset ?? 0);
 
   return supabaseRest<OrderRow[]>(
-    `orders?select=${orderSelect()}${ownerFilter}&order=created_at.desc`
+    `orders?select=${orderSelect()}${ownerFilter}&order=created_at.desc&limit=${limit}&offset=${offset}`,
+    {},
+    user.accessToken,
+    anonKey
   );
 }
 
 export async function selectOrderById(user: CurrentUser, id: string) {
+  const { anonKey } = requireSupabaseConfig();
   const ownerFilter =
     user.role === "admin" ? "" : `&user_id=eq.${encodeURIComponent(user.id)}`;
   const rows = await supabaseRest<OrderRow[]>(
-    `orders?select=${orderSelect()}&id=eq.${encodeURIComponent(id)}${ownerFilter}&limit=1`
+    `orders?select=${orderSelect()}&id=eq.${encodeURIComponent(id)}${ownerFilter}&limit=1`,
+    {},
+    user.accessToken,
+    anonKey
   );
 
   return rows[0] ?? null;
 }
 
-export async function insertOrder(
-  order: Omit<OrderRow, "created_at" | "updated_at" | "order_items" | "profiles">
+export async function countOrders(
+  accessToken: string,
+  status?: OrderRow["status"]
 ) {
-  const rows = await supabaseRest<OrderRow[]>("orders", {
-    method: "POST",
-    body: JSON.stringify(order),
-  });
+  const { anonKey } = requireSupabaseConfig();
+  const params = new URLSearchParams({ select: "id" });
+
+  if (status) params.set("status", `eq.${status}`);
+
+  return supabaseCount(`orders?${params.toString()}`, accessToken, anonKey);
+}
+
+// Slim projection for dashboard aggregates (revenue, monthly trend, status
+// breakdown) -- avoids the full order_items/products join that the orders
+// management table needs, since only these three columns are used here.
+export type OrderStatsRow = Pick<OrderRow, "total_amount" | "status" | "created_at">;
+
+export async function selectOrderStats(accessToken: string) {
+  const { anonKey } = requireSupabaseConfig();
+  return supabaseRest<OrderStatsRow[]>(
+    "orders?select=total_amount,status,created_at",
+    {},
+    accessToken,
+    anonKey
+  );
+}
+
+export type TopProductRow = {
+  product_id: number;
+  quantity: number;
+  products: Pick<ProductRow, "name" | "image"> | null;
+};
+
+// Slim projection over order_items for a "best sellers" aggregate -- summed
+// client-side in app/lib/backend.ts since PostgREST (without a custom SQL
+// view) doesn't expose a GROUP BY/SUM endpoint.
+export async function selectOrderItemStats(accessToken: string) {
+  const { anonKey } = requireSupabaseConfig();
+  return supabaseRest<TopProductRow[]>(
+    "order_items?select=product_id,quantity,products(name,image)",
+    {},
+    accessToken,
+    anonKey
+  );
+}
+
+export async function insertOrder(
+  order: Omit<OrderRow, "created_at" | "updated_at" | "order_items" | "profiles">,
+  accessToken: string
+) {
+  const { anonKey } = requireSupabaseConfig();
+  const rows = await supabaseRest<OrderRow[]>(
+    "orders",
+    {
+      method: "POST",
+      body: JSON.stringify(order),
+    },
+    accessToken,
+    anonKey
+  );
 
   return rows[0];
 }
 
 export async function insertOrderItems(
-  items: Omit<OrderItemRow, "id" | "products">[]
+  items: Omit<OrderItemRow, "id" | "products">[],
+  accessToken: string
 ) {
-  return supabaseRest<OrderItemRow[]>("order_items", {
-    method: "POST",
-    body: JSON.stringify(items),
-  });
+  const { anonKey } = requireSupabaseConfig();
+  return supabaseRest<OrderItemRow[]>(
+    "order_items",
+    {
+      method: "POST",
+      body: JSON.stringify(items),
+    },
+    accessToken,
+    anonKey
+  );
 }
 
-export async function updateOrderStatus(id: string, status: OrderRow["status"]) {
-  const rows = await supabaseRest<OrderRow[]>(`orders?id=eq.${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ status }),
-  });
+export async function updateOrderStatus(
+  id: string,
+  status: OrderRow["status"],
+  accessToken: string
+) {
+  const { anonKey } = requireSupabaseConfig();
+  const rows = await supabaseRest<OrderRow[]>(
+    `orders?id=eq.${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    },
+    accessToken,
+    anonKey
+  );
 
   return rows[0] ?? null;
 }

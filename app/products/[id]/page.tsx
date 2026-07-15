@@ -5,45 +5,21 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { Product, UserRole } from "../../data/products";
 import Product3DViewer from "../../components/Product3DViewer";
-import { authHeaders, getAccessToken } from "../../lib/client-auth";
-
-type CurrentUser = {
-  id?: string;
-  email: string;
-  role: UserRole;
-};
+import { authHeaders } from "../../lib/client-auth";
+import { formatCurrency } from "../../lib/format";
+import { useCurrentUser } from "../../lib/useCurrentUser";
 
 export default function ProductDetailsPage() {
   const params = useParams();
   const productId = Number(params.id);
 
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const { user: currentUser } = useCurrentUser();
   const [product, setProduct] = useState<Product | null>(null);
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [wishlistItemId, setWishlistItemId] = useState<string | null>(null);
   const [cartMessage, setCartMessage] = useState("");
-
-  useEffect(() => {
-    async function loadSession() {
-      const token = getAccessToken();
-
-      if (!token) {
-        setCurrentUser(null);
-        return;
-      }
-
-      const response = await fetch("/api/auth/me", {
-        headers: authHeaders(),
-      });
-      const data = (await response.json()) as { user: CurrentUser | null };
-
-      setCurrentUser(response.ok ? data.user : null);
-    }
-
-    loadSession();
-  }, []);
 
   useEffect(() => {
     async function loadProduct() {
@@ -290,7 +266,7 @@ export default function ProductDetailsPage() {
 
             <div className="mt-8">
               <p className="text-4xl font-bold">
-                ฿{displayPrice.toLocaleString()}
+                {formatCurrency(displayPrice)}
               </p>
 
               {userRole === "wholesale" && product.wholesalePrice && (
@@ -401,7 +377,7 @@ export default function ProductDetailsPage() {
                   <h3 className="mt-4 font-bold">{item.name}</h3>
 
                   <p className="mt-1 text-sm text-zinc-500">
-                    ฿{item.price.toLocaleString()}
+                    {formatCurrency(item.price)}
                   </p>
                 </Link>
               ))}

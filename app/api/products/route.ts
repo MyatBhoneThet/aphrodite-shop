@@ -1,8 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { authenticate, createProduct, getProducts } from "@/app/lib/backend";
+import { handleRouteError } from "@/app/lib/errors";
+import { firstIssueMessage, productInputSchema } from "@/app/lib/validation";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
+  const limit = searchParams.get("limit");
+  const offset = searchParams.get("offset");
 
   const products = await getProducts({
     search: searchParams.get("search") ?? searchParams.get("q"),
@@ -11,6 +15,8 @@ export async function GET(request: NextRequest) {
     stock:
       searchParams.get("stock") ??
       (searchParams.get("inStock") === "true" ? "In Stock" : null),
+    limit: limit ? Number(limit) : null,
+    offset: offset ? Number(offset) : null,
   });
 
   return NextResponse.json({ products });
@@ -19,13 +25,16 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const user = await authenticate(request);
-    const product = await createProduct(user, await request.json());
+    const parsed = productInputSchema.safeParse(await request.json().catch(() => ({})));
+
+    if (!parsed.success) {
+      return NextResponse.json({ error: firstIssueMessage(parsed.error) }, { status: 400 });
+    }
+
+    const product = await createProduct(user, parsed.data);
 
     return NextResponse.json({ product }, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to create product.";
-    const status = message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 400;
-
-    return NextResponse.json({ error: message }, { status });
+    return handleRouteError("products.create", error);
   }
 }

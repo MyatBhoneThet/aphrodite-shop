@@ -1,14 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { authenticate, getOrder, patchOrderStatus } from "@/app/lib/backend";
-import type { OrderRow } from "@/app/lib/supabase";
-
-const orderStatuses = new Set<OrderRow["status"]>([
-  "pending",
-  "confirmed",
-  "shipped",
-  "delivered",
-  "cancelled",
-]);
+import { handleRouteError } from "@/app/lib/errors";
+import { firstIssueMessage, orderStatusSchema } from "@/app/lib/validation";
 
 export async function GET(
   request: NextRequest,
@@ -24,8 +17,8 @@ export async function GET(
     }
 
     return NextResponse.json({ order });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return handleRouteError("orders.get", error);
   }
 }
 
@@ -36,13 +29,13 @@ export async function PATCH(
   try {
     const user = await authenticate(request);
     const { id } = await context.params;
-    const body = (await request.json()) as { status?: OrderRow["status"] };
+    const parsed = orderStatusSchema.safeParse(await request.json().catch(() => ({})));
 
-    if (!body.status || !orderStatuses.has(body.status)) {
-      return NextResponse.json({ error: "Invalid order status." }, { status: 400 });
+    if (!parsed.success) {
+      return NextResponse.json({ error: firstIssueMessage(parsed.error) }, { status: 400 });
     }
 
-    const order = await patchOrderStatus(user, id, body.status);
+    const order = await patchOrderStatus(user, id, parsed.data.status);
 
     if (!order) {
       return NextResponse.json({ error: "Order not found." }, { status: 404 });
@@ -50,9 +43,6 @@ export async function PATCH(
 
     return NextResponse.json({ order });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to update order.";
-    const status = message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 400;
-
-    return NextResponse.json({ error: message }, { status });
+    return handleRouteError("orders.update-status", error);
   }
 }

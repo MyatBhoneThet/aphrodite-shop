@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { authenticate } from "@/app/lib/backend";
+import { handleRouteError } from "@/app/lib/errors";
 import { fetchProductsSheet } from "@/app/lib/google-sheets";
 import { mapProductRow, requireAdmin, upsertProducts } from "@/app/lib/supabase";
 
@@ -33,11 +34,6 @@ export async function POST(request: NextRequest) {
       products: syncedProducts.map(mapProductRow),
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unable to sync Google Sheet.";
-    const status =
-      message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 400;
-
-    return NextResponse.json({ error: message }, { status });
+    return handleRouteError("admin.sync-products", error);
   }
 }

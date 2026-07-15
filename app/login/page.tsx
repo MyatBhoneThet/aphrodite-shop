@@ -2,14 +2,8 @@
 
 import Link from "next/link";
 import { FormEvent, useState } from "react";
-import type { UserRole } from "../data/products";
-
-type CurrentUser = {
-  id?: string;
-  email: string;
-  full_name?: string | null;
-  role: UserRole;
-};
+import type { CurrentUser } from "../lib/useCurrentUser";
+import { storeAuth } from "../lib/client-auth";
 
 type LoginResponse = {
   user?: CurrentUser | null;
@@ -26,8 +20,8 @@ async function readLoginResponse(response: Response) {
 }
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("admin@aphrodite.com");
-  const [password, setPassword] = useState("Admin123456");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -37,10 +31,6 @@ export default function LoginPage() {
     setIsSubmitting(true);
 
     try {
-      localStorage.removeItem("aphrodite_access_token");
-      localStorage.removeItem("aphrodite_refresh_token");
-      localStorage.removeItem("aphrodite_user");
-
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: {
@@ -62,21 +52,19 @@ export default function LoginPage() {
 
       if (!user) {
         throw new Error(
-          "Login success, but profile was not returned. Please check your profiles table."
+          "Login succeeded, but no profile was returned. Please contact support."
         );
       }
 
-      localStorage.setItem("aphrodite_user", JSON.stringify(user));
+      storeAuth({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        user,
+      });
 
-      if (data.access_token) {
-        localStorage.setItem("aphrodite_access_token", data.access_token);
-      }
-
-      if (data.refresh_token) {
-        localStorage.setItem("aphrodite_refresh_token", data.refresh_token);
-      }
-
-      window.location.assign(user.role === "admin" ? "/admin" : "/");
+      // Admin accounts still need to go through /admin/login separately --
+      // that's what sets the httpOnly session cookie /admin/* requires.
+      window.location.assign("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to login.");
       setIsSubmitting(false);
@@ -104,7 +92,7 @@ export default function LoginPage() {
               <input
                 type="email"
                 required
-                placeholder="admin@aphrodite.com"
+                placeholder="you@example.com"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 className="w-full rounded-2xl border px-5 py-4 outline-none focus:border-red-500"
@@ -118,7 +106,7 @@ export default function LoginPage() {
               <input
                 type="password"
                 required
-                placeholder="Admin123456"
+                placeholder="Password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 className="w-full rounded-2xl border px-5 py-4 outline-none focus:border-red-500"
@@ -140,12 +128,12 @@ export default function LoginPage() {
             )}
           </form>
 
-          <div className="mt-6 max-w-md rounded-2xl bg-zinc-100 p-4 text-sm text-zinc-600">
-            <p className="font-semibold text-zinc-900">Demo admin:</p>
-            <p>Email: admin@aphrodite.com</p>
-            <p>Password: Admin123456</p>
-            <p>Admin page: http://localhost:3000/admin</p>
-          </div>
+          <p className="mt-6 text-sm text-zinc-500">
+            New here?{" "}
+            <Link href="/register" className="font-semibold text-red-600">
+              Create an account
+            </Link>
+          </p>
         </section>
 
         <section className="hidden items-center justify-center bg-red-600 p-10 text-white md:flex">

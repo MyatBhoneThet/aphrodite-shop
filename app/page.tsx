@@ -1,24 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Product, UserRole } from "./data/products";
 import Navbar from "./components/Navbar";
 import HeroSlider from "./components/HeroSlider";
 import CategoryGrid from "./components/CategoryGrid";
 import ProductSection from "./components/ProductSection";
 import ChatbotButton from "./components/ChatbotButton";
-import { authHeaders, clearStoredAuth, getAccessToken } from "./lib/client-auth";
-
-type CurrentUser = {
-  id?: string;
-  email: string;
-  role: UserRole;
-};
+import { authHeaders, clearStoredAuth } from "./lib/client-auth";
+import { useCurrentUser } from "./lib/useCurrentUser";
+import { useDebouncedValue } from "./lib/useDebouncedValue";
 
 export default function HomePage() {
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [language, setLanguage] = useState<"en" | "my">("en");
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const { user: currentUser, refresh: refreshUser } = useCurrentUser();
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
 
@@ -26,39 +23,13 @@ export default function HomePage() {
   const [cart, setCart] = useState<number[]>([]);
 
   useEffect(() => {
-    async function loadSession() {
-      const token = getAccessToken();
-
-      if (!token) {
-        setCurrentUser(null);
-        return;
-      }
-
-      const response = await fetch("/api/auth/me", {
-        headers: authHeaders(),
-      });
-      const data = (await response.json()) as { user: CurrentUser | null };
-
-      setCurrentUser(response.ok ? data.user : null);
-
-      if (response.ok && data.user) {
-        localStorage.setItem("aphrodite_user", JSON.stringify(data.user));
-      } else {
-        clearStoredAuth();
-      }
-    }
-
-    loadSession();
-  }, []);
-
-  useEffect(() => {
     async function loadProducts() {
       setIsLoadingProducts(true);
 
       const params = new URLSearchParams();
 
-      if (search.trim()) {
-        params.set("q", search.trim());
+      if (debouncedSearch.trim()) {
+        params.set("q", debouncedSearch.trim());
       }
 
       const response = await fetch(`/api/products?${params.toString()}`);
@@ -69,7 +40,7 @@ export default function HomePage() {
     }
 
     loadProducts();
-  }, [search]);
+  }, [debouncedSearch]);
 
   useEffect(() => {
     async function loadCustomerLists() {
@@ -112,22 +83,16 @@ export default function HomePage() {
 
   const userRole: UserRole = currentUser?.role ?? "normal";
 
-  const filteredProducts = useMemo(() => {
-    return products;
-  }, [products]);
+  const laptopProducts = products.filter((product) => product.type === "laptop");
 
-  const laptopProducts = filteredProducts.filter(
-    (product) => product.type === "laptop"
-  );
-
-  const accessoryProducts = filteredProducts.filter(
+  const accessoryProducts = products.filter(
     (product) => product.type === "accessory"
   );
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
     clearStoredAuth();
-    setCurrentUser(null);
+    await refreshUser();
     setWishlist([]);
     setCart([]);
   }

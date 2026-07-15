@@ -142,6 +142,31 @@ on public.profiles for update
 using (id = auth.uid())
 with check (id = auth.uid());
 
+-- A profiles policy cannot subquery public.profiles directly (self-reference
+-- triggers "infinite recursion detected in policy for relation"). This
+-- security definer function runs as the function owner, which bypasses RLS
+-- on its internal lookup (tables here only use ENABLE, not FORCE, row level
+-- security), so it can safely answer "is the current user an admin?" without
+-- recursing back into this table's own policies.
+create or replace function public.is_admin()
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'admin'
+  );
+$$;
+
+drop policy if exists "Admins read all profiles" on public.profiles;
+create policy "Admins read all profiles"
+on public.profiles for select
+to authenticated
+using (public.is_admin());
+
 drop policy if exists "Public product reads" on public.products;
 create policy "Public product reads"
 on public.products for select
@@ -274,6 +299,7 @@ with check (
 );
 
 grant usage on schema public to anon, authenticated;
+grant execute on function public.is_admin() to authenticated;
 grant select on public.products to anon, authenticated;
 grant select, update on public.profiles to authenticated;
 grant all on public.profiles to service_role;

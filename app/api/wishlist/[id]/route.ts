@@ -3,6 +3,7 @@ import {
   authenticate,
   removeWishlistItem,
 } from "@/app/lib/backend";
+import { handleRouteError } from "@/app/lib/errors";
 
 export async function DELETE(
   request: NextRequest,
@@ -15,7 +16,7 @@ export async function DELETE(
     return NextResponse.json({
       items: await removeWishlistItem(user, id),
     });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return handleRouteError("wishlist.remove", error);
   }
 }

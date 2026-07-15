@@ -4,37 +4,40 @@ import {
   createOrder,
   getOrders,
 } from "@/app/lib/backend";
+import { handleRouteError } from "@/app/lib/errors";
+import { firstIssueMessage, orderInputSchema } from "@/app/lib/validation";
 
 export async function GET(request: NextRequest) {
   try {
     const user = await authenticate(request);
-    return NextResponse.json({ orders: await getOrders(user) });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const limit = request.nextUrl.searchParams.get("limit");
+    const offset = request.nextUrl.searchParams.get("offset");
+
+    return NextResponse.json({
+      orders: await getOrders(user, {
+        limit: limit ? Number(limit) : null,
+        offset: offset ? Number(offset) : null,
+      }),
+    });
+  } catch (error) {
+    return handleRouteError("orders.list", error);
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const user = await authenticate(request);
-    const body = (await request.json()) as {
-      shipping_name?: string;
-      shipping_phone?: string;
-      shipping_address?: string;
-      notes?: string | null;
-    };
+    const parsed = orderInputSchema.safeParse(await request.json().catch(() => ({})));
+
+    if (!parsed.success) {
+      return NextResponse.json({ error: firstIssueMessage(parsed.error) }, { status: 400 });
+    }
 
     return NextResponse.json(
-      { order: await createOrder(user, body) },
+      { order: await createOrder(user, parsed.data) },
       { status: 201 }
     );
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unable to create order.";
-
-    return NextResponse.json(
-      { error: message },
-      { status: message === "Unauthorized" ? 401 : 400 }
-    );
+    return handleRouteError("orders.create", error);
   }
 }

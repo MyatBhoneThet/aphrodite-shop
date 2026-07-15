@@ -4,6 +4,8 @@ import {
   changeCartItem,
   removeCartItem,
 } from "@/app/lib/backend";
+import { handleRouteError } from "@/app/lib/errors";
+import { cartQuantityUpdateSchema, firstIssueMessage } from "@/app/lib/validation";
 
 export async function PATCH(
   request: NextRequest,
@@ -12,17 +14,17 @@ export async function PATCH(
   try {
     const user = await authenticate(request);
     const { id } = await context.params;
-    const body = (await request.json()) as { quantity?: number };
-
-    return NextResponse.json(await changeCartItem(user, id, body.quantity));
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unable to update cart item.";
-
-    return NextResponse.json(
-      { error: message },
-      { status: message === "Unauthorized" ? 401 : 400 }
+    const parsed = cartQuantityUpdateSchema.safeParse(
+      await request.json().catch(() => ({}))
     );
+
+    if (!parsed.success) {
+      return NextResponse.json({ error: firstIssueMessage(parsed.error) }, { status: 400 });
+    }
+
+    return NextResponse.json(await changeCartItem(user, id, parsed.data.quantity));
+  } catch (error) {
+    return handleRouteError("cart.update", error);
   }
 }
 
@@ -35,7 +37,7 @@ export async function DELETE(
     const { id } = await context.params;
 
     return NextResponse.json(await removeCartItem(user, id));
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return handleRouteError("cart.remove", error);
   }
 }

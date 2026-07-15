@@ -1,5 +1,6 @@
 import { createSign } from "crypto";
 import type { Product, ProductType } from "../data/products";
+import { badRequest } from "./errors";
 
 type SheetsValuesResponse = {
   values?: unknown[][];
@@ -27,7 +28,7 @@ function getGoogleSheetsConfig() {
   const range = process.env.GOOGLE_SHEETS_PRODUCTS_RANGE ?? "Products!A:L";
 
   if (!clientEmail || !privateKey || !spreadsheetId) {
-    throw new Error("Google Sheets sync is not configured.");
+    throw badRequest("Google Sheets sync is not configured.");
   }
 
   return { clientEmail, privateKey, spreadsheetId, range };
@@ -45,7 +46,7 @@ function normalizePrivateKey(value?: string) {
   const privateKey = withoutOuterQuotes.replace(/\\n/g, "\n");
 
   if (!privateKey.includes("-----BEGIN PRIVATE KEY-----")) {
-    throw new Error(
+    throw badRequest(
       "GOOGLE_SHEETS_PRIVATE_KEY must be a service-account PEM private key."
     );
   }
@@ -100,7 +101,8 @@ async function getAccessToken() {
   });
 
   if (!response.ok) {
-    throw new Error(await response.text());
+    console.error("[google-sheets] token exchange failed", await response.text());
+    throw badRequest("Unable to authenticate with Google Sheets. Check the service account configuration.");
   }
 
   const data = (await response.json()) as { access_token: string };
@@ -121,7 +123,7 @@ function parseNumber(value: unknown, field: string, rowNumber: number) {
   const numberValue = Number(String(value).replace(/,/g, ""));
 
   if (!Number.isFinite(numberValue)) {
-    throw new Error(`Row ${rowNumber}: ${field} must be a number.`);
+    throw badRequest(`Row ${rowNumber}: ${field} must be a number.`);
   }
 
   return Math.round(numberValue);
@@ -131,7 +133,7 @@ function parseProductType(value: unknown, rowNumber: number) {
   const type = String(value ?? "").trim().toLowerCase();
 
   if (type !== "laptop" && type !== "accessory") {
-    throw new Error(`Row ${rowNumber}: type must be "laptop" or "accessory".`);
+    throw badRequest(`Row ${rowNumber}: type must be "laptop" or "accessory".`);
   }
 
   return type as ProductType;
@@ -141,7 +143,7 @@ function parseStock(value: unknown, rowNumber: number) {
   const stock = String(value ?? "").trim();
 
   if (stock !== "In Stock" && stock !== "Out of Stock") {
-    throw new Error(`Row ${rowNumber}: stock must be "In Stock" or "Out of Stock".`);
+    throw badRequest(`Row ${rowNumber}: stock must be "In Stock" or "Out of Stock".`);
   }
 
   return stock;
@@ -166,7 +168,7 @@ function parseJsonObject(value: unknown, field: string, rowNumber: number) {
 
     return parsed;
   } catch {
-    throw new Error(`Row ${rowNumber}: ${field} must be a JSON object.`);
+    throw badRequest(`Row ${rowNumber}: ${field} must be a JSON object.`);
   }
 }
 
@@ -178,7 +180,7 @@ function requireText(
   const value = String(row[field] ?? "").trim();
 
   if (!value) {
-    throw new Error(`Row ${rowNumber}: ${field} is required.`);
+    throw badRequest(`Row ${rowNumber}: ${field} is required.`);
   }
 
   return value;
@@ -188,7 +190,7 @@ export function parseProductsSheet(values: unknown[][]) {
   const [headers, ...rows] = values;
 
   if (!headers?.length) {
-    throw new Error("The Google Sheet needs a header row.");
+    throw badRequest("The Google Sheet needs a header row.");
   }
 
   const normalizedHeaders = headers.map(normalizeHeader);
@@ -215,7 +217,7 @@ export function parseProductsSheet(values: unknown[][]) {
     const price = parseNumber(row.price, "price", rowNumber);
 
     if (price === undefined) {
-      throw new Error(`Row ${rowNumber}: price is required.`);
+      throw badRequest(`Row ${rowNumber}: price is required.`);
     }
 
     products.push({
@@ -266,7 +268,8 @@ export async function fetchProductsSheet() {
   });
 
   if (!response.ok) {
-    throw new Error(await response.text());
+    console.error("[google-sheets] sheet fetch failed", await response.text());
+    throw badRequest("Unable to read the Google Sheet. Check the spreadsheet ID and sharing settings.");
   }
 
   const data = (await response.json()) as SheetsValuesResponse;

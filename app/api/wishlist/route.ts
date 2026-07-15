@@ -4,37 +4,35 @@ import {
   authenticate,
   getWishlist,
 } from "@/app/lib/backend";
+import { handleRouteError } from "@/app/lib/errors";
+import { firstIssueMessage, wishlistInputSchema } from "@/app/lib/validation";
 
 export async function GET(request: NextRequest) {
   try {
     const user = await authenticate(request);
     return NextResponse.json({ items: await getWishlist(user) });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return handleRouteError("wishlist.list", error);
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const user = await authenticate(request);
-    const body = (await request.json()) as {
-      product_id?: number;
-      productId?: number;
-    };
+    const parsed = wishlistInputSchema.safeParse(await request.json().catch(() => ({})));
 
-    return NextResponse.json({
-      items: await addWishlistItem(user, Number(body.product_id ?? body.productId)),
-    });
+    if (!parsed.success) {
+      return NextResponse.json({ error: firstIssueMessage(parsed.error) }, { status: 400 });
+    }
+
+    const productId = parsed.data.product_id ?? parsed.data.productId;
+
+    if (!productId) {
+      return NextResponse.json({ error: "product_id is required." }, { status: 400 });
+    }
+
+    return NextResponse.json({ items: await addWishlistItem(user, productId) });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unable to update wishlist.";
-
-    return NextResponse.json(
-      { error: message },
-      {
-        status:
-          message === "Unauthorized" ? 401 : message === "Already wishlisted." ? 409 : 400,
-      }
-    );
+    return handleRouteError("wishlist.add", error);
   }
 }
