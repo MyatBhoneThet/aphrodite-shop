@@ -5,6 +5,7 @@ import type { UserRole } from "../data/products";
 type CurrentUser = {
   email: string;
   role: UserRole;
+  wholesale_status?: string;
 };
 
 type Props = {
@@ -64,11 +65,19 @@ export default function Navbar({
 
           {currentUser ? (
             <div className="flex items-center gap-2">
-              <span className="hidden rounded-full bg-zinc-100 px-3 py-2 md:inline">
+              <span
+                className={`hidden rounded-full px-3 py-2 md:inline ${
+                  currentUser.wholesale_status === "approved"
+                    ? "bg-green-100 font-semibold text-green-700"
+                    : "bg-zinc-100"
+                }`}
+              >
                 {currentUser.role === "admin"
                   ? "Admin"
-                  : currentUser.role === "wholesale"
-                  ? "Wholesale"
+                  : currentUser.wholesale_status === "approved"
+                  ? "Wholesale ✓"
+                  : currentUser.wholesale_status === "suspended"
+                  ? "Wholesale (suspended)"
                   : "User"}
               </span>
 

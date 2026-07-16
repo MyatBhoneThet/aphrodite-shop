@@ -1,12 +1,23 @@
 import type { Product, ProductType, UserRole } from "../data/products";
+import type { PriceTierRow } from "./pricing";
 import { ADMIN_SESSION_COOKIE, parseCookieHeader } from "./admin-session";
+import { USER_SESSION_COOKIE } from "./user-session";
 import { forbidden, notFound, unauthorized } from "./errors";
+
+export type { PriceTierRow } from "./pricing";
+
+export type WholesaleStatus =
+  | "not_applied"
+  | "approved"
+  | "suspended";
 
 export type Profile = {
   id: string;
   email: string;
   full_name: string | null;
   role: UserRole;
+  wholesale_status: WholesaleStatus;
+  price_list_id: string | null;
   phone: string | null;
   created_at?: string;
   updated_at?: string;
@@ -31,8 +42,29 @@ export type ProductRow = {
   image: string;
   model_3d: string | null;
   stock: "In Stock" | "Out of Stock";
+  stock_quantity: number;
   specs: Product["specs"];
   full_specs: Product["fullSpecs"];
+};
+
+export type PriceListRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type AuditLogRow = {
+  id: string;
+  actor_id: string | null;
+  action: string;
+  target_type: string;
+  target_id: string;
+  previous_data: Record<string, unknown> | null;
+  new_data: Record<string, unknown> | null;
+  created_at: string;
 };
 
 export type CartItemRow = {
@@ -233,6 +265,7 @@ export function mapProductRow(row: ProductRow): Product {
     image: row.image,
     model3D: row.model_3d ?? undefined,
     stock: row.stock,
+    stockQuantity: row.stock_quantity ?? 0,
     specs: row.specs ?? {},
     fullSpecs: row.full_specs ?? {},
   };
@@ -250,6 +283,12 @@ export function mapProductToRow(product: Partial<Product>) {
     image: product.image ?? null,
     model_3d: product.model3D ?? null,
     stock: product.stock ?? null,
+    // Only send stock_quantity when the caller provided one: the column is
+    // NOT NULL and writers that predate numeric inventory (e.g. the Google
+    // Sheets sync without a stock_quantity column) must not null it out.
+    ...(product.stockQuantity !== undefined
+      ? { stock_quantity: product.stockQuantity }
+      : {}),
     specs: product.specs ?? {},
     full_specs: product.fullSpecs ?? {},
   };
@@ -366,14 +405,14 @@ export async function countCustomers(accessToken: string) {
 export async function requireUserFromRequest(request: Request) {
   const authorization = request.headers.get("authorization");
   const bearerToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
-  // Admin pages set an httpOnly session cookie (see app/lib/admin-session.ts)
-  // in addition to the bearer token, so admin API routes stay reachable even
-  // if client JS never attaches an Authorization header.
-  const cookieToken = parseCookieHeader(
-    request.headers.get("cookie"),
-    ADMIN_SESSION_COOKIE
-  );
-  const token = bearerToken ?? cookieToken;
+  const cookieHeader = request.headers.get("cookie");
+  // Ordinary logins set an httpOnly session cookie (app/lib/user-session.ts);
+  // admin logins set a separate one (app/lib/admin-session.ts). The bearer
+  // header still wins so legacy localStorage sessions keep working until
+  // they expire.
+  const userCookieToken = parseCookieHeader(cookieHeader, USER_SESSION_COOKIE);
+  const adminCookieToken = parseCookieHeader(cookieHeader, ADMIN_SESSION_COOKIE);
+  const token = bearerToken ?? userCookieToken ?? adminCookieToken;
 
   if (!token) {
     throw unauthorized();
@@ -803,4 +842,296 @@ export async function updateOrderStatus(
   );
 
   return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Price lists + quantity tiers
+//
+// Reads for pricing run under the CUSTOMER'S own token: RLS only exposes the
+// price list a wholesale-approved profile is assigned to, so an unapproved or
+// suspended account reads nothing even if this code were called for them.
+// Admin CRUD runs under the admin's token ("Admins manage ..." policies).
+// ---------------------------------------------------------------------------
+
+export async function selectPriceListById(id: string, accessToken: string) {
+  const { anonKey } = requireSupabaseConfig();
+  const rows = await supabaseRest<PriceListRow[]>(
+    `price_lists?select=*&id=eq.${encodeURIComponent(id)}&limit=1`,
+    {},
+    accessToken,
+    anonKey
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function selectTiersForProducts(
+  priceListId: string,
+  productIds: number[],
+  accessToken: string
+) {
+  if (productIds.length === 0) return [];
+
+  const { anonKey } = requireSupabaseConfig();
+  const idList = productIds
+    .filter((id) => Number.isInteger(id) && id > 0)
+    .join(",");
+
+  return supabaseRest<PriceTierRow[]>(
+    `product_price_tiers?select=*&price_list_id=eq.${encodeURIComponent(
+      priceListId
+    )}&product_id=in.(${idList})&order=min_quantity.asc`,
+    {},
+    accessToken,
+    anonKey
+  );
+}
+
+export async function selectPriceLists(adminToken: string) {
+  const { anonKey } = requireSupabaseConfig();
+  return supabaseRest<PriceListRow[]>(
+    "price_lists?select=*&order=created_at.asc",
+    {},
+    adminToken,
+    anonKey
+  );
+}
+
+export async function insertPriceList(
+  fields: Pick<PriceListRow, "name" | "description" | "is_active">,
+  adminToken: string
+) {
+  const { anonKey } = requireSupabaseConfig();
+  const rows = await supabaseRest<PriceListRow[]>(
+    "price_lists",
+    { method: "POST", body: JSON.stringify(fields) },
+    adminToken,
+    anonKey
+  );
+
+  return rows[0];
+}
+
+export async function updatePriceList(
+  id: string,
+  fields: Partial<Pick<PriceListRow, "name" | "description" | "is_active">>,
+  adminToken: string
+) {
+  const { anonKey } = requireSupabaseConfig();
+  const rows = await supabaseRest<PriceListRow[]>(
+    `price_lists?id=eq.${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(fields) },
+    adminToken,
+    anonKey
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function selectTiersAdmin(
+  filters: { priceListId?: string | null; productId?: number | null },
+  adminToken: string
+) {
+  const { anonKey } = requireSupabaseConfig();
+  const params = new URLSearchParams({
+    select: "*",
+    order: "product_id.asc,min_quantity.asc",
+  });
+
+  if (filters.priceListId) params.set("price_list_id", `eq.${filters.priceListId}`);
+  if (filters.productId) params.set("product_id", `eq.${filters.productId}`);
+
+  return supabaseRest<PriceTierRow[]>(
+    `product_price_tiers?${params.toString()}`,
+    {},
+    adminToken,
+    anonKey
+  );
+}
+
+export type TierInput = {
+  price_list_id: string;
+  product_id: number;
+  min_quantity: number;
+  unit_price: number;
+  is_active: boolean;
+  effective_from: string | null;
+  effective_to: string | null;
+};
+
+export async function insertTier(fields: TierInput, adminToken: string) {
+  const { anonKey } = requireSupabaseConfig();
+  const rows = await supabaseRest<PriceTierRow[]>(
+    "product_price_tiers",
+    { method: "POST", body: JSON.stringify(fields) },
+    adminToken,
+    anonKey
+  );
+
+  return rows[0];
+}
+
+export async function updateTier(
+  id: string,
+  fields: Partial<Omit<TierInput, "price_list_id" | "product_id">>,
+  adminToken: string
+) {
+  const { anonKey } = requireSupabaseConfig();
+  const rows = await supabaseRest<PriceTierRow[]>(
+    `product_price_tiers?id=eq.${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(fields) },
+    adminToken,
+    anonKey
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function deleteTier(id: string, adminToken: string) {
+  const { anonKey } = requireSupabaseConfig();
+  await supabaseRest(
+    `product_price_tiers?id=eq.${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+    adminToken,
+    anonKey
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Wholesale account administration (customer listing)
+// ---------------------------------------------------------------------------
+
+// Service-role read, like the other admin profile helpers below: deployed
+// databases created before the "Admins read all profiles" policy existed
+// would return an empty list under the admin's own token. Callers MUST run
+// requireAdmin() first (adminListWholesaleAccounts does).
+export async function selectCustomerProfiles(
+  filters: { search?: string | null; wholesaleOnly?: boolean } = {}
+) {
+  const params = new URLSearchParams({
+    select: "id,email,full_name,role,wholesale_status,price_list_id,created_at",
+    role: "neq.admin",
+    order: "created_at.desc",
+    limit: "200",
+  });
+
+  if (filters.wholesaleOnly) {
+    params.set("wholesale_status", "in.(approved,suspended)");
+  }
+
+  const search = filters.search?.trim();
+
+  if (search) {
+    // PostgREST `or` filter over email/full_name. `*` is the wildcard; commas
+    // and parens would change the filter grammar, so strip them.
+    const term = search.replace(/[,()*]/g, "");
+    params.set("or", `(email.ilike.*${term}*,full_name.ilike.*${term}*)`);
+  }
+
+  return supabaseRest<Profile[]>(`profiles?${params.toString()}`);
+}
+
+// ---------------------------------------------------------------------------
+// Admin-only profile mutations + audit trail (service role)
+//
+// (These bypass RLS deliberately: authenticated users -- including admins --
+// have no UPDATE privilege on role/wholesale_status/price_list_id columns.
+// Callers MUST run requireAdmin() first; every route that reaches these is
+// audited via insertAuditLog.)
+// ---------------------------------------------------------------------------
+
+export async function selectProfileByIdService(userId: string) {
+  const rows = await supabaseRest<Profile[]>(
+    `profiles?select=*&id=eq.${encodeURIComponent(userId)}&limit=1`
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function updateProfileWholesaleService(
+  userId: string,
+  fields: Partial<Pick<Profile, "role" | "wholesale_status" | "price_list_id">>
+) {
+  const rows = await supabaseRest<Profile[]>(
+    `profiles?id=eq.${encodeURIComponent(userId)}`,
+    { method: "PATCH", body: JSON.stringify(fields) }
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function insertAuditLog(entry: {
+  actor_id: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  previous_data?: Record<string, unknown> | null;
+  new_data?: Record<string, unknown> | null;
+}) {
+  await supabaseRest("audit_log", {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      actor_id: entry.actor_id,
+      action: entry.action,
+      target_type: entry.target_type,
+      target_id: entry.target_id,
+      previous_data: entry.previous_data ?? null,
+      new_data: entry.new_data ?? null,
+    }),
+  });
+}
+
+export async function selectAuditLog(limit: number, adminToken: string) {
+  const { anonKey } = requireSupabaseConfig();
+  const safeLimit = Math.min(Math.max(1, limit), 200);
+
+  return supabaseRest<AuditLogRow[]>(
+    `audit_log?select=*&order=created_at.desc&limit=${safeLimit}`,
+    {},
+    adminToken,
+    anonKey
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Atomic checkout (service role RPC)
+//
+// checkout_order() is EXECUTE-able only by service_role -- browsers cannot
+// call it through PostgREST. The route handler authenticates the user and
+// backend.ts recomputes every price from tiers before invoking this.
+// ---------------------------------------------------------------------------
+
+export type CheckoutLine = {
+  product_id: number;
+  quantity: number;
+  unit_price: number;
+  retail_unit_price: number;
+  price_list_id: string | null;
+  tier_id: string | null;
+  tier_min_quantity: number | null;
+};
+
+export async function checkoutOrderRpc(payload: {
+  user_id: string;
+  shipping_name: string;
+  shipping_phone: string;
+  shipping_address: string;
+  notes: string | null;
+  lines: CheckoutLine[];
+}) {
+  return supabaseRest<{ order_id: string; total_amount: number }>(
+    "rpc/checkout_order",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        p_user_id: payload.user_id,
+        p_shipping_name: payload.shipping_name,
+        p_shipping_phone: payload.shipping_phone,
+        p_shipping_address: payload.shipping_address,
+        p_notes: payload.notes,
+        p_lines: payload.lines,
+      }),
+    }
+  );
 }

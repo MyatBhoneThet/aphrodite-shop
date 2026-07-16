@@ -3,15 +3,15 @@ import type { Product, UserRole } from "../data/products";
 import Product3DViewer from "./Product3DViewer";
 
 type Props = {
-  product: Product;
+  // The API only attaches `tiers` for approved wholesale viewers; prices
+  // themselves are always calculated server-side.
+  product: Product & { tiers?: { minQuantity: number; unitPrice: number }[] };
   userRole: UserRole;
 };
 
-export default function ProductCard({ product, userRole }: Props) {
-  const displayPrice =
-    userRole === "wholesale" && product.wholesalePrice
-      ? product.wholesalePrice
-      : product.price;
+export default function ProductCard({ product }: Props) {
+  const displayPrice = product.price;
+  const bestTier = product.tiers?.[0];
 
   return (
     <article className="rounded-[2rem] bg-zinc-100 p-5 text-center transition hover:-translate-y-1 hover:shadow-xl">
@@ -52,9 +52,9 @@ export default function ProductCard({ product, userRole }: Props) {
         ฿{displayPrice.toLocaleString()}
       </p>
 
-      {userRole === "wholesale" && product.wholesalePrice && (
+      {bestTier && (
         <p className="mt-1 text-xs font-semibold text-red-600">
-          Wholesale price
+          Wholesale from ฿{bestTier.unitPrice.toLocaleString()} ({bestTier.minQuantity}+ units)
         </p>
       )}
 

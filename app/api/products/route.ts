@@ -1,5 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { authenticate, createProduct, getProducts } from "@/app/lib/backend";
+import {
+  authenticate,
+  authenticateOptional,
+  createProduct,
+  getProductsForViewer,
+} from "@/app/lib/backend";
 import { handleRouteError } from "@/app/lib/errors";
 import { firstIssueMessage, productInputSchema } from "@/app/lib/validation";
 
@@ -8,7 +13,12 @@ export async function GET(request: NextRequest) {
   const limit = searchParams.get("limit");
   const offset = searchParams.get("offset");
 
-  const products = await getProducts({
+  // Viewer-aware response: anonymous/normal viewers get retail data only;
+  // approved wholesale accounts additionally get their own price tiers;
+  // admins get the full record (legacy wholesale price + inventory count).
+  const viewer = await authenticateOptional(request);
+
+  const products = await getProductsForViewer(viewer, {
     search: searchParams.get("search") ?? searchParams.get("q"),
     type: searchParams.get("type"),
     category: searchParams.get("category"),

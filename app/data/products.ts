@@ -9,10 +9,14 @@ export type Product = {
   category: string;
   brand: string;
   price: number;
+  /** Legacy single wholesale price. No longer used for pricing (quantity
+   *  tiers are authoritative) and never sent to non-admin clients. */
   wholesalePrice?: number;
   image: string;
   model3D?: string;
   stock: "In Stock" | "Out of Stock";
+  /** Authoritative numeric inventory. Only serialized for admins. */
+  stockQuantity?: number;
   specs: {
     cpu?: string;
     ram?: string;

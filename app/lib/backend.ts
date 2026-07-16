@@ -1,47 +1,69 @@
-import type { Product, UserRole } from "../data/products";
+import type { Product } from "../data/products";
 import {
+  checkoutOrderRpc,
   clearCart,
   countCustomers,
   countOrders,
   countProducts,
   deleteCartItem,
   deleteProduct,
+  deleteTier,
   deleteWishlistItem,
-  insertOrder,
-  insertOrderItems,
+  insertAuditLog,
+  insertPriceList,
   insertProduct,
+  insertTier,
   insertWishlistItem,
   mapProductRow,
   requireAdmin,
   requireUserFromRequest,
+  selectAuditLog,
   selectCart,
   selectOrderById,
   selectOrderItemStats,
   selectOrderStats,
   selectOrders,
+  selectCustomerProfiles,
+  selectPriceListById,
+  selectPriceLists,
   selectProductById,
   selectProducts,
+  selectProfileByIdService,
+  selectTiersAdmin,
+  selectTiersForProducts,
   selectWishlist,
   updateCartItem,
   updateOrderStatus,
+  updatePriceList,
   updateProduct,
+  updateProfileWholesaleService,
+  updateTier,
   upsertCartItem,
   type CartItemRow,
   type CurrentUser,
   type OrderRow,
+  type PriceListRow,
+  type PriceTierRow,
   type ProductRow,
   type WishlistItemRow,
 } from "./supabase";
-import { badRequest, conflict, notFound } from "./errors";
+import {
+  isTierEffective,
+  isWholesaleApproved,
+  priceLine,
+  type PricingResult,
+} from "./pricing";
+import { badRequest, conflict, forbidden, notFound } from "./errors";
 
 export type { CurrentUser } from "./supabase";
 
 export type CartLine = {
   id?: string;
-  product: Product;
+  product: PublicProduct;
   product_id: number;
   quantity: number;
   lineTotal: number;
+  pricing: PricingResult;
 };
 
 export type CartSummary = {
@@ -49,44 +71,149 @@ export type CartSummary = {
   subtotal: number;
   total: number;
   totalQuantity: number;
+  retailSubtotal: number;
+  totalSavings: number;
+  wholesale: boolean;
 };
-
-export function priceForRole(product: Product, role: UserRole) {
-  return role === "wholesale" && product.wholesalePrice
-    ? product.wholesalePrice
-    : product.price;
-}
 
 function cleanQuantity(quantity: unknown) {
   const value = Number(quantity ?? 1);
   return Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 1;
 }
 
-function cartResponse(rows: CartItemRow[], role: UserRole): CartSummary {
+// Numeric inventory is authoritative. The legacy text is only consulted when
+// a row predates the stock_quantity migration (column missing/null), so the
+// app degrades safely instead of treating everything as sellable.
+function availableStock(row: Pick<ProductRow, "stock" | "stock_quantity">) {
+  return (
+    row.stock_quantity ??
+    (row.stock === "Out of Stock" ? 0 : Number.POSITIVE_INFINITY)
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Product DTOs -- what each viewer is allowed to see.
+//
+// The legacy wholesale_price and the exact inventory count are admin-only;
+// public/API responses never include them. Wholesale customers receive the
+// tiers of THEIR assigned price list as a separate field.
+// ---------------------------------------------------------------------------
+
+export type PublicTier = { minQuantity: number; unitPrice: number };
+
+export type PublicProduct = Omit<Product, "wholesalePrice" | "stockQuantity"> & {
+  wholesalePrice?: number;
+  stockQuantity?: number;
+  tiers?: PublicTier[];
+};
+
+export function productDTO(
+  product: Product,
+  viewer: CurrentUser | null,
+  tiers?: PriceTierRow[]
+): PublicProduct {
+  const { wholesalePrice, stockQuantity, ...publicFields } = product;
+
+  if (viewer?.role === "admin") {
+    return { ...publicFields, wholesalePrice, stockQuantity };
+  }
+
+  const now = new Date();
+  const visibleTiers = (tiers ?? [])
+    .filter((tier) => isTierEffective(tier, now))
+    .sort((a, b) => a.min_quantity - b.min_quantity)
+    .map((tier) => ({ minQuantity: tier.min_quantity, unitPrice: tier.unit_price }));
+
+  return visibleTiers.length > 0
+    ? { ...publicFields, tiers: visibleTiers }
+    : publicFields;
+}
+
+// ---------------------------------------------------------------------------
+// Wholesale pricing context -- the ONLY place entitlement is derived.
+// Profile data comes from requireUserFromRequest (a fresh DB read per
+// request), never from anything the browser claims.
+// ---------------------------------------------------------------------------
+
+export type WholesaleContext = {
+  priceList: PriceListRow;
+  tiersByProduct: Map<number, PriceTierRow[]>;
+};
+
+export async function wholesaleContext(
+  user: CurrentUser | null,
+  productIds: number[]
+): Promise<WholesaleContext | null> {
+  if (!user || !isWholesaleApproved(user.profile)) return null;
+
+  const priceList = await selectPriceListById(
+    user.profile.price_list_id as string,
+    user.accessToken
+  );
+
+  if (!priceList || !priceList.is_active) return null;
+
+  const tiersByProduct = new Map<number, PriceTierRow[]>();
+
+  if (productIds.length > 0) {
+    const tiers = await selectTiersForProducts(
+      priceList.id,
+      productIds,
+      user.accessToken
+    );
+
+    for (const tier of tiers) {
+      const list = tiersByProduct.get(tier.product_id) ?? [];
+      list.push(tier);
+      tiersByProduct.set(tier.product_id, list);
+    }
+  }
+
+  return { priceList, tiersByProduct };
+}
+
+function cartResponse(
+  rows: CartItemRow[],
+  user: CurrentUser,
+  context: WholesaleContext | null
+): CartSummary {
   const items = rows.flatMap((row) => {
     if (!row.products) return [];
 
     const product = mapProductRow(row.products);
-    const lineTotal = priceForRole(product, role) * row.quantity;
+    const tiers = context?.tiersByProduct.get(product.id) ?? [];
+    const pricing = priceLine({
+      retailPrice: product.price,
+      quantity: row.quantity,
+      tiers,
+    });
 
     return [
       {
         id: row.id,
-        product,
+        product: productDTO(product, user.role === "admin" ? user : null, tiers),
         product_id: row.product_id,
         quantity: row.quantity,
-        lineTotal,
+        lineTotal: pricing.lineTotal,
+        pricing,
       },
     ];
   });
 
   const total = items.reduce((sum, item) => sum + item.lineTotal, 0);
+  const retailSubtotal = items.reduce(
+    (sum, item) => sum + item.pricing.retailUnitPrice * item.quantity,
+    0
+  );
 
   return {
     items,
     subtotal: total,
     total,
     totalQuantity: items.reduce((sum, item) => sum + item.quantity, 0),
+    retailSubtotal,
+    totalSavings: items.reduce((sum, item) => sum + item.pricing.savings, 0),
+    wholesale: context !== null,
   };
 }
 
@@ -97,7 +224,7 @@ function wishlistResponse(rows: WishlistItemRow[]) {
           {
             id: row.id,
             product_id: row.product_id,
-            product: mapProductRow(row.products),
+            product: productDTO(mapProductRow(row.products), null),
             created_at: row.created_at,
           },
         ]
@@ -110,13 +237,25 @@ function orderResponse(order: OrderRow) {
     ...order,
     order_items: order.order_items?.map((item) => ({
       ...item,
-      product: item.products ? mapProductRow(item.products) : null,
+      product: item.products ? productDTO(mapProductRow(item.products), null) : null,
+      products: undefined,
     })),
   };
 }
 
 export async function authenticate(request: Request) {
   return requireUserFromRequest(request);
+}
+
+// For public endpoints that render differently for signed-in viewers
+// (e.g. wholesale tiers on product responses). An invalid/expired/missing
+// session simply means "anonymous viewer" -- never an error.
+export async function authenticateOptional(request: Request) {
+  try {
+    return await requireUserFromRequest(request);
+  } catch {
+    return null;
+  }
 }
 
 export async function getProducts(filters: {
@@ -153,6 +292,96 @@ export async function getRelatedProducts(product: Product) {
     .slice(0, 3);
 }
 
+// Viewer-aware product listing: admins get the full record (incl. legacy
+// wholesale price + inventory count), approved wholesale customers get their
+// own tiers attached, everyone else gets the public shape only.
+export async function getProductsForViewer(
+  viewer: CurrentUser | null,
+  filters: Parameters<typeof getProducts>[0] = {}
+) {
+  const products = await getProducts(filters);
+  const context = await wholesaleContext(
+    viewer,
+    products.map((product) => product.id)
+  );
+
+  return products.map((product) =>
+    viewer?.role === "admin"
+      ? productDTO(product, viewer)
+      : productDTO(product, null, context?.tiersByProduct.get(product.id))
+  );
+}
+
+export async function getProductForViewer(
+  viewer: CurrentUser | null,
+  id: number,
+  quantity = 1
+) {
+  const product = await getProductById(id);
+
+  if (!product) return null;
+
+  const context = await wholesaleContext(viewer, [id]);
+  const tiers = context?.tiersByProduct.get(id) ?? [];
+  const pricing = priceLine({
+    retailPrice: product.price,
+    quantity: cleanQuantity(quantity),
+    tiers,
+  });
+
+  const related = await getRelatedProducts(product);
+
+  return {
+    product:
+      viewer?.role === "admin"
+        ? productDTO(product, viewer)
+        : productDTO(product, null, tiers),
+    pricing,
+    wholesale: context !== null,
+    relatedProducts: related.map((item) => productDTO(item, null)),
+  };
+}
+
+// Admin "what would this customer type pay?" preview. Uses the exact same
+// priceLine() logic as the storefront and checkout.
+export async function adminPricePreview(
+  user: CurrentUser,
+  params: { productId: number; quantity: number; priceListId?: string | null }
+) {
+  requireAdmin(user);
+
+  const productRow = await selectProductById(params.productId);
+
+  if (!productRow) {
+    throw notFound("Product not found.");
+  }
+
+  let tiers: PriceTierRow[] = [];
+
+  if (params.priceListId) {
+    const priceList = await selectPriceListById(params.priceListId, user.accessToken);
+
+    if (!priceList) {
+      throw notFound("Price list not found.");
+    }
+
+    // Mirror production behavior: an inactive list never discounts.
+    if (priceList.is_active) {
+      tiers = await selectTiersForProducts(
+        priceList.id,
+        [params.productId],
+        user.accessToken
+      );
+    }
+  }
+
+  return priceLine({
+    retailPrice: productRow.price,
+    quantity: cleanQuantity(params.quantity),
+    tiers,
+  });
+}
+
 export async function createProduct(user: CurrentUser, product: Partial<Product>) {
   requireAdmin(user);
   const row = await insertProduct(product, user.accessToken);
@@ -175,7 +404,13 @@ export async function removeProduct(user: CurrentUser, id: number) {
 }
 
 export async function getCart(user: CurrentUser) {
-  return cartResponse(await selectCart(user.id, user.accessToken), user.role);
+  const rows = await selectCart(user.id, user.accessToken);
+  const context = await wholesaleContext(
+    user,
+    rows.map((row) => row.product_id)
+  );
+
+  return cartResponse(rows, user, context);
 }
 
 export async function addCartItem(
@@ -193,20 +428,24 @@ export async function addCartItem(
     throw notFound("Product not found.");
   }
 
-  if (productRow.stock === "Out of Stock") {
+  const available = availableStock(productRow);
+
+  if (available <= 0) {
     throw badRequest("This product is currently out of stock.");
   }
 
   const rows = await selectCart(user.id, user.accessToken);
   const existingQuantity =
     rows.find((row) => row.product_id === productId)?.quantity ?? 0;
+  const requestedQuantity = existingQuantity + cleanQuantity(quantity);
 
-  await upsertCartItem(
-    user.id,
-    productId,
-    existingQuantity + cleanQuantity(quantity),
-    user.accessToken
-  );
+  if (requestedQuantity > available) {
+    throw badRequest(
+      `Only ${available} unit(s) of ${productRow.name} available.`
+    );
+  }
+
+  await upsertCartItem(user.id, productId, requestedQuantity, user.accessToken);
 
   return getCart(user);
 }
@@ -216,7 +455,21 @@ export async function changeCartItem(
   id: string,
   quantity: unknown
 ) {
-  await updateCartItem(user.id, id, cleanQuantity(quantity), user.accessToken);
+  const requestedQuantity = cleanQuantity(quantity);
+  const rows = await selectCart(user.id, user.accessToken);
+  const row = rows.find((item) => item.id === id);
+
+  if (!row) {
+    throw notFound("Cart item not found.");
+  }
+
+  if (row.products && requestedQuantity > availableStock(row.products)) {
+    throw badRequest(
+      `Only ${availableStock(row.products)} unit(s) of ${row.products.name} available.`
+    );
+  }
+
+  await updateCartItem(user.id, id, requestedQuantity, user.accessToken);
   return getCart(user);
 }
 
@@ -273,6 +526,11 @@ export async function getOrder(user: CurrentUser, id: string) {
   return order ? orderResponse(order) : null;
 }
 
+// Checkout is authoritative: the user's profile, wholesale entitlement,
+// price list, tiers, and inventory are all re-read here (the `user` argument
+// comes from requireUserFromRequest, which loads the profile fresh from the
+// database for every request). The browser contributes shipping details and,
+// optionally, the total it last displayed -- never a price.
 export async function createOrder(
   user: CurrentUser,
   body: {
@@ -280,6 +538,9 @@ export async function createOrder(
     shipping_phone?: string;
     shipping_address?: string;
     notes?: string | null;
+    /** The total the client last saw. Used ONLY to detect price drift
+     *  between the cart view and checkout; never to set prices. */
+    expected_total?: number;
   }
 ) {
   if (!body.shipping_name || !body.shipping_phone || !body.shipping_address) {
@@ -292,55 +553,562 @@ export async function createOrder(
     throw badRequest("Cart is empty.");
   }
 
+  const context = await wholesaleContext(
+    user,
+    cart.map((row) => row.product_id)
+  );
+
   const lines = cart.map((item) => {
     if (!item.products) {
       throw badRequest("Cart contains an unavailable product.");
     }
 
-    if (item.products.stock === "Out of Stock") {
-      throw badRequest(`${item.products.name} is currently out of stock.`);
+    const available = availableStock(item.products);
+
+    if (available < item.quantity) {
+      throw badRequest(
+        available <= 0
+          ? `${item.products.name} is currently out of stock.`
+          : `Only ${available} unit(s) of ${item.products.name} available.`
+      );
     }
 
-    const product = mapProductRow(item.products as ProductRow);
-    const unitPrice = priceForRole(product, user.role);
+    const pricing = priceLine({
+      retailPrice: item.products.price,
+      quantity: item.quantity,
+      tiers: context?.tiersByProduct.get(item.product_id) ?? [],
+    });
 
     return {
       product_id: item.product_id,
       quantity: item.quantity,
-      unit_price: unitPrice,
-      lineTotal: unitPrice * item.quantity,
+      unit_price: pricing.unitPrice,
+      retail_unit_price: pricing.retailUnitPrice,
+      price_list_id: pricing.priceListId,
+      tier_id: pricing.tierId,
+      tier_min_quantity: pricing.tierMinQuantity,
     };
   });
 
-  const orderId = crypto.randomUUID();
-  const totalAmount = lines.reduce((sum, item) => sum + item.lineTotal, 0);
+  const totalAmount = lines.reduce(
+    (sum, item) => sum + item.unit_price * item.quantity,
+    0
+  );
 
-  const order = await insertOrder(
-    {
-      id: orderId,
+  if (body.expected_total !== undefined && body.expected_total !== totalAmount) {
+    throw conflict(
+      "Prices were updated while you were checking out. Please review your cart and try again."
+    );
+  }
+
+  // Single transaction: order + items + inventory deduction + cart clear all
+  // succeed or all roll back (see checkout_order in supabase/schema.sql).
+  let result: { order_id: string };
+
+  try {
+    result = await checkoutOrderRpc({
       user_id: user.id,
-      status: "pending",
-      total_amount: totalAmount,
       shipping_name: body.shipping_name,
       shipping_phone: body.shipping_phone,
       shipping_address: body.shipping_address,
       notes: body.notes ?? null,
+      lines,
+    });
+  } catch (error) {
+    throw mapCheckoutError(error, cart);
+  }
+
+  const order = await selectOrderById(user, result.order_id);
+
+  return order
+    ? orderResponse(order)
+    : orderResponse({
+        id: result.order_id,
+        user_id: user.id,
+        status: "pending",
+        total_amount: totalAmount,
+        shipping_name: body.shipping_name,
+        shipping_phone: body.shipping_phone,
+        shipping_address: body.shipping_address,
+        notes: body.notes ?? null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        order_items: [],
+      });
+}
+
+function mapCheckoutError(error: unknown, cart: CartItemRow[]) {
+  const message = error instanceof Error ? error.message : "";
+
+  if (message.includes("CART_EMPTY")) {
+    return badRequest("Cart is empty.");
+  }
+
+  if (message.includes("CART_CHANGED")) {
+    return conflict(
+      "Your cart changed while checking out. Please review it and try again."
+    );
+  }
+
+  const stockMatch = message.match(/INSUFFICIENT_STOCK:(\d+):(\d+)/);
+
+  if (stockMatch) {
+    const productId = Number(stockMatch[1]);
+    const available = Number(stockMatch[2]);
+    const name =
+      cart.find((row) => row.product_id === productId)?.products?.name ??
+      `Product #${productId}`;
+
+    return conflict(
+      available <= 0
+        ? `${name} sold out while you were checking out.`
+        : `Only ${available} unit(s) of ${name} are left. Please adjust the quantity.`
+    );
+  }
+
+  if (message.includes("PRODUCT_NOT_FOUND")) {
+    return badRequest("Cart contains an unavailable product.");
+  }
+
+  return error instanceof Error ? error : new Error("Checkout failed.");
+}
+
+// ---------------------------------------------------------------------------
+// Wholesale administration. Wholesale accounts are provisioned by an
+// administrator only (no self-service application flow): the customer
+// registers a normal account, an admin grants it wholesale access, and from
+// then on the customer logs in exactly like everyone else -- the only
+// difference is tier pricing on multi-unit purchases. Every mutation runs
+// requireAdmin() first and is recorded in audit_log with the acting admin.
+// ---------------------------------------------------------------------------
+
+export async function adminListWholesaleAccounts(
+  user: CurrentUser,
+  filters: { search?: string | null; wholesaleOnly?: boolean } = {}
+) {
+  requireAdmin(user);
+  return selectCustomerProfiles(filters);
+}
+
+async function resolveDefaultPriceListId(user: CurrentUser) {
+  const lists = await selectPriceLists(user.accessToken);
+  const standard =
+    lists.find((list) => list.name === "Standard Wholesale" && list.is_active) ??
+    lists.find((list) => list.is_active);
+
+  if (!standard) {
+    throw badRequest(
+      "No active price list exists. Create one before granting wholesale access."
+    );
+  }
+
+  return standard.id;
+}
+
+export async function adminUpdateWholesaleAccount(
+  user: CurrentUser,
+  targetUserId: string,
+  update:
+    | { action: "grant"; price_list_id?: string | null }
+    | { action: "revoke" }
+    | { action: "suspend" }
+    | { action: "reactivate" }
+    | { action: "assign_price_list"; price_list_id: string }
+) {
+  requireAdmin(user);
+
+  const profile = await selectProfileByIdService(targetUserId);
+
+  if (!profile) {
+    throw notFound("Customer not found.");
+  }
+
+  if (update.action === "grant") {
+    // Four-eyes guard: an admin must not grant wholesale to their own
+    // account, and admin accounts stay admin accounts.
+    if (targetUserId === user.id) {
+      throw forbidden("You cannot grant wholesale access to your own account.");
+    }
+
+    if (profile.role === "admin") {
+      throw conflict("Admin accounts cannot be converted to wholesale.");
+    }
+
+    if (profile.wholesale_status !== "not_applied") {
+      throw conflict("This account already has wholesale access.");
+    }
+
+    let priceListId = update.price_list_id ?? null;
+
+    if (priceListId) {
+      const priceList = await selectPriceListById(priceListId, user.accessToken);
+
+      if (!priceList) {
+        throw notFound("Price list not found.");
+      }
+    } else {
+      priceListId = await resolveDefaultPriceListId(user);
+    }
+
+    const updated = await updateProfileWholesaleService(targetUserId, {
+      role: "wholesale",
+      wholesale_status: "approved",
+      price_list_id: priceListId,
+    });
+
+    await insertAuditLog({
+      actor_id: user.id,
+      action: "wholesale.account.grant",
+      target_type: "profile",
+      target_id: targetUserId,
+      previous_data: {
+        role: profile.role,
+        wholesale_status: profile.wholesale_status,
+        price_list_id: profile.price_list_id,
+      },
+      new_data: {
+        role: "wholesale",
+        wholesale_status: "approved",
+        price_list_id: priceListId,
+      },
+    });
+
+    return updated;
+  }
+
+  if (update.action === "revoke") {
+    if (profile.wholesale_status === "not_applied") {
+      throw conflict("This account has no wholesale access to revoke.");
+    }
+
+    const updated = await updateProfileWholesaleService(targetUserId, {
+      role: profile.role === "admin" ? "admin" : "normal",
+      wholesale_status: "not_applied",
+      price_list_id: null,
+    });
+
+    await insertAuditLog({
+      actor_id: user.id,
+      action: "wholesale.account.revoke",
+      target_type: "profile",
+      target_id: targetUserId,
+      previous_data: {
+        role: profile.role,
+        wholesale_status: profile.wholesale_status,
+        price_list_id: profile.price_list_id,
+      },
+      new_data: {
+        role: "normal",
+        wholesale_status: "not_applied",
+        price_list_id: null,
+      },
+    });
+
+    return updated;
+  }
+
+  if (update.action === "suspend") {
+    if (profile.wholesale_status !== "approved") {
+      throw conflict("Only an approved wholesale account can be suspended.");
+    }
+
+    const updated = await updateProfileWholesaleService(targetUserId, {
+      wholesale_status: "suspended",
+    });
+
+    await insertAuditLog({
+      actor_id: user.id,
+      action: "wholesale.account.suspend",
+      target_type: "profile",
+      target_id: targetUserId,
+      previous_data: { wholesale_status: profile.wholesale_status },
+      new_data: { wholesale_status: "suspended" },
+    });
+
+    return updated;
+  }
+
+  if (update.action === "reactivate") {
+    if (profile.wholesale_status !== "suspended") {
+      throw conflict("Only a suspended wholesale account can be reactivated.");
+    }
+
+    const updated = await updateProfileWholesaleService(targetUserId, {
+      wholesale_status: "approved",
+    });
+
+    await insertAuditLog({
+      actor_id: user.id,
+      action: "wholesale.account.reactivate",
+      target_type: "profile",
+      target_id: targetUserId,
+      previous_data: { wholesale_status: profile.wholesale_status },
+      new_data: { wholesale_status: "approved" },
+    });
+
+    return updated;
+  }
+
+  const priceList = await selectPriceListById(
+    update.price_list_id,
+    user.accessToken
+  );
+
+  if (!priceList) {
+    throw notFound("Price list not found.");
+  }
+
+  const updated = await updateProfileWholesaleService(targetUserId, {
+    price_list_id: update.price_list_id,
+  });
+
+  await insertAuditLog({
+    actor_id: user.id,
+    action: "wholesale.account.assign_price_list",
+    target_type: "profile",
+    target_id: targetUserId,
+    previous_data: { price_list_id: profile.price_list_id },
+    new_data: { price_list_id: update.price_list_id },
+  });
+
+  return updated;
+}
+
+// ---------------------------------------------------------------------------
+// Price list + tier administration
+// ---------------------------------------------------------------------------
+
+export async function adminListPriceLists(user: CurrentUser) {
+  requireAdmin(user);
+  return selectPriceLists(user.accessToken);
+}
+
+export async function adminCreatePriceList(
+  user: CurrentUser,
+  input: { name: string; description?: string | null; is_active?: boolean }
+) {
+  requireAdmin(user);
+
+  let created;
+
+  try {
+    created = await insertPriceList(
+      {
+        name: input.name,
+        description: input.description ?? null,
+        is_active: input.is_active ?? true,
+      },
+      user.accessToken
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("duplicate key")) {
+      throw conflict("A price list with this name already exists.");
+    }
+
+    throw error;
+  }
+
+  await insertAuditLog({
+    actor_id: user.id,
+    action: "price_list.create",
+    target_type: "price_list",
+    target_id: created.id,
+    new_data: { name: created.name, is_active: created.is_active },
+  });
+
+  return created;
+}
+
+export async function adminUpdatePriceList(
+  user: CurrentUser,
+  id: string,
+  fields: { name?: string; description?: string | null; is_active?: boolean }
+) {
+  requireAdmin(user);
+
+  const previous = await selectPriceListById(id, user.accessToken);
+
+  if (!previous) {
+    throw notFound("Price list not found.");
+  }
+
+  const updated = await updatePriceList(id, fields, user.accessToken);
+
+  await insertAuditLog({
+    actor_id: user.id,
+    action: "price_list.update",
+    target_type: "price_list",
+    target_id: id,
+    previous_data: {
+      name: previous.name,
+      description: previous.description,
+      is_active: previous.is_active,
     },
-    user.accessToken
+    new_data: fields,
+  });
+
+  return updated;
+}
+
+export async function adminListTiers(
+  user: CurrentUser,
+  filters: { priceListId?: string | null; productId?: number | null }
+) {
+  requireAdmin(user);
+  return selectTiersAdmin(filters, user.accessToken);
+}
+
+export type TierAdminInput = {
+  price_list_id: string;
+  product_id: number;
+  min_quantity: number;
+  unit_price: number;
+  is_active?: boolean;
+  effective_from?: string | null;
+  effective_to?: string | null;
+};
+
+function validateTierDates(from?: string | null, to?: string | null) {
+  if (from && to && new Date(to) <= new Date(from)) {
+    throw badRequest("The effective end date must be after the start date.");
+  }
+}
+
+export async function adminCreateTier(user: CurrentUser, input: TierAdminInput) {
+  requireAdmin(user);
+  validateTierDates(input.effective_from, input.effective_to);
+
+  const [product, priceList] = await Promise.all([
+    selectProductById(input.product_id),
+    selectPriceListById(input.price_list_id, user.accessToken),
+  ]);
+
+  if (!product) throw notFound("Product not found.");
+  if (!priceList) throw notFound("Price list not found.");
+
+  let created;
+
+  try {
+    created = await insertTier(
+      {
+        price_list_id: input.price_list_id,
+        product_id: input.product_id,
+        min_quantity: input.min_quantity,
+        unit_price: input.unit_price,
+        is_active: input.is_active ?? true,
+        effective_from: input.effective_from ?? null,
+        effective_to: input.effective_to ?? null,
+      },
+      user.accessToken
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("duplicate key")) {
+      throw conflict(
+        "A tier with this minimum quantity already exists for this product and price list."
+      );
+    }
+
+    throw error;
+  }
+
+  await insertAuditLog({
+    actor_id: user.id,
+    action: "tier.create",
+    target_type: "product_price_tier",
+    target_id: created.id,
+    new_data: {
+      price_list_id: created.price_list_id,
+      product_id: created.product_id,
+      min_quantity: created.min_quantity,
+      unit_price: created.unit_price,
+    },
+  });
+
+  return created;
+}
+
+export async function adminUpdateTier(
+  user: CurrentUser,
+  id: string,
+  fields: Partial<Omit<TierAdminInput, "price_list_id" | "product_id">>
+) {
+  requireAdmin(user);
+
+  const existing = (await selectTiersAdmin({}, user.accessToken)).find(
+    (tier) => tier.id === id
   );
 
-  await insertOrderItems(
-    lines.map((item) => ({
-      order_id: orderId,
-      product_id: item.product_id,
-      quantity: item.quantity,
-      unit_price: item.unit_price,
-    })),
-    user.accessToken
-  );
-  await clearCart(user.id, user.accessToken);
+  if (!existing) {
+    throw notFound("Tier not found.");
+  }
 
-  return orderResponse({ ...order, order_items: [] });
+  validateTierDates(
+    fields.effective_from !== undefined ? fields.effective_from : existing.effective_from,
+    fields.effective_to !== undefined ? fields.effective_to : existing.effective_to
+  );
+
+  let updated;
+
+  try {
+    updated = await updateTier(id, fields, user.accessToken);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("duplicate key")) {
+      throw conflict(
+        "A tier with this minimum quantity already exists for this product and price list."
+      );
+    }
+
+    throw error;
+  }
+
+  await insertAuditLog({
+    actor_id: user.id,
+    action: "tier.update",
+    target_type: "product_price_tier",
+    target_id: id,
+    previous_data: {
+      min_quantity: existing.min_quantity,
+      unit_price: existing.unit_price,
+      is_active: existing.is_active,
+      effective_from: existing.effective_from,
+      effective_to: existing.effective_to,
+    },
+    new_data: fields,
+  });
+
+  return updated;
+}
+
+export async function adminDeleteTier(user: CurrentUser, id: string) {
+  requireAdmin(user);
+
+  const existing = (await selectTiersAdmin({}, user.accessToken)).find(
+    (tier) => tier.id === id
+  );
+
+  if (!existing) {
+    throw notFound("Tier not found.");
+  }
+
+  await deleteTier(id, user.accessToken);
+
+  await insertAuditLog({
+    actor_id: user.id,
+    action: "tier.delete",
+    target_type: "product_price_tier",
+    target_id: id,
+    previous_data: {
+      price_list_id: existing.price_list_id,
+      product_id: existing.product_id,
+      min_quantity: existing.min_quantity,
+      unit_price: existing.unit_price,
+    },
+  });
+}
+
+export async function adminAuditLog(user: CurrentUser, limit = 100) {
+  requireAdmin(user);
+  return selectAuditLog(limit, user.accessToken);
 }
 
 export async function patchOrderStatus(

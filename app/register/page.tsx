@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import type { CurrentUser } from "../lib/useCurrentUser";
-import { storeAuth } from "../lib/client-auth";
 
 type RegisterResponse = {
   user?: CurrentUser | null;
@@ -14,8 +13,6 @@ type RegisterResponse = {
 type LoginResponse = {
   user?: CurrentUser | null;
   profile?: CurrentUser | null;
-  access_token?: string;
-  refresh_token?: string;
   error?: string;
 };
 
@@ -76,12 +73,7 @@ export default function RegisterPage() {
         return;
       }
 
-      storeAuth({
-        access_token: loginData.access_token,
-        refresh_token: loginData.refresh_token,
-        user,
-      });
-
+      // Session cookie was set by the login route; nothing to store here.
       window.location.assign("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to create account.");

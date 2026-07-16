@@ -10,6 +10,12 @@ export type CurrentUser = {
   email: string;
   full_name?: string | null;
   role: UserRole;
+  wholesale_status?:
+    | "not_applied"
+    | "pending"
+    | "approved"
+    | "rejected"
+    | "suspended";
 };
 
 export type CurrentUserState = {

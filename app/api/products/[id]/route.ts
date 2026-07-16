@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
   authenticate,
-  getProductById,
-  getRelatedProducts,
+  authenticateOptional,
+  getProductForViewer,
   patchProduct,
   removeProduct,
 } from "@/app/lib/backend";
@@ -10,20 +10,22 @@ import { handleRouteError } from "@/app/lib/errors";
 import { firstIssueMessage, productUpdateSchema } from "@/app/lib/validation";
 
 export async function GET(
-  _request: Request,
+  request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
-  const product = await getProductById(Number(id));
+  const viewer = await authenticateOptional(request);
+  const quantityParam = Number(request.nextUrl.searchParams.get("quantity") ?? 1);
+  const quantity =
+    Number.isFinite(quantityParam) && quantityParam > 0 ? quantityParam : 1;
 
-  if (!product) {
+  const result = await getProductForViewer(viewer, Number(id), quantity);
+
+  if (!result) {
     return NextResponse.json({ error: "Product not found." }, { status: 404 });
   }
 
-  return NextResponse.json({
-    product,
-    relatedProducts: await getRelatedProducts(product),
-  });
+  return NextResponse.json(result);
 }
 
 export async function PATCH(

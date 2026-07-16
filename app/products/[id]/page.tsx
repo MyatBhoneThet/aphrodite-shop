@@ -9,23 +9,54 @@ import { authHeaders } from "../../lib/client-auth";
 import { formatCurrency } from "../../lib/format";
 import { useCurrentUser } from "../../lib/useCurrentUser";
 
+type PublicTier = { minQuantity: number; unitPrice: number };
+
+type Pricing = {
+  quantity: number;
+  retailUnitPrice: number;
+  unitPrice: number;
+  lineTotal: number;
+  savings: number;
+  tierMinQuantity: number | null;
+  label: string;
+  nextTier: { minQuantity: number; unitPrice: number; unitsAway: number } | null;
+  wholesaleEligible: boolean;
+};
+
+type ProductResponse = {
+  product: Product & { tiers?: PublicTier[] };
+  pricing: Pricing;
+  wholesale: boolean;
+  relatedProducts: Product[];
+};
+
 export default function ProductDetailsPage() {
   const params = useParams();
   const productId = Number(params.id);
 
   const { user: currentUser } = useCurrentUser();
-  const [product, setProduct] = useState<Product | null>(null);
+  const [product, setProduct] = useState<ProductResponse["product"] | null>(null);
+  const [pricing, setPricing] = useState<Pricing | null>(null);
+  const [isWholesale, setIsWholesale] = useState(false);
+  const [quantity, setQuantity] = useState(1);
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [wishlistItemId, setWishlistItemId] = useState<string | null>(null);
   const [cartMessage, setCartMessage] = useState("");
 
+  // Pricing is always computed server-side; changing the quantity refetches
+  // the quote so tier selection stays out of the UI.
   useEffect(() => {
-    async function loadProduct() {
-      setIsLoading(true);
+    let cancelled = false;
 
-      const response = await fetch(`/api/products/${productId}`);
+    async function loadProduct() {
+      const response = await fetch(
+        `/api/products/${productId}?quantity=${quantity}`,
+        { headers: authHeaders(), cache: "no-store" }
+      );
+
+      if (cancelled) return;
 
       if (!response.ok) {
         setProduct(null);
@@ -34,18 +65,23 @@ export default function ProductDetailsPage() {
         return;
       }
 
-      const data = (await response.json()) as {
-        product: Product;
-        relatedProducts: Product[];
-      };
+      const data = (await response.json()) as ProductResponse;
+
+      if (cancelled) return;
 
       setProduct(data.product);
+      setPricing(data.pricing);
+      setIsWholesale(data.wholesale);
       setRelatedProducts(data.relatedProducts);
       setIsLoading(false);
     }
 
     loadProduct();
-  }, [productId]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [productId, quantity]);
 
   useEffect(() => {
     async function loadWishlist() {
@@ -130,10 +166,7 @@ export default function ProductDetailsPage() {
     );
   }
 
-  const displayPrice =
-    userRole === "wholesale" && product.wholesalePrice
-      ? product.wholesalePrice
-      : product.price;
+  const displayPrice = pricing?.unitPrice ?? product.price;
 
   async function addToCart(productItem: Product) {
     if (!currentUser) {
@@ -152,7 +185,7 @@ export default function ProductDetailsPage() {
         "Content-Type": "application/json",
         ...authHeaders(),
       },
-      body: JSON.stringify({ product_id: productItem.id, quantity: 1 }),
+      body: JSON.stringify({ product_id: productItem.id, quantity }),
     });
 
     if (!response.ok) {
@@ -210,8 +243,14 @@ export default function ProductDetailsPage() {
 
           <div className="flex items-center gap-3">
             {currentUser && (
-              <span className="hidden rounded-full bg-zinc-100 px-4 py-2 text-sm md:inline">
-                {currentUser.role === "wholesale" ? "Wholesale" : "User"}
+              <span
+                className={`hidden rounded-full px-4 py-2 text-sm md:inline ${
+                  isWholesale
+                    ? "bg-green-100 font-semibold text-green-700"
+                    : "bg-zinc-100"
+                }`}
+              >
+                {isWholesale ? "Wholesale ✓" : "User"}
               </span>
             )}
 
@@ -267,12 +306,147 @@ export default function ProductDetailsPage() {
             <div className="mt-8">
               <p className="text-4xl font-bold">
                 {formatCurrency(displayPrice)}
+                <span className="ml-2 text-base font-semibold text-zinc-400">
+                  / unit
+                </span>
               </p>
 
-              {userRole === "wholesale" && product.wholesalePrice && (
+              {pricing && pricing.unitPrice < pricing.retailUnitPrice && (
                 <p className="mt-2 text-sm font-semibold text-red-600">
-                  Wholesale price
+                  {pricing.label} — retail{" "}
+                  <span className="line-through">
+                    {formatCurrency(pricing.retailUnitPrice)}
+                  </span>
                 </p>
+              )}
+
+              {pricing?.wholesaleEligible && !pricing.tierMinQuantity && (
+                <p className="mt-2 text-sm font-semibold text-zinc-500">
+                  Retail price — quantity below wholesale tier
+                </p>
+              )}
+
+              {isWholesale && pricing?.nextTier && (
+                <p className="mt-1 text-sm text-zinc-500">
+                  Add {pricing.nextTier.unitsAway} more unit(s) to pay{" "}
+                  {formatCurrency(pricing.nextTier.unitPrice)}/unit
+                </p>
+              )}
+
+              {!isWholesale && userRole !== "admin" && (
+                <p className="mt-2 text-sm text-zinc-500">
+                  Wholesale pricing is available for approved business
+                  accounts. Contact the store to open one.
+                </p>
+              )}
+
+              <div className="mt-5 flex items-center gap-3">
+                <span className="text-sm font-semibold">Quantity</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                    className="h-9 w-9 rounded-full border font-bold"
+                    aria-label="Decrease quantity"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={9999}
+                    value={quantity}
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      setQuantity(
+                        Number.isFinite(next)
+                          ? Math.min(9999, Math.max(1, Math.floor(next)))
+                          : 1
+                      );
+                    }}
+                    className="w-20 rounded-xl border px-3 py-2 text-center outline-none focus:border-red-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setQuantity(Math.min(9999, quantity + 1))}
+                    className="h-9 w-9 rounded-full border font-bold"
+                    aria-label="Increase quantity"
+                  >
+                    +
+                  </button>
+                </div>
+
+                {pricing && (
+                  <span className="text-sm text-zinc-500">
+                    Total:{" "}
+                    <span className="font-bold text-zinc-900">
+                      {formatCurrency(pricing.lineTotal)}
+                    </span>
+                    {pricing.savings > 0 && (
+                      <span className="ml-2 font-semibold text-green-600">
+                        Save {formatCurrency(pricing.savings)}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </div>
+
+              {isWholesale && product.tiers && product.tiers.length > 0 && (
+                <div className="mt-6 overflow-hidden rounded-2xl border">
+                  <p className="border-b bg-zinc-100 px-4 py-3 text-sm font-bold">
+                    Your wholesale quantity pricing
+                  </p>
+                  <table className="w-full text-left text-sm">
+                    <thead className="text-xs uppercase text-zinc-500">
+                      <tr>
+                        <th className="px-4 py-2">Quantity</th>
+                        <th className="px-4 py-2">Unit price</th>
+                        <th className="px-4 py-2">vs retail</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {(product.tiers[0]?.minQuantity ?? 1) > 1 && (
+                        <tr
+                          className={
+                            pricing && !pricing.tierMinQuantity
+                              ? "bg-red-50 font-semibold"
+                              : ""
+                          }
+                        >
+                          <td className="px-4 py-2">
+                            1–{(product.tiers[0]?.minQuantity ?? 2) - 1}
+                          </td>
+                          <td className="px-4 py-2">{formatCurrency(product.price)}</td>
+                          <td className="px-4 py-2 text-zinc-500">Retail</td>
+                        </tr>
+                      )}
+                      {product.tiers.map((tier, index) => {
+                        const nextTier = product.tiers?.[index + 1];
+                        const range = nextTier
+                          ? `${tier.minQuantity}–${nextTier.minQuantity - 1}`
+                          : `${tier.minQuantity}+`;
+                        const isApplied =
+                          pricing?.tierMinQuantity === tier.minQuantity;
+
+                        return (
+                          <tr
+                            key={tier.minQuantity}
+                            className={isApplied ? "bg-red-50 font-semibold" : ""}
+                          >
+                            <td className="px-4 py-2">{range}</td>
+                            <td className="px-4 py-2">
+                              {formatCurrency(tier.unitPrice)}
+                            </td>
+                            <td className="px-4 py-2 text-green-600">
+                              −{formatCurrency(product.price - tier.unitPrice)}
+                              /unit
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
 

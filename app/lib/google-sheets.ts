@@ -220,6 +220,22 @@ export function parseProductsSheet(values: unknown[][]) {
       throw badRequest(`Row ${rowNumber}: price is required.`);
     }
 
+    // Optional numeric inventory column. When the sheet has no
+    // "stock_quantity" header the field stays undefined and the sync leaves
+    // the database quantity untouched (only the In/Out of Stock text column
+    // applies, via the sync_products_stock trigger). Price tiers are NEVER
+    // read from or written by the sheet sync -- manage them in the admin
+    // "Price Lists & Tiers" panel.
+    const stockQuantity = parseNumber(
+      row.stock_quantity ?? row.stockquantity,
+      "stock_quantity",
+      rowNumber
+    );
+
+    if (stockQuantity !== undefined && stockQuantity < 0) {
+      throw badRequest(`Row ${rowNumber}: stock_quantity must be 0 or more.`);
+    }
+
     products.push({
       rowNumber,
       ...(id ? { id } : {}),
@@ -228,6 +244,7 @@ export function parseProductsSheet(values: unknown[][]) {
       category: requireText(row, "category", rowNumber),
       brand: requireText(row, "brand", rowNumber),
       price,
+      ...(stockQuantity !== undefined ? { stockQuantity } : {}),
       wholesalePrice: parseNumber(
         row.wholesale_price ?? row.wholesaleprice,
         "wholesale_price",

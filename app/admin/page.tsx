@@ -5,9 +5,11 @@
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { Product, ProductType, UserRole } from "../data/products";
-import { adminLogout, authHeaders, getAccessToken } from "../lib/client-auth";
+import { adminLogout, authHeaders } from "../lib/client-auth";
 import { formatCurrency, formatDateTime } from "../lib/format";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import PricingPanel from "./PricingPanel";
+import WholesalePanel from "./WholesalePanel";
 
 type OrderStatus =
   | "pending"
@@ -55,6 +57,7 @@ type ProductFormState = {
   image: string;
   model3D: string;
   stock: Product["stock"];
+  stockQuantity: string;
   specs: string;
   fullSpecs: string;
 };
@@ -78,6 +81,7 @@ function emptyProductForm(): ProductFormState {
     image: "/products/macbook-air.png",
     model3D: "",
     stock: "In Stock",
+    stockQuantity: "100",
     specs: JSON.stringify(
       {
         cpu: "Intel Core i5",
@@ -123,6 +127,8 @@ function productToForm(product: Product): ProductFormState {
     image: product.image,
     model3D: product.model3D ?? "",
     stock: product.stock,
+    stockQuantity:
+      product.stockQuantity !== undefined ? String(product.stockQuantity) : "",
     specs: JSON.stringify(product.specs ?? {}, null, 2),
     fullSpecs: JSON.stringify(product.fullSpecs ?? {}, null, 2),
   };
@@ -160,7 +166,7 @@ export default function AdminPage() {
       : "forbidden";
 
   const [activePanel, setActivePanel] = useState<
-    "products" | "orders" | "sync"
+    "products" | "orders" | "wholesale" | "pricing" | "sync"
   >("products");
 
   const [products, setProducts] = useState<Product[]>([]);
@@ -180,7 +186,10 @@ export default function AdminPage() {
     setError("");
 
     try {
-      const productsResponse = await fetch("/api/products", {
+      // Authenticated so the response includes admin-only fields
+      // (legacy wholesale price + numeric inventory).
+      const productsResponse = await fetch("/api/products?limit=100", {
+        headers: authHeaders(),
         cache: "no-store",
       });
 
@@ -194,16 +203,8 @@ export default function AdminPage() {
 
       setProducts(productsData.products ?? []);
 
-      const token = getAccessToken();
-
-      if (!token) {
-        setOrders([]);
-        setMessage(
-          "Products loaded. Orders need admin login token. Please login again if orders do not show."
-        );
-        return;
-      }
-
+      // Auth rides in the httpOnly admin session cookie (or a legacy
+      // localStorage bearer token via authHeaders()).
       const ordersResponse = await fetch("/api/orders", {
         headers: authHeaders(),
         cache: "no-store",
@@ -284,6 +285,17 @@ export default function AdminPage() {
         throw new Error("Wholesale price must be a valid number.");
       }
 
+      const stockQuantity = productForm.stockQuantity
+        ? Number(productForm.stockQuantity)
+        : undefined;
+
+      if (
+        stockQuantity !== undefined &&
+        (!Number.isInteger(stockQuantity) || stockQuantity < 0)
+      ) {
+        throw new Error("Stock quantity must be a whole number of 0 or more.");
+      }
+
       const payload: Partial<Product> = {
         name: productForm.name.trim(),
         type: productForm.type,
@@ -294,6 +306,7 @@ export default function AdminPage() {
         image: productForm.image.trim() || "/products/macbook-air.png",
         model3D: productForm.model3D.trim() || undefined,
         stock: productForm.stock,
+        stockQuantity,
         specs: parseJsonObject(productForm.specs, "Short specs"),
         fullSpecs: parseJsonObject(productForm.fullSpecs, "Full specs"),
       };
@@ -509,6 +522,18 @@ export default function AdminPage() {
             onClick={() => setActivePanel("orders")}
           />
           <SidebarButton
+            active={activePanel === "wholesale"}
+            icon="🏢"
+            label="Wholesale"
+            onClick={() => setActivePanel("wholesale")}
+          />
+          <SidebarButton
+            active={activePanel === "pricing"}
+            icon="🏷️"
+            label="Price Lists & Tiers"
+            onClick={() => setActivePanel("pricing")}
+          />
+          <SidebarButton
             active={activePanel === "sync"}
             icon="🔄"
             label="Google Sheet Sync"
@@ -711,7 +736,7 @@ export default function AdminPage() {
 
                     <div>
                       <label className="mb-1 block text-sm font-semibold">
-                        Wholesale Price
+                        Wholesale Price (legacy)
                       </label>
                       <input
                         type="number"
@@ -725,7 +750,34 @@ export default function AdminPage() {
                         className="w-full rounded-xl border px-4 py-3 outline-none focus:border-red-500"
                         placeholder="23000"
                       />
+                      <p className="mt-1 text-xs text-zinc-400">
+                        Not used for pricing — manage quantity tiers in
+                        “Price Lists &amp; Tiers”.
+                      </p>
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-semibold">
+                      Stock Quantity
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={productForm.stockQuantity}
+                      onChange={(event) =>
+                        setProductForm({
+                          ...productForm,
+                          stockQuantity: event.target.value,
+                        })
+                      }
+                      className="w-full rounded-xl border px-4 py-3 outline-none focus:border-red-500"
+                      placeholder="100"
+                    />
+                    <p className="mt-1 text-xs text-zinc-400">
+                      Authoritative inventory for checkout. The In/Out of Stock
+                      label follows this number automatically.
+                    </p>
                   </div>
 
                   <div>
@@ -863,6 +915,10 @@ export default function AdminPage() {
             </section>
           )}
 
+          {activePanel === "wholesale" && <WholesalePanel />}
+
+          {activePanel === "pricing" && <PricingPanel />}
+
           {activePanel === "sync" && (
             <section className="mt-6 rounded bg-white p-6 shadow">
               <h2 className="text-xl font-bold">Google Sheet Product Sync</h2>
@@ -990,6 +1046,11 @@ function ProductsTable({
                 >
                   {product.stock}
                 </span>
+                {product.stockQuantity !== undefined && (
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {product.stockQuantity} unit(s)
+                  </p>
+                )}
               </td>
 
               <td className="p-4">

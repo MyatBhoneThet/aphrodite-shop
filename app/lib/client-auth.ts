@@ -1,5 +1,9 @@
 import { AUTH_STORAGE_KEYS } from "./auth-storage";
 
+// Sessions now live in httpOnly cookies set by the login routes; the browser
+// sends them automatically on same-origin fetches, so new logins never touch
+// localStorage. getAccessToken() only remains so sessions created BEFORE the
+// cookie migration keep working until their token expires (~1h).
 export function getAccessToken() {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(AUTH_STORAGE_KEYS.accessToken);
@@ -10,31 +14,16 @@ export function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export function storeAuth(session: {
-  access_token?: string;
-  refresh_token?: string;
-  user: unknown;
-}) {
-  localStorage.setItem(AUTH_STORAGE_KEYS.user, JSON.stringify(session.user));
-
-  if (session.access_token) {
-    localStorage.setItem(AUTH_STORAGE_KEYS.accessToken, session.access_token);
-  }
-
-  if (session.refresh_token) {
-    localStorage.setItem(AUTH_STORAGE_KEYS.refreshToken, session.refresh_token);
-  }
-}
-
 export function clearStoredAuth() {
   localStorage.removeItem(AUTH_STORAGE_KEYS.accessToken);
   localStorage.removeItem(AUTH_STORAGE_KEYS.refreshToken);
   localStorage.removeItem(AUTH_STORAGE_KEYS.user);
 }
 
-// Clears both the localStorage session (used by client-side fetches) and the
-// httpOnly admin session cookie (used by proxy.ts to gate /admin/* routes).
+// Clears both the localStorage remnants (legacy sessions) and the httpOnly
+// session cookies (used by proxy.ts to gate /admin/* routes).
 export async function adminLogout() {
+  await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
   await fetch("/api/admin/logout", { method: "POST" }).catch(() => null);
   clearStoredAuth();
 }

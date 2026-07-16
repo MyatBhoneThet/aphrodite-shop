@@ -3,13 +3,10 @@
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import type { CurrentUser } from "../lib/useCurrentUser";
-import { storeAuth } from "../lib/client-auth";
 
 type LoginResponse = {
   user?: CurrentUser | null;
   profile?: CurrentUser | null;
-  access_token?: string;
-  refresh_token?: string;
   error?: string;
 };
 
@@ -56,15 +53,11 @@ export default function LoginPage() {
         );
       }
 
-      storeAuth({
-        access_token: data.access_token,
-        refresh_token: data.refresh_token,
-        user,
-      });
-
-      // Admin accounts still need to go through /admin/login separately --
-      // that's what sets the httpOnly session cookie /admin/* requires.
-      window.location.assign("/");
+      // The session travels in an httpOnly cookie set by the login route;
+      // nothing to persist client-side. Admins land on their dashboard
+      // (the login route also set the admin session cookie for them);
+      // everyone else goes to the store.
+      window.location.assign(user.role === "admin" ? "/admin/dashboard" : "/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to login.");
       setIsSubmitting(false);

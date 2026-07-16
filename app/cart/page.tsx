@@ -7,12 +7,25 @@ import { authHeaders } from "../lib/client-auth";
 import { formatCurrency } from "../lib/format";
 import { useCurrentUser } from "../lib/useCurrentUser";
 
+type LinePricing = {
+  quantity: number;
+  retailUnitPrice: number;
+  unitPrice: number;
+  lineTotal: number;
+  savings: number;
+  tierMinQuantity: number | null;
+  label: string;
+  nextTier: { minQuantity: number; unitPrice: number; unitsAway: number } | null;
+  wholesaleEligible: boolean;
+};
+
 type CartLine = {
   id: string;
   product: Product;
   product_id: number;
   quantity: number;
   lineTotal: number;
+  pricing: LinePricing;
 };
 
 type CartSummary = {
@@ -20,6 +33,9 @@ type CartSummary = {
   subtotal: number;
   total: number;
   totalQuantity: number;
+  retailSubtotal: number;
+  totalSavings: number;
+  wholesale: boolean;
 };
 
 export default function CartPage() {
@@ -108,6 +124,9 @@ export default function CartPage() {
           shipping_phone: shippingPhone.trim(),
           shipping_address: shippingAddress.trim(),
           notes: notes.trim() || null,
+          // Server detects price drift against this and answers 409;
+          // authoritative prices are always recomputed server-side.
+          expected_total: cart?.total,
         }),
       });
 
@@ -115,12 +134,20 @@ export default function CartPage() {
         | { order?: { id: string }; error?: string }
         | null;
 
+      if (response.status === 409) {
+        await loadCart();
+        throw new Error(
+          data?.error ??
+            "Prices or stock changed while checking out. Your cart has been refreshed — please review and try again."
+        );
+      }
+
       if (!response.ok) {
         throw new Error(data?.error ?? "Unable to place order.");
       }
 
       setPlacedOrderId(data?.order?.id ?? null);
-      setCart({ items: [], subtotal: 0, total: 0, totalQuantity: 0 });
+      setCart(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to place order.");
     } finally {
@@ -235,8 +262,34 @@ export default function CartPage() {
                   <div className="flex-1">
                     <p className="font-bold">{item.product.name}</p>
                     <p className="text-sm text-zinc-500">
-                      {formatCurrency(item.lineTotal / item.quantity)} each
+                      {formatCurrency(item.pricing.unitPrice)} each
+                      {item.pricing.unitPrice < item.pricing.retailUnitPrice && (
+                        <>
+                          {" "}
+                          <span className="line-through">
+                            {formatCurrency(item.pricing.retailUnitPrice)}
+                          </span>
+                        </>
+                      )}
                     </p>
+
+                    {item.pricing.tierMinQuantity ? (
+                      <p className="mt-1 text-xs font-semibold text-green-700">
+                        {item.pricing.label} · save{" "}
+                        {formatCurrency(item.pricing.savings)}
+                      </p>
+                    ) : item.pricing.wholesaleEligible ? (
+                      <p className="mt-1 text-xs font-semibold text-zinc-500">
+                        Retail price — below wholesale tier
+                      </p>
+                    ) : null}
+
+                    {item.pricing.nextTier && (
+                      <p className="mt-1 text-xs text-zinc-500">
+                        Add {item.pricing.nextTier.unitsAway} more to pay{" "}
+                        {formatCurrency(item.pricing.nextTier.unitPrice)}/unit
+                      </p>
+                    )}
 
                     <div className="mt-2 flex items-center gap-2">
                       <button
@@ -280,13 +333,34 @@ export default function CartPage() {
             <div className="rounded-[2rem] bg-zinc-100 p-6">
               <h2 className="text-xl font-bold">Checkout</h2>
 
-              <div className="mt-4 flex items-center justify-between text-sm">
-                <span className="text-zinc-500">
-                  {cart.totalQuantity} item(s)
-                </span>
-                <span className="text-2xl font-bold">
-                  {formatCurrency(cart.total)}
-                </span>
+              <div className="mt-4 space-y-2 text-sm">
+                {cart.totalSavings > 0 && (
+                  <>
+                    <div className="flex items-center justify-between text-zinc-500">
+                      <span>Retail subtotal</span>
+                      <span className="line-through">
+                        {formatCurrency(cart.retailSubtotal)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between font-semibold text-green-700">
+                      <span>Wholesale savings</span>
+                      <span>−{formatCurrency(cart.totalSavings)}</span>
+                    </div>
+                  </>
+                )}
+
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-500">
+                    {cart.totalQuantity} item(s)
+                  </span>
+                  <span className="text-2xl font-bold">
+                    {formatCurrency(cart.total)}
+                  </span>
+                </div>
+
+                <p className="text-xs text-zinc-400">
+                  Final prices are confirmed at checkout.
+                </p>
               </div>
 
               <form onSubmit={handleCheckout} className="mt-6 space-y-4">

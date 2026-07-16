@@ -2,14 +2,11 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
-import { storeAuth } from "../../lib/client-auth";
 import { useCurrentUser } from "../../lib/useCurrentUser";
 import type { CurrentUser } from "../../lib/useCurrentUser";
 
 type AdminLoginResponse = {
   user?: CurrentUser | null;
-  access_token?: string;
-  refresh_token?: string;
   error?: string;
 };
 
@@ -70,12 +67,7 @@ export default function AdminLoginPage() {
         throw new Error(data.error ?? "Unable to login.");
       }
 
-      storeAuth({
-        access_token: data.access_token,
-        refresh_token: data.refresh_token,
-        user: data.user,
-      });
-
+      // Admin session lives in an httpOnly cookie set by the route.
       window.location.assign("/admin/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to login.");

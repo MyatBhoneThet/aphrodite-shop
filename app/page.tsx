@@ -32,7 +32,11 @@ export default function HomePage() {
         params.set("q", debouncedSearch.trim());
       }
 
-      const response = await fetch(`/api/products?${params.toString()}`);
+      // authHeaders() covers legacy bearer sessions; cookie sessions ride
+      // along automatically and make the API attach wholesale tiers.
+      const response = await fetch(`/api/products?${params.toString()}`, {
+        headers: authHeaders(),
+      });
       const data = (await response.json()) as { products: Product[] };
 
       setProducts(data.products);

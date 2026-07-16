@@ -48,12 +48,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const response = NextResponse.json({
-      ok: true,
-      user: profile,
-      access_token: session.access_token,
-      refresh_token: session.refresh_token,
-    });
+    // Tokens live only in httpOnly cookies -- never in the JSON body where
+    // client JS could persist them to localStorage.
+    const response = NextResponse.json({ ok: true, user: profile });
 
     response.cookies.set(ADMIN_SESSION_COOKIE, session.access_token, {
       httpOnly: true,
