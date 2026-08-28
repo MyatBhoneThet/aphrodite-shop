@@ -1,0 +1,14 @@
+# Mirrors .dockerignore: keeps the source upload to Cloud Build small.
+# Note: .gcloudignore does NOT inherit .gitignore here, so list everything.
+node_modules
+.next
+.git
+.env*
+npm-debug.log*
+*.tsbuildinfo
+coverage
+tests
+__MACOSX
+.DS_Store
+.github
+AUDIT_REPORT.md
