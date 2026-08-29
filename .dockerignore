@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.env*
+!.env.example
+npm-debug.log*
+*.tsbuildinfo
+docs
+README.md
+ADMIN_SETUP.md
+AUDIT_REPORT.md
+tests
+coverage
+__MACOSX
+.DS_Store
+.github
