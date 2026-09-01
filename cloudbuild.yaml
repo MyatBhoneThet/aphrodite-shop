@@ -1,0 +1,85 @@
+# Cloud Build -> Artifact Registry -> Cloud Run.
+#
+# Why a cloudbuild.yaml instead of plain `gcloud run deploy --source .`?
+# Next.js inlines NEXT_PUBLIC_* values into the client bundle at `next build`
+# time (see the ARG block in the Dockerfile). `--source` gives no way to pass
+# --build-arg, so the browser bundle would ship with an undefined Supabase URL
+# and every client-side call would fail at runtime. Here we pass them explicitly.
+#
+# Deploy:
+#   gcloud builds submit --config cloudbuild.yaml \
+#     --substitutions=_SUPABASE_URL=https://xxxx.supabase.co,_SUPABASE_ANON_KEY=eyJ...
+#
+# Both substitutions are public-by-design values (the anon key is shipped to
+# browsers regardless). The service-role key and the Sheets private key are
+# NEVER build args -- they are injected at runtime from Secret Manager below.
+
+substitutions:
+  _REGION: asia-southeast1 # change to the region nearest your customers
+  _REPO: aphrodite
+  _SERVICE: aphrodite-shop
+  _SUPABASE_URL: ""
+  _SUPABASE_ANON_KEY: ""
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8 # faster next build; drop this line to use the cheaper default
+
+# NOTE: there is deliberately no top-level `images:` field. Images listed there
+# are pushed only *after every step finishes*, so the deploy step below would run
+# against a registry that does not yet hold the tag and fail with
+# "Image ... not found". The explicit push step handles it instead.
+#
+# Tagged with $BUILD_ID rather than $SHORT_SHA: SHORT_SHA is only populated for
+# builds Cloud Build resolves from a commit (trigger-based). A manual
+# `gcloud builds submit` from a plain directory leaves it empty, which produces
+# an unparseable "image:" reference and fails the build before it starts.
+# BUILD_ID is always defined, in both manual and trigger builds.
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=NEXT_PUBLIC_SUPABASE_URL=${_SUPABASE_URL}
+      - --build-arg=NEXT_PUBLIC_SUPABASE_ANON_KEY=${_SUPABASE_ANON_KEY}
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${BUILD_ID}
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest
+      - .
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${BUILD_ID}
+
+  - id: push-latest
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${BUILD_ID}
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --port=3000
+      - --cpu=1
+      - --memory=512Mi
+      - --concurrency=80
+      # max-instances caps the worst-case bill AND keeps the in-memory rate
+      # limiter (app/lib/rate-limit.ts) meaningful -- its effective limit is
+      # (limit x instance count), since counters are per-process.
+      - --min-instances=0
+      - --max-instances=3
+      - --timeout=60
+      - --cpu-boost
+      - --set-env-vars=NODE_ENV=production,NEXT_PUBLIC_SUPABASE_URL=${_SUPABASE_URL},NEXT_PUBLIC_SUPABASE_ANON_KEY=${_SUPABASE_ANON_KEY}
+      - --set-secrets=SUPABASE_SERVICE_ROLE_KEY=supabase-service-role-key:latest,GOOGLE_SHEETS_CLIENT_EMAIL=sheets-client-email:latest,GOOGLE_SHEETS_PRIVATE_KEY=sheets-private-key:latest,GOOGLE_SHEETS_SPREADSHEET_ID=sheets-spreadsheet-id:latest
