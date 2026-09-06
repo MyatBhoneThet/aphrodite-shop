@@ -30,6 +30,10 @@ const completeCatalog = [
 ];
 
 describe("PC Build Planner", () => {
+  it("excludes products with pending prices", () => {
+    const plans = generatePcBuilds([part(99, "CPU", "Ryzen 5 AM5", 0)], { minimumBudget: 0, maximumBudget: 6000000, purpose: "gaming" });
+    expect(plans.every(plan => plan.parts.every(item => item.product.price > 0))).toBe(true);
+  });
   it("generates a complete gaming build inside a 50k–60k range", () => {
     const plans = generatePcBuilds(completeCatalog, {
       minimumBudget: 50_000,

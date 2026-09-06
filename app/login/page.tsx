@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import type { CurrentUser } from "../lib/useCurrentUser";
+import DeliveryLocationWelcome from "../components/DeliveryLocationWelcome";
 
 type LoginResponse = {
   user?: CurrentUser | null;
@@ -21,6 +22,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showDeliveryWelcome, setShowDeliveryWelcome] = useState(false);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -56,13 +58,16 @@ export default function LoginPage() {
       // The session travels in an httpOnly cookie set by the login route;
       // nothing to persist client-side. Admins land on their dashboard
       // (the login route also set the admin session cookie for them);
-      // everyone else goes to the store.
-      window.location.assign(user.role === "admin" ? "/admin/dashboard" : "/");
+      // Customers see a consent explanation before any browser GPS request.
+      if (user.role === "admin") window.location.assign("/admin/dashboard");
+      else setShowDeliveryWelcome(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to login.");
       setIsSubmitting(false);
     }
   }
+
+  if (showDeliveryWelcome) return <DeliveryLocationWelcome />;
 
   return (
     <main className="min-h-screen bg-white text-zinc-950">

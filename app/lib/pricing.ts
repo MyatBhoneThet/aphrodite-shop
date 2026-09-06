@@ -125,11 +125,12 @@ export type WholesaleProfileFields = {
   role: string;
   wholesale_status: string;
   price_list_id: string | null;
+  business_verified_at?: string | null;
 };
 
 /** Single source of truth for "does this account get wholesale prices?".
  *  Callers must pass a profile freshly loaded from the database -- never one
  *  cached in the browser. */
 export function isWholesaleApproved(profile: WholesaleProfileFields) {
-  return profile.wholesale_status === "approved" && Boolean(profile.price_list_id);
+  return profile.role === "wholesale" && profile.wholesale_status === "approved" && Boolean(profile.price_list_id) && Boolean(profile.business_verified_at);
 }

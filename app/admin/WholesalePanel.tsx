@@ -19,6 +19,8 @@ type Account = {
   wholesale_status: "not_applied" | "approved" | "suspended";
   price_list_id: string | null;
   created_at?: string;
+  business_name?: string | null;
+  business_verified_at?: string | null;
 };
 
 type AuditEntry = {
@@ -53,6 +55,8 @@ export default function WholesalePanel() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showAudit, setShowAudit] = useState(false);
+  const [businessDraft, setBusinessDraft] = useState<{ account: Account; priceListId: string; name: string; note: string; verified: boolean } | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -117,7 +121,7 @@ export default function WholesalePanel() {
   async function updateAccount(
     account: Account,
     update:
-      | { action: "grant"; price_list_id?: string }
+      | { action: "grant"; price_list_id?: string; business_name: string; business_review_note: string; business_verified: true }
       | { action: "revoke" }
       | { action: "suspend" }
       | { action: "reactivate" }
@@ -125,6 +129,7 @@ export default function WholesalePanel() {
   ) {
     setMessage("");
     setError("");
+    setSaving(true);
 
     try {
       const response = await fetch(`/api/admin/wholesale/accounts/${account.id}`, {
@@ -143,23 +148,34 @@ export default function WholesalePanel() {
           : "Account updated."
       );
       await load();
+      setBusinessDraft(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to update account.");
-    }
+    } finally { setSaving(false); }
   }
 
   function handleRevoke(account: Account) {
-    if (
-      window.confirm(
-        `Remove wholesale access for ${account.email}? They will pay retail prices again.`
-      )
-    ) {
-      updateAccount(account, { action: "revoke" });
-    }
+    // Reversible action, no unsupported browser confirmation dialog.
+    updateAccount(account, { action: "revoke" });
   }
 
   return (
     <section className="mt-6 space-y-6">
+      {businessDraft && <form onSubmit={event => {
+        event.preventDefault();
+        if (!businessDraft.verified || saving) return;
+        void updateAccount(businessDraft.account, { action: "grant", price_list_id: businessDraft.priceListId || undefined,
+          business_name: businessDraft.name, business_review_note: businessDraft.note, business_verified: true });
+      }} className="space-y-4 rounded-2xl border border-blue-200 bg-white p-5">
+        <h3 className="text-lg font-bold">Verify B2B business: {businessDraft.account.email}</h3>
+        <p className="text-sm text-zinc-600">Call the business contact, check the shop/business address and reseller purpose. A shared signup code alone does not qualify a customer.</p>
+        <fieldset disabled={saving} className="space-y-3">
+          <label className="block text-sm font-semibold">Business / shop name<input required minLength={2} maxLength={160} value={businessDraft.name} onChange={e => setBusinessDraft({ ...businessDraft, name: e.target.value })} className="mt-1 w-full rounded-xl border p-3" /></label>
+          <label className="block text-sm font-semibold">Private verification note<textarea required minLength={10} maxLength={500} value={businessDraft.note} onChange={e => setBusinessDraft({ ...businessDraft, note: e.target.value })} className="mt-1 w-full rounded-xl border p-3" placeholder="Business contact called, shop/address checked, reseller purpose confirmed. Do not store national ID or bank credentials." /></label>
+          <label className="flex gap-3 text-sm"><input type="checkbox" required checked={businessDraft.verified} onChange={e => setBusinessDraft({ ...businessDraft, verified: e.target.checked })} />I completed these business checks and approve B2B pricing.</label>
+          <div className="flex gap-3"><button className="rounded-full bg-green-700 px-5 py-2 text-white">{saving ? "Saving…" : "Approve business"}</button><button type="button" onClick={() => setBusinessDraft(null)} className="rounded-full border px-5 py-2">Cancel</button></div>
+        </fieldset>
+      </form>}
       {(message || error) && (
         <div
           className={`rounded-xl p-4 text-sm font-semibold ${
@@ -175,7 +191,7 @@ export default function WholesalePanel() {
           <div>
             <h2 className="font-bold">Wholesale Accounts</h2>
             <p className="text-sm text-zinc-500">
-              Grant wholesale access to registered customers, assign price
+              Verify business customers before granting wholesale access. Assign price
               lists, suspend or revoke. Wholesale customers log in like any
               other customer and automatically see tier prices.
             </p>
@@ -218,6 +234,7 @@ export default function WholesalePanel() {
               const chosenList =
                 selectedPriceList[account.id] ??
                 account.price_list_id ??
+                priceLists.find((list) => list.name === "Sheet B2B (MMK)" && list.is_active)?.id ??
                 priceLists.find((list) => list.is_active)?.id ??
                 "";
 
@@ -246,13 +263,13 @@ export default function WholesalePanel() {
                         }`}
                       >
                         {status === "approved"
-                          ? "Wholesale"
+                          ? account.business_verified_at ? "Verified B2B" : "Needs business verification"
                           : status === "suspended"
                           ? "Wholesale (suspended)"
                           : "Retail"}
                       </span>
 
-                      {status === "not_applied" && (
+                      {(status === "not_applied" || !account.business_verified_at) && (
                         <>
                           <select
                             value={chosenList}
@@ -265,7 +282,7 @@ export default function WholesalePanel() {
                             className="rounded-full border px-3 py-2 text-xs font-semibold outline-none focus:border-red-500"
                           >
                             {priceLists.map((list) => (
-                              <option key={list.id} value={list.id}>
+                              <option key={list.id} value={list.id} disabled={!list.is_active}>
                                 {list.name}
                                 {list.is_active ? "" : " (inactive)"}
                               </option>
@@ -273,15 +290,13 @@ export default function WholesalePanel() {
                           </select>
 
                           <button
+                            disabled={saving || !chosenList}
                             onClick={() =>
-                              updateAccount(account, {
-                                action: "grant",
-                                price_list_id: chosenList || undefined,
-                              })
+                              setBusinessDraft({ account, priceListId: chosenList, name: account.business_name ?? "", note: "", verified: false })
                             }
                             className="rounded-full bg-green-600 px-4 py-2 text-xs font-semibold text-white hover:bg-green-700"
                           >
-                            Grant wholesale
+                            Verify business / grant B2B
                           </button>
                         </>
                       )}

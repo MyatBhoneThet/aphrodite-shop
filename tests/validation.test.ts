@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   adminOrderCancellationSchema,
+  adminDeliveryUpdateSchema,
   adminOrderResolutionSchema,
   adminReturnWorkflowSchema,
   customerOrderActionSchema,
@@ -91,12 +92,13 @@ describe("registration cannot smuggle privileges", () => {
 describe("wholesale account update validation", () => {
   it("accepts every admin action", () => {
     expect(
-      wholesaleAccountUpdateSchema.safeParse({ action: "grant" }).success
+      wholesaleAccountUpdateSchema.safeParse({ action: "grant", business_name: "Example shop", business_review_note: "Business callback and address checked", business_verified: true }).success
     ).toBe(true);
     expect(
       wholesaleAccountUpdateSchema.safeParse({
         action: "grant",
         price_list_id: "3f9d8e60-1111-4111-8111-000000000000",
+        business_name: "Example shop", business_review_note: "Business callback and address checked", business_verified: true,
       }).success
     ).toBe(true);
     expect(
@@ -126,6 +128,10 @@ describe("order input validation", () => {
       shipping_name: "A Customer",
       shipping_phone: "0812345678",
       shipping_address: "Somewhere 123",
+      shipping_country: "Myanmar",
+      shipping_state: "Yangon",
+      cod_confirmation: true,
+      cod_contact_confirmation: true,
       expected_total: 480000,
       // Injected junk that must be dropped:
       total_amount: 1,
@@ -143,11 +149,20 @@ describe("order input validation", () => {
       shipping_phone: "+66 81 234 5678",
       shipping_address_line1: "123 Test Road",
       shipping_address_line2: "Unit 4",
-      shipping_city: "Bangkok",
-      shipping_state: "Bangkok",
+      shipping_city: "Yangon",
+      shipping_state: "Yangon",
       shipping_postal_code: "10110",
-      shipping_country: "Thailand",
+      shipping_country: "Myanmar",
       payment_method: "cash_on_delivery",
+      cod_confirmation: true,
+      cod_contact_confirmation: true,
+      delivery_location_consent: true,
+      delivery_location: {
+        latitude: 16.8661,
+        longitude: 96.1951,
+        accuracy_m: 25,
+        captured_at: "2026-09-02T10:00:00.000Z",
+      },
     });
     expect(parsed.payment_method).toBe("cash_on_delivery");
   });
@@ -174,6 +189,8 @@ describe("order lifecycle validation", () => {
       reason_code: "damaged_in_transit",
       pickup_method: "courier_pickup",
       pickup_address: "123 Test Road, Bangkok",
+      evidence_url: "https://example.com/evidence",
+      evidence_attestation: true,
     }).success).toBe(true);
     expect(adminOrderResolutionSchema.safeParse({
       action: "resolve_request",
@@ -181,6 +198,24 @@ describe("order lifecycle validation", () => {
       decision: "approve",
       admin_note: "Refund issued.",
     }).success).toBe(true);
+  });
+
+  it("validates admin COD and delivery timeline updates", () => {
+    expect(adminDeliveryUpdateSchema.safeParse({
+      action: "update_delivery",
+      verification_status: "phone_verified",
+      verification_method: "phone_callback",
+      courier_name: "Example Courier",
+      tracking_number: "MM-123",
+      estimated_delivery_at: "2026-09-05T16:00:00+06:30",
+      stage: "in_transit",
+      event_title: "Package is travelling to Yangon",
+    }).success).toBe(true);
+    expect(adminDeliveryUpdateSchema.safeParse({
+      action: "update_delivery",
+      verification_status: "approved",
+      stage: "in_transit",
+    }).success).toBe(false);
   });
 
   it("validates cancellation, pickup, inspection, and refund administration", () => {

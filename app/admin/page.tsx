@@ -3,6 +3,9 @@
 /* eslint-disable @next/next/no-img-element */
 
 import Image from "next/image";
+import BrandLogo from "../components/BrandLogo";
+import CustomerLocation from "./CustomerLocation";
+import { normalizeGallery, parseGalleryLines } from "../lib/product-gallery";
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { Product, ProductType, UserRole } from "../data/products";
@@ -13,6 +16,7 @@ import PricingPanel from "./PricingPanel";
 import SupportPanel from "./SupportPanel";
 import WholesalePanel from "./WholesalePanel";
 import AdminOverviewPanel from "./AdminOverviewPanel";
+import CodDeliveryForm from "./CodDeliveryForm";
 
 type OrderStatus =
   | "pending"
@@ -95,6 +99,16 @@ type AdminOrder = {
   receipt_number?: string | null;
   receipt_email_status?: string;
   admin_order_note: string | null;
+  cod_verification_status?: "pending" | "phone_verified" | "deposit_verified" | "approved" | "rejected" | null;
+  cod_verification_method?: "phone_callback" | "cod_deposit" | "admin_review" | null;
+  delivery_latitude?: number | null;
+  delivery_longitude?: number | null;
+  delivery_accuracy_m?: number | null;
+  delivery_location_consent?: boolean;
+  courier_name?: string | null;
+  delivery_tracking_number?: string | null;
+  estimated_delivery_at?: string | null;
+  delivery_status_detail?: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -120,6 +134,7 @@ type ProductFormState = {
   stockQuantity: string;
   specs: string;
   fullSpecs: string;
+  gallery: string;
 };
 
 type SheetSyncReport = {
@@ -150,6 +165,7 @@ function emptyProductForm(): ProductFormState {
     wholesalePrice: "",
     image: "/products/macbook-air.png",
     model3D: "",
+    gallery: "",
     stock: "In Stock",
     stockQuantity: "100",
     specs: JSON.stringify(
@@ -196,6 +212,7 @@ function productToForm(product: Product): ProductFormState {
       : "",
     image: product.image,
     model3D: product.model3D ?? "",
+    gallery: normalizeGallery(product.fullSpecs.gallery).map(photo => `${photo.url} | ${photo.label}`).join("\n"),
     stock: product.stock,
     stockQuantity:
       product.stockQuantity !== undefined ? String(product.stockQuantity) : "",
@@ -241,6 +258,7 @@ export default function AdminPage() {
 
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [deliveryOrder, setDeliveryOrder] = useState<AdminOrder | null>(null);
   const [productForm, setProductForm] =
     useState<ProductFormState>(emptyProductForm);
   // The add/edit form is hidden until requested so the product list gets the
@@ -412,7 +430,7 @@ export default function AdminPage() {
         stock: productForm.stock,
         stockQuantity,
         specs: parseJsonObject(productForm.specs, "Short specs"),
-        fullSpecs: parseJsonObject(productForm.fullSpecs, "Full specs"),
+        fullSpecs: { ...parseJsonObject(productForm.fullSpecs, "Full specs"), gallery: parseGalleryLines(productForm.gallery), galleryManagedBy: "admin" },
       };
 
       const response = await fetch(
@@ -497,6 +515,10 @@ export default function AdminPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to update order.");
     }
+  }
+
+  function handleDeliveryUpdate(order: AdminOrder) {
+    setError(""); setMessage(""); setDeliveryOrder(order);
   }
 
   function openOrderRequestResolution(
@@ -751,7 +773,7 @@ export default function AdminPage() {
     <main className="min-h-screen bg-[#f4f6f9] text-zinc-900">
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 bg-[#343a40] text-white shadow-xl lg:block">
         <div className="flex h-20 items-center border-b border-white/10 bg-white px-5">
-          <Image src="/brand/aphrodite-myanmar.png" alt="Aphrodite Myanmar" width={218} height={77} className="h-14 w-auto" priority />
+          <BrandLogo />
         </div>
 
         <div className="border-b border-white/10 p-5">
@@ -1109,6 +1131,13 @@ export default function AdminPage() {
                     />
                   </div>
 
+                  <div className="md:col-span-2">
+                    <label htmlFor="product-gallery" className="mb-1 block text-sm font-semibold">Product photos</label>
+                    <textarea id="product-gallery" rows={5} value={productForm.gallery} onChange={event => setProductForm({ ...productForm, gallery: event.target.value })} placeholder={"/products/my-product/front.jpg | Front view\n/products/my-product/rear.jpg | Rear view\n/products/my-product/side.jpg | Side view"} className="w-full rounded-xl border px-4 py-3 text-sm outline-none focus:border-red-500" />
+                    <p className="mt-2 text-xs text-zinc-500">One HTTPS image URL or local image path per line, followed by | and its view name. Up to 12 photos. Saving here keeps this gallery during later sheet syncs.</p>
+                    <div className="mt-3 flex gap-3 overflow-x-auto">{normalizeGallery(productForm.gallery.split("\n").map(line => ({ url: line.split("|")[0], label: line.split("|")[1] }))).map(photo => <img key={photo.url} src={photo.url} alt={photo.label} className="h-20 w-20 rounded-xl border object-contain p-2" />)}</div>
+                  </div>
+
                   <div>
                     <label className="mb-1 block text-sm font-semibold">
                       Short Specs JSON
@@ -1224,11 +1253,17 @@ export default function AdminPage() {
                 </p>
               </div>
 
+              {deliveryOrder && <CodDeliveryForm key={deliveryOrder.id} order={deliveryOrder}
+                onClose={() => setDeliveryOrder(null)} onSaved={async () => {
+                  await loadDashboardData(); setDeliveryOrder(null);
+                  setMessage("COD verification and delivery details saved.");
+                }} />}
               <OrdersTable
                 orders={orders}
                 onStatusChange={handleOrderStatusChange}
                 onResolveRequest={openOrderRequestResolution}
                 onWorkflow={openOrderWorkflow}
+                onDelivery={handleDeliveryUpdate}
               />
             </section>
           )}
@@ -1410,7 +1445,7 @@ function ProductsTable({
               <td className="p-4 capitalize">{product.type}</td>
 
               <td className="p-4">
-                <p className="font-bold">{formatCurrency(product.price)}</p>
+                <p className="font-bold">{product.price > 0 ? formatCurrency(product.price) : "Price pending"}</p>
                 {product.wholesalePrice && (
                   <p className="text-xs text-zinc-500">
                     W/S {formatCurrency(product.wholesalePrice)}
@@ -1465,6 +1500,7 @@ function OrdersTable({
   onStatusChange,
   onResolveRequest,
   onWorkflow,
+  onDelivery,
 }: {
   orders: AdminOrder[];
   onStatusChange: (orderId: string, status: OrderStatus) => void;
@@ -1474,6 +1510,7 @@ function OrdersTable({
     decision: OrderRequestDecision
   ) => void;
   onWorkflow: (order: AdminOrder, action: OrderWorkflowAction) => void;
+  onDelivery: (order: AdminOrder) => void;
 }) {
   if (orders.length === 0) {
     return (
@@ -1576,6 +1613,7 @@ function OrdersTable({
                     {order.receipt_number}<br />Email: {order.receipt_email_status ?? "not sent"}
                   </p>
                 )}
+                <p className="mt-2 text-[10px] font-bold uppercase text-zinc-500">Verification: {(order.cod_verification_status ?? "pending").replaceAll("_", " ")}</p>
               </td>
 
               <td className="p-4">
@@ -1634,6 +1672,11 @@ function OrdersTable({
                     Admin note: {order.admin_order_note}
                   </p>
                 )}
+                {order.courier_name && <p className="mt-2 text-xs font-semibold">{order.courier_name}{order.delivery_tracking_number ? ` · ${order.delivery_tracking_number}` : ""}</p>}
+                {order.estimated_delivery_at && <p className="mt-1 text-xs text-zinc-500">ETA {formatDateTime(order.estimated_delivery_at)}</p>}
+                {order.delivery_location_consent && order.delivery_latitude != null && order.delivery_longitude != null && <a href={`https://www.google.com/maps?q=${order.delivery_latitude},${order.delivery_longitude}`} target="_blank" rel="noreferrer" className="mt-2 block text-xs font-bold text-blue-600 hover:underline">Open customer-selected delivery pin{order.delivery_accuracy_m != null ? ` (device accuracy ±${Math.round(order.delivery_accuracy_m)} m; not identity proof)` : " (manually placed; not verified)"}</a>}
+                <CustomerLocation userId={order.user_id} />
+                <button type="button" onClick={() => onDelivery(order)} className="mt-3 rounded-full bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100">COD & delivery details</button>
               </td>
             </tr>
           ))}

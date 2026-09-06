@@ -1,5 +1,9 @@
 # Aphrodite Shop
 
+For this update, start with [COD_B2B_SETUP.md](./COD_B2B_SETUP.md): COD form fix,
+staff verification, business-only wholesale pricing and the required migration.
+Its instructions supersede older wholesale-sync instructions below.
+
 Aphrodite Shop is a Next.js ecommerce application for laptops, PC parts, and accessories. It supports category-specific product specifications, a catalogue-based PC Build Planner, customer accounts, login-gated wishlist/cart/COD purchasing, detailed delivery addresses, cancellation and return requests, server-authoritative pricing, inventory-safe checkout, and administrator purchase management.
 
 For the security and architecture review, see [AUDIT_REPORT.md](./AUDIT_REPORT.md).
@@ -73,7 +77,7 @@ The browser calls only same-origin `/api/*` routes. `app/lib/backend.ts` contain
 | `APP_URL` | For receipt email links | Server only | Public website URL, such as `http://localhost:3000` locally. |
 | `RESEND_API_KEY` | Optional | Secret, server only | Sends the order-confirmation receipt email. The website receipt still works without it. |
 | `RECEIPT_FROM_EMAIL` | With Resend | Server only | Verified sender, for example `Aphrodite Myanmar <receipts@example.com>`. |
-| `RECEIPT_CURRENCY` | Optional | Server only | Currency used in receipt formatting; defaults to `THB` to match the current storefront. |
+| `RECEIPT_CURRENCY` | Optional | Server only | Currency used in receipt formatting; defaults to `MMK`. |
 
 Do not set `NODE_ENV` in `.env.local`; Next.js selects it for `dev`, `build`, and tests. Use separate credentials/projects for development, staging, and production. Google sync expects the production `Laptops`, `Accessories`, and `PC Parts` tabs described in `docs/production-google-sheet-sync.md`.
 

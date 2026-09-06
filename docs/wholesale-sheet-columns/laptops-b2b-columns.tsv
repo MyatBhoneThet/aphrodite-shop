@@ -1,0 +1,21 @@
+Wholesale Price MMK	Wholesale Min Qty	Wholesale Discount	Wholesale Status	Wholesale Notes
+				
+				
+=IF(AND(ISNUMBER(R9),R9>0),ROUND(R9*(1-AB9),0),"")	3	0.05	=IF(AND(ISNUMBER(R9),R9>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R10),R10>0),ROUND(R10*(1-AB10),0),"")	3	0.05	=IF(AND(ISNUMBER(R10),R10>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R11),R11>0),ROUND(R11*(1-AB11),0),"")	3	0.05	=IF(AND(ISNUMBER(R11),R11>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R12),R12>0),ROUND(R12*(1-AB12),0),"")	3	0.05	=IF(AND(ISNUMBER(R12),R12>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R13),R13>0),ROUND(R13*(1-AB13),0),"")	3	0.05	=IF(AND(ISNUMBER(R13),R13>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R14),R14>0),ROUND(R14*(1-AB14),0),"")	3	0.05	=IF(AND(ISNUMBER(R14),R14>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R15),R15>0),ROUND(R15*(1-AB15),0),"")	3	0.05	=IF(AND(ISNUMBER(R15),R15>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R16),R16>0),ROUND(R16*(1-AB16),0),"")	3	0.05	=IF(AND(ISNUMBER(R16),R16>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R17),R17>0),ROUND(R17*(1-AB17),0),"")	3	0.05	=IF(AND(ISNUMBER(R17),R17>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R18),R18>0),ROUND(R18*(1-AB18),0),"")	3	0.05	=IF(AND(ISNUMBER(R18),R18>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R19),R19>0),ROUND(R19*(1-AB19),0),"")	3	0.05	=IF(AND(ISNUMBER(R19),R19>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R20),R20>0),ROUND(R20*(1-AB20),0),"")	3	0.05	=IF(AND(ISNUMBER(R20),R20>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R21),R21>0),ROUND(R21*(1-AB21),0),"")	3	0.05	=IF(AND(ISNUMBER(R21),R21>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R22),R22>0),ROUND(R22*(1-AB22),0),"")	3	0.05	=IF(AND(ISNUMBER(R22),R22>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R23),R23>0),ROUND(R23*(1-AB23),0),"")	3	0.05	=IF(AND(ISNUMBER(R23),R23>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R24),R24>0),ROUND(R24*(1-AB24),0),"")	3	0.05	=IF(AND(ISNUMBER(R24),R24>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R25),R25>0),ROUND(R25*(1-AB25),0),"")	3	0.05	=IF(AND(ISNUMBER(R25),R25>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.
+=IF(AND(ISNUMBER(R26),R26>0),ROUND(R26*(1-AB26),0),"")	3	0.05	=IF(AND(ISNUMBER(R26),R26>0),"enabled","pending")	Owner approved 5% below approved retail, 3+ of this product. Business verification required. Not a supplier quote.

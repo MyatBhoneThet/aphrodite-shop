@@ -36,7 +36,7 @@ const emptySettings: SettingsData = {
   shipping_city: "",
   shipping_state: "",
   shipping_postal_code: "",
-  shipping_country: "Thailand",
+  shipping_country: "Myanmar",
   preferred_language: "en",
   order_updates_enabled: true,
   support_updates_enabled: true,

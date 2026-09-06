@@ -9,13 +9,15 @@ vi.mock("../app/lib/supabase", async (importOriginal) => {
     resolveOrderActionRpc: vi.fn(),
     updateOrderStatus: vi.fn(),
     insertAuditLog: vi.fn(),
+    reviewOrderDeliveryRpc: vi.fn(),
   };
 });
 
-import { patchOrderStatus, requestOrderAction, resolveOrderRequest } from "../app/lib/backend";
+import { patchOrderStatus, requestOrderAction, resolveOrderRequest, updateOrderDelivery } from "../app/lib/backend";
 import {
   requestOrderActionRpc, resolveOrderActionRpc, selectOrderById,
   updateOrderStatus, type CurrentUser, type OrderRow, type Profile,
+  reviewOrderDeliveryRpc,
 } from "../app/lib/supabase";
 
 function user(role: Profile["role"] = "normal"): CurrentUser {
@@ -49,6 +51,7 @@ beforeEach(() => {
   vi.mocked(requestOrderActionRpc).mockReset().mockResolvedValue({ ok: true });
   vi.mocked(resolveOrderActionRpc).mockReset().mockResolvedValue({ ok: true });
   vi.mocked(updateOrderStatus).mockReset().mockResolvedValue(order({ status: "confirmed" }));
+  vi.mocked(reviewOrderDeliveryRpc).mockReset().mockResolvedValue({ok:true});
 });
 
 describe("order lifecycle authorization", () => {
@@ -84,5 +87,34 @@ describe("order lifecycle authorization", () => {
     await expect(patchOrderStatus(user("admin"), "order-1", "shipped"))
       .rejects.toMatchObject({ status: 409 });
     expect(updateOrderStatus).not.toHaveBeenCalled();
+  });
+
+  it("will not confirm an order before COD approval", async () => {
+    await expect(patchOrderStatus(user("admin"),"order-1","confirmed")).rejects.toMatchObject({status:409});
+    expect(updateOrderStatus).not.toHaveBeenCalled();
+  });
+
+  it("requires a courier reference before shipping an approved order", async () => {
+    vi.mocked(selectOrderById).mockResolvedValue(order({status:"confirmed",cod_verification_status:"approved"}));
+    await expect(patchOrderStatus(user("admin"),"order-1","shipped")).rejects.toMatchObject({status:409});
+    expect(updateOrderStatus).not.toHaveBeenCalled();
+  });
+
+  const approval={verification_status:"approved" as const,callback_confirmed:true,address_confirmed:true,verification_note:"Callback completed; confirmed address and total."};
+  it("only permits administrators to record COD verification", async () => {
+    await expect(updateOrderDelivery(user(),"order-1",approval)).rejects.toMatchObject({status:403});
+    expect(reviewOrderDeliveryRpc).not.toHaveBeenCalled();
+  });
+
+  it("uses one audited database transaction for an admin's review", async () => {
+    await updateOrderDelivery(user("admin"),"order-1",approval);
+    expect(reviewOrderDeliveryRpc).toHaveBeenCalledExactlyOnceWith("admin-1","order-1",approval);
+  });
+
+  it("does not write an incomplete or closed order review", async () => {
+    await expect(updateOrderDelivery(user("admin"),"order-1",{...approval,callback_confirmed:false})).rejects.toMatchObject({status:400});
+    vi.mocked(selectOrderById).mockResolvedValue(order({status:"cancelled"}));
+    await expect(updateOrderDelivery(user("admin"),"order-1",approval)).rejects.toMatchObject({status:409});
+    expect(reviewOrderDeliveryRpc).not.toHaveBeenCalled();
   });
 });

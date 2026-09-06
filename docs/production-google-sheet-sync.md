@@ -1,14 +1,17 @@
 # APD Google Sheet catalogue sync
 
-The catalogue importer is configured for the shared APD Testing workbook:
+The catalogue importer now defaults to the current edited workbook:
 
-`1PVS3wp7UvezKVeb1VL0ifpYMrgxWjpoAq0UXDu-RdXE`
+`1bQ3SVyRh5CD20JKCX-YWv0M30NdpTCafIfoDEI8NlN4`
+
+For the September 2026 MMK update and actual pricing progress, read
+`MYANMAR_LOCATION_MMK_SETUP.md` in the project root first.
 
 It reads these tabs in one authenticated Google Sheets request:
 
-- `Laptops!A:Q`
-- `Accessories!A:AK`
-- `PC Parts!A:AH`
+- `Laptops!A:AZ`
+- `Accessories!A:AZ`
+- `PC Parts!A:AZ`
 
 The Sheet remains the inventory source. The application does not change its
 layout or product descriptions during an import. The only Sheet write is the
@@ -33,7 +36,7 @@ adapter update and tests.
 - Name: `Model`, with `Model No` as fallback
 - Identity: Sheet + brand + model number/name
 - Store family/category: laptop / `Laptop`
-- Price: `Price` or `Pur Cost`
+- Price: `Retail Price MMK`; legacy cost fallback only when that header is absent
 - Inventory: `Qty`
 - Details: `Specs (Detail)` and `Warranty`
 
@@ -42,7 +45,7 @@ adapter update and tests.
 - Name: `Model`
 - Identity: Sheet + brand + category + model number/name
 - Store family: accessory
-- Price: closing `Pur Cost`, then purchase and opening cost as fallbacks
+- Price: `Retail Price MMK`; legacy cost fallback only when that header is absent
 - Inventory: closing `Qty`; a dash or blank means zero
 - Details: `Specs` and `Warranty`
 
@@ -52,21 +55,23 @@ adapter update and tests.
 - Identity: Sheet + brand + category + description
 - Store family: PC part (stored with the existing accessory database type and
   identified by `source_sheet = 'PC Parts'`)
-- Price: closing `Pur Cost`, then purchase and opening cost as fallbacks
+- Price: `Retail Price MMK`; legacy cost fallback only when that header is absent
 - Inventory: closing `Qty`
 - Details: `Description`
 
 Repeated rows with the same identity become one store product. Quantities are
-added and the highest available unit cost is used. Rows with a product name but
-no valid positive price are skipped and reported by Dry Run.
+added and the highest available retail price is used. With a `Retail Price MMK`
+header, named rows without an approved positive price remain in the catalogue
+as Price pending and cannot be ordered. A missing MMK header triggers a warning
+and retains the old cost fallback for older workbooks; it does not convert THB.
 
 The workbook has no image column. A new product uses
 `/products/production-placeholder.svg`; later manual image edits in the admin
 dashboard are preserved by future syncs.
 
-## Audit snapshot (25 August 2026)
+## Historical audit snapshot (25 August 2026 — different workbook)
 
-The shared workbook produced 465 unique products:
+The previous shared workbook produced 465 unique products:
 
 - Laptops: 16
 - Accessories: 110
@@ -74,19 +79,18 @@ The shared workbook produced 465 unique products:
 - Products currently in stock: 270
 - Named rows skipped for invalid price: 0
 
-All 465 products currently have the workbook price `1000`. The store displays
-prices in Thai baht, so this becomes `฿1,000`. Confirm and correct the Sheet's
-price data before a live Sync if `1000` is only test data. Dry Run shows this as
-an amber warning in the admin dashboard.
+Those products had the placeholder value `1000`. The current app uses MMK and
+dedicated retail columns, so do not use this historical snapshot as a current
+count or as a price source.
 
 Counts are a point-in-time audit; they change when the Sheet changes.
 
 ## Setup and first sync
 
-1. Apply every SQL file in `supabase/migrations` in filename order. The product
-   sync uses the existing `source_key`, `source_sheet`, and
-   `sheet_stock_quantity` columns; no additional migration is required for this
-   catalogue update.
+1. Check that the existing product-sync migrations were applied. The importer
+   uses `source_key`, `source_sheet`, and `sheet_stock_quantity`. No additional
+   SQL migration is needed for this MMK update; do not blindly rerun all older
+   SQL files against an existing database.
 2. Create a Google Cloud service account with Sheets API access.
 3. Put `GOOGLE_SHEETS_CLIENT_EMAIL` and `GOOGLE_SHEETS_PRIVATE_KEY` in
    `.env.local`. The shared workbook ID is already the default;
@@ -96,10 +100,10 @@ Counts are a point-in-time audit; they change when the Sheet changes.
    deductions back to the Sheet.
 5. Start the app, sign in as an administrator, then open **Admin → Google Sheet
    Sync**.
-6. Run **Dry Run** first. If the Sheet is unchanged from the audit above, it
-   should show 465 products split 16 / 110 / 339 and zero skipped rows.
-7. Review every warning, especially the uniform `1000` price warning. Then run
-   **Sync Products**.
+6. Run **Dry Run** first and check counts against the current workbook, not the
+   older historical snapshot above.
+7. Review every warning, especially pending prices. After approving the prices,
+   run **Sync Products**.
 
 The sync upserts by stable `source_key`, writes the catalogue to Supabase in
 safe batches, and preserves products created manually because they have no

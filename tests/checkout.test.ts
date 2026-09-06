@@ -60,6 +60,7 @@ function user(profileOverrides: Partial<Profile> = {}): CurrentUser {
 
 function approvedWholesaleUser() {
   return user({
+    business_verified_at: "2026-09-03T00:00:00Z",
     role: "wholesale",
     wholesale_status: "approved",
     price_list_id: "list-1",
@@ -119,7 +120,9 @@ const LADDER = [
 const SHIPPING = {
   shipping_name: "Customer",
   shipping_phone: "0812345678",
-  shipping_address: "123 Test Road, Bangkok",
+  shipping_address: "123 Test Road, Yangon",
+  shipping_country: "Myanmar",
+  shipping_state: "Yangon",
 };
 
 beforeEach(() => {
@@ -241,20 +244,35 @@ describe("checkout pricing authority", () => {
       shipping_phone: "+66 81 234 5678",
       shipping_address_line1: "123 Test Road",
       shipping_address_line2: "Unit 4",
-      shipping_city: "Bangkok",
-      shipping_state: "Bangkok",
+      shipping_city: "Yangon",
+      shipping_state: "Yangon",
       shipping_postal_code: "10110",
-      shipping_country: "Thailand",
+      shipping_country: "Myanmar",
       payment_method: "cash_on_delivery",
     });
     expect(checkoutOrderRpc).toHaveBeenCalledWith(expect.objectContaining({
-      shipping_address: "123 Test Road, Unit 4, Bangkok, Bangkok, 10110, Thailand",
+      shipping_address: "123 Test Road, Unit 4, Yangon, Yangon, 10110, Myanmar",
       payment_method: "cash_on_delivery",
     }));
   });
 });
 
 describe("checkout safety", () => {
+  it("rejects foreign destinations before reading the cart", async () => {
+    await expect(createOrder(user(), { ...SHIPPING, shipping_country: "Thailand" })).rejects.toMatchObject({ status: 400 });
+    expect(selectCart).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing country even for a legacy combined address", async () => {
+    await expect(createOrder(user(), { ...SHIPPING, shipping_country: undefined })).rejects.toMatchObject({ status: 400 });
+    expect(checkoutOrderRpc).not.toHaveBeenCalled();
+  });
+
+  it("cannot purchase unpriced products, even from an old cart", async () => {
+    vi.mocked(selectProductsByIdsService).mockResolvedValue([{ ...cartRow().products!, price: 0 }]);
+    await expect(createOrder(user(), SHIPPING)).rejects.toMatchObject({ status: 400 });
+    expect(checkoutOrderRpc).not.toHaveBeenCalled();
+  });
   it("rejects orders that exceed available inventory before calling the RPC", async () => {
     vi.mocked(selectCart).mockResolvedValue([
       cartRow({

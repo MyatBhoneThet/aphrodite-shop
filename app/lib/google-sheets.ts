@@ -14,6 +14,8 @@ type SheetsBatchGetResponse = {
 export type ProductionSheetName = "Laptops" | "Accessories" | "PC Parts";
 
 export type ProductSheetRow = Omit<Product, "id"> & {
+  /** Undefined = legacy sheet: preserve tiers. Null = explicitly not enabled. */
+  sheetWholesale?: { unitPrice: number; minQuantity: number } | null;
   rowNumber: number;
   sourceKey: string;
   sourceSheet: ProductionSheetName;
@@ -35,16 +37,16 @@ const tokenUrl = "https://oauth2.googleapis.com/token";
 // Read-write: checkout writes the reduced quantity back to the workbook.
 const sheetsScope = "https://www.googleapis.com/auth/spreadsheets";
 const DEFAULT_PRODUCTION_SPREADSHEET_ID =
-  "1PVS3wp7UvezKVeb1VL0ifpYMrgxWjpoAq0UXDu-RdXE";
+  "1bQ3SVyRh5CD20JKCX-YWv0M30NdpTCafIfoDEI8NlN4";
 // The production workbook spans several thousand inventory rows across three
 // tabs, so allow enough time for one authenticated batch response.
 const GOOGLE_API_TIMEOUT_MS = 30_000;
 const DEFAULT_PRODUCT_IMAGE = "/products/production-placeholder.svg";
 
 const productionRanges = [
-  { sheet: "Laptops", range: "'Laptops'!A:Q" },
-  { sheet: "Accessories", range: "'Accessories'!A:AK" },
-  { sheet: "PC Parts", range: "'PC Parts'!A:AH" },
+  { sheet: "Laptops", range: "'Laptops'!A:AZ" },
+  { sheet: "Accessories", range: "'Accessories'!A:AZ" },
+  { sheet: "PC Parts", range: "'PC Parts'!A:AZ" },
 ] as const satisfies readonly {
   sheet: ProductionSheetName;
   range: string;
@@ -152,6 +154,8 @@ async function getAccessToken() {
   return data.access_token;
 }
 
+import { normalizeGallery, sheetGallery } from "./product-gallery";
+
 function cleanText(value: unknown) {
   return String(value ?? "")
     .replace(/\u200b/g, "")
@@ -216,19 +220,6 @@ function requireColumn(
   const index = headers.indexOf(header);
   if (index === -1) {
     throw badRequest(`${sheet}: required column "${header}" is missing.`);
-  }
-  return index;
-}
-
-function requireOneOfColumns(
-  headers: string[],
-  sheet: ProductionSheetName,
-  aliases: string[],
-  label: string
-) {
-  const index = headers.findIndex((header) => aliases.includes(header));
-  if (index === -1) {
-    throw badRequest(`${sheet}: required column "${label}" is missing.`);
   }
   return index;
 }
@@ -339,6 +330,16 @@ function detailSpecifications(detail: string, warranty = "") {
   } satisfies Pick<Product, "specs" | "fullSpecs">;
 }
 
+export function readSheetWholesale(headers: string[], cells: unknown[], retail: number): ProductSheetRow["sheetWholesale"] {
+  const index = headers.indexOf("wholesale_price_mmk");
+  if (index < 0) return undefined;
+  const price = parsePrice(cells[index]);
+  const minimum = Number(cells[headers.indexOf("wholesale_min_qty")]);
+  const status = cleanText(cells[headers.indexOf("wholesale_status")]).toLowerCase();
+  if (status !== "enabled" || !price || retail <= 0 || price > retail || !Number.isInteger(price) || price > 2147483647 || !Number.isInteger(minimum) || minimum < 3 || minimum > 10000) return null;
+  return { unitPrice: price, minQuantity: minimum };
+}
+
 function productRow({
   rowNumber,
   sourceKey,
@@ -351,6 +352,7 @@ function productRow({
   stockQuantity,
   specs,
   fullSpecs,
+  sheetWholesale,
 }: {
   rowNumber: number;
   sourceKey: string;
@@ -363,6 +365,7 @@ function productRow({
   stockQuantity: number;
   specs: Product["specs"];
   fullSpecs: Product["fullSpecs"];
+  sheetWholesale?: ProductSheetRow["sheetWholesale"];
 }): ProductSheetRow {
   return {
     rowNumber,
@@ -370,12 +373,13 @@ function productRow({
     rowQuantities: [{ row: rowNumber, quantity: stockQuantity }],
     sourceKey,
     sourceSheet,
+    sheetWholesale,
     name,
     type,
     category,
     brand,
     price,
-    image: DEFAULT_PRODUCT_IMAGE,
+    image: normalizeGallery(fullSpecs.gallery)[0]?.url ?? DEFAULT_PRODUCT_IMAGE,
     stock: stockQuantity > 0 ? "In Stock" : "Out of Stock",
     stockQuantity,
     specs,
@@ -383,16 +387,7 @@ function productRow({
   };
 }
 
-function addSkippedRow(
-  skippedRows: ProductionSkippedRow[],
-  sheet: ProductionSheetName,
-  rowNumber: number,
-  reason: string
-) {
-  skippedRows.push({ sheet, rowNumber, reason });
-}
-
-function parseLaptops(values: unknown[][], skippedRows: ProductionSkippedRow[]) {
+function parseLaptops(values: unknown[][]) {
   const sheet: ProductionSheetName = "Laptops";
   const { headers, index: headerIndex } = findHeaderRow(values, sheet, [
     "pur_no",
@@ -406,12 +401,7 @@ function parseLaptops(values: unknown[][], skippedRows: ProductionSkippedRow[]) 
   const specsIndex = requireColumn(headers, sheet, "specs_detail");
   const warrantyIndex = requireColumn(headers, sheet, "warranty");
   const quantityIndex = requireColumn(headers, sheet, "qty");
-  const priceIndex = requireOneOfColumns(
-    headers,
-    sheet,
-    ["pur_cost", "price"],
-    "Pur Cost"
-  );
+  const retailMmkIndex = requireColumn(headers, sheet, "retail_price_mmk");
   const products: ProductSheetRow[] = [];
 
   values.slice(headerIndex + 1).forEach((cells, offset) => {
@@ -420,16 +410,9 @@ function parseLaptops(values: unknown[][], skippedRows: ProductionSkippedRow[]) 
 
     if (!name) return;
 
-    const price = parsePrice(cells[priceIndex]);
-    if (price === undefined) {
-      addSkippedRow(
-        skippedRows,
-        sheet,
-        rowNumber,
-        "missing or invalid Pur Cost"
-      );
-      return;
-    }
+    // An explicit MMK column is authoritative. Blank/invalid means awaiting
+    // pricing, NOT fallback to placeholder costs and NOT a free product.
+    const price = parsePrice(cells[retailMmkIndex]) ?? 0;
 
     const brand = cleanText(cells[brandIndex]) || "Unknown";
     const modelNumber = cleanText(cells[modelNumberIndex]);
@@ -437,6 +420,7 @@ function parseLaptops(values: unknown[][], skippedRows: ProductionSkippedRow[]) 
     const warranty = cleanText(cells[warrantyIndex]);
     const stockQuantity = parseQuantity(cells[quantityIndex]);
     const { specs, fullSpecs } = laptopSpecifications(detail, warranty);
+    Object.assign(fullSpecs, { gallery: sheetGallery(headers, cells), photoSource: cleanText(cells[headers.indexOf("photo_source_url")]) });
 
     products.push(
       productRow({
@@ -444,6 +428,7 @@ function parseLaptops(values: unknown[][], skippedRows: ProductionSkippedRow[]) 
         sourceKey: createSourceKey(sheet, [brand, modelNumber || name]),
         sourceSheet: sheet,
         name,
+        sheetWholesale: readSheetWholesale(headers, cells, price),
         type: "laptop",
         category: "Laptop",
         brand,
@@ -460,8 +445,7 @@ function parseLaptops(values: unknown[][], skippedRows: ProductionSkippedRow[]) 
 
 function parseInventorySheet(
   values: unknown[][],
-  sheet: "Accessories" | "PC Parts",
-  skippedRows: ProductionSkippedRow[]
+  sheet: "Accessories" | "PC Parts"
 ) {
   const requiredHeaders =
     sheet === "Accessories"
@@ -473,6 +457,7 @@ function parseInventorySheet(
     requiredHeaders
   );
   const categoryIndex = requireColumn(headers, sheet, "category");
+  const retailMmkIndex = requireColumn(headers, sheet, "retail_price_mmk");
   const brandIndex = requireColumn(headers, sheet, "brand");
   const nameIndex = requireColumn(
     headers,
@@ -487,31 +472,6 @@ function parseInventorySheet(
     sheet === "Accessories" ? requireColumn(headers, sheet, "specs") : undefined;
   const warrantyIndex =
     sheet === "Accessories" ? requireColumn(headers, sheet, "warranty") : undefined;
-  const openingCostIndex = requireInventoryColumn({
-    values,
-    headerIndex,
-    headers,
-    sheet,
-    directAliases: [
-      "openingpur_cost",
-      "openingunit_cost",
-      "opening_pur_cost",
-      "opening_unit_cost",
-    ],
-    groupPrefixes: ["opening_inv", "opening_inventory"],
-    subheaderAliases: ["pur_cost", "unit_cost"],
-    label: "Opening Pur/Unit Cost",
-  });
-  const purchaseCostIndex = requireInventoryColumn({
-    values,
-    headerIndex,
-    headers,
-    sheet,
-    directAliases: ["purchaseunit_cost", "purchase_unit_cost"],
-    groupPrefixes: ["pur_of", "purchase_of", "purchases"],
-    subheaderAliases: ["pur_cost", "unit_cost"],
-    label: "Purchase Unit Cost",
-  });
   const closingQuantityIndex = requireInventoryColumn({
     values,
     headerIndex,
@@ -521,16 +481,6 @@ function parseInventorySheet(
     groupPrefixes: ["closing_inv", "closing_inventory"],
     subheaderAliases: ["qty", "quantity"],
     label: "Closing Qty",
-  });
-  const closingCostIndex = requireInventoryColumn({
-    values,
-    headerIndex,
-    headers,
-    sheet,
-    directAliases: ["closingunit_cost", "closing_unit_cost"],
-    groupPrefixes: ["closing_inv", "closing_inventory"],
-    subheaderAliases: ["pur_cost", "unit_cost"],
-    label: "Closing Unit Cost",
   });
   const products: ProductSheetRow[] = [];
 
@@ -543,20 +493,7 @@ function parseInventorySheet(
 
     if (!name) return;
 
-    const closingUnitCost = parsePrice(cells[closingCostIndex]);
-    const purchaseUnitCost = parsePrice(cells[purchaseCostIndex]);
-    const openingUnitCost = parsePrice(cells[openingCostIndex]);
-    const price = closingUnitCost ?? purchaseUnitCost ?? openingUnitCost;
-
-    if (price === undefined) {
-      addSkippedRow(
-        skippedRows,
-        sheet,
-        rowNumber,
-        "missing or invalid inventory unit cost"
-      );
-      return;
-    }
+    const price = parsePrice(cells[retailMmkIndex]) ?? 0;
 
     const brand = cleanText(cells[brandIndex]) || "Unknown";
     const category = cleanText(cells[categoryIndex]) || sheet;
@@ -570,6 +507,7 @@ function parseInventorySheet(
       warrantyIndex === undefined ? "" : cleanText(cells[warrantyIndex]);
     const stockQuantity = parseQuantity(cells[closingQuantityIndex]);
     const { specs, fullSpecs } = detailSpecifications(detail, warranty);
+    Object.assign(fullSpecs, { gallery: sheetGallery(headers, cells), photoSource: cleanText(cells[headers.indexOf("photo_source_url")]) });
 
     products.push(
       productRow({
@@ -581,6 +519,7 @@ function parseInventorySheet(
         ]),
         sourceSheet: sheet,
         name,
+        sheetWholesale: readSheetWholesale(headers, cells, price),
         type: "accessory",
         category,
         brand,
@@ -612,6 +551,8 @@ function mergeProductRows(rows: ProductSheetRow[]) {
       (current.stockQuantity ?? 0) + (row.stockQuantity ?? 0);
     current.stock = current.stockQuantity > 0 ? "In Stock" : "Out of Stock";
     current.price = Math.max(current.price, row.price);
+    // Conflicting duplicate-row terms are not silently combined into a deal.
+    if (JSON.stringify(current.sheetWholesale) !== JSON.stringify(row.sheetWholesale)) current.sheetWholesale = null;
 
     if ((row.specs.detail?.length ?? 0) > (current.specs.detail?.length ?? 0)) {
       current.specs = row.specs;
@@ -626,13 +567,12 @@ function mergeProductRows(rows: ProductSheetRow[]) {
 
 export function parseProductionSheets(values: ProductionSheetsValues) {
   const skippedRows: ProductionSkippedRow[] = [];
-  const laptops = parseLaptops(values.Laptops, skippedRows);
+  const laptops = parseLaptops(values.Laptops);
   const accessories = parseInventorySheet(
     values.Accessories,
-    "Accessories",
-    skippedRows
+    "Accessories"
   );
-  const pcParts = parseInventorySheet(values["PC Parts"], "PC Parts", skippedRows);
+  const pcParts = parseInventorySheet(values["PC Parts"], "PC Parts");
   const sourceProducts = [
     ...laptops.products,
     ...accessories.products,
@@ -648,8 +588,9 @@ export function parseProductionSheets(values: ProductionSheetsValues) {
     (product) => product.brand === "Unknown"
   ).length;
   const distinctPrices = new Set(products.map((product) => product.price));
+  const pendingPrices = products.filter((product) => product.price <= 0).length;
   const warnings = [
-    "Storefront price is sourced from production Pur Cost/Unit Cost because the workbook has no separate retail-price column.",
+    ...(pendingPrices ? [`${pendingPrices} products have no positive Retail Price MMK. They will show Price pending and cannot be purchased until priced.`] : []),
     "Products without image data use the production placeholder; later manual image edits are preserved by sync.",
     ...(unknownBrandCount
       ? [`${unknownBrandCount} products have no production brand and use \"Unknown\".`]
@@ -674,6 +615,8 @@ export function parseProductionSheets(values: ProductionSheetsValues) {
         sheet,
         products: products.filter((product) => product.sourceSheet === sheet)
           .length,
+        priced: products.filter(product => product.sourceSheet === sheet && product.price > 0).length,
+        pendingPrices: products.filter(product => product.sourceSheet === sheet && product.price <= 0).length,
       })),
     },
   };

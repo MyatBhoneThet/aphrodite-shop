@@ -60,7 +60,7 @@ export default function ProductFilters({
         <div className="border-t border-zinc-200 px-6 py-6">
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
             <label className="text-sm font-semibold">
-              Minimum price (฿)
+              Minimum price (MMK)
               <input
                 className={`${fieldClassName} mt-2`}
                 type="number"
@@ -73,7 +73,7 @@ export default function ProductFilters({
             </label>
 
             <label className="text-sm font-semibold">
-              Maximum price (฿)
+              Maximum price (MMK)
               <input
                 className={`${fieldClassName} mt-2`}
                 type="number"

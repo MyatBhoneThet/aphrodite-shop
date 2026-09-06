@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { codReviewError } from "./cod-verification";
+import { reviewOrderDeliveryRpc } from "./supabase";
+import { isApproximatelyInMyanmar, isMyanmarCountry, normalizeMyanmarRegion } from "./delivery-country";
 import type { Product } from "../data/products";
 import {
   checkoutOrderRpc,
@@ -12,8 +16,10 @@ import {
   deleteWishlistItem,
   ensureSupportConversation,
   insertAuditLog,
+  insertDeliveryEvent,
   insertPriceList,
   insertProduct,
+  insertReturnEvidence,
   insertSupportMessage,
   setSheetStockBaselines,
   insertTier,
@@ -29,6 +35,7 @@ import {
   selectAuditLog,
   selectCart,
   selectOrderById,
+  selectReturnEvidenceById,
   selectOrderItemStats,
   selectOrderStats,
   selectOrders,
@@ -51,6 +58,7 @@ import {
   selectWishlist,
   updateCartItem,
   updateOrderStatus,
+  updateOrderDeliveryService,
   updatePriceList,
   updateProduct,
   updateCustomerSettingsService,
@@ -60,6 +68,10 @@ import {
   updateUserPassword,
   upsertCartItem,
   upsertRecentlyViewedProduct,
+  uploadReturnEvidenceObject,
+  createReturnEvidenceSignedUrl,
+  type CodVerificationStatus,
+  type DeliveryEventStage,
   type CartItemRow,
   type CustomerSettingsFields,
   type CurrentUser,
@@ -71,6 +83,7 @@ import {
   type ProductRow,
   type RefundMethod,
   type ReturnPickupMethod,
+  type ReturnEvidenceKind,
   type ReturnReasonCode,
   type SupportConversationRow,
   type SupportConversationStatus,
@@ -281,6 +294,14 @@ function orderResponse(order: OrderRow) {
       product: item.products ? productDTO(mapProductRow(item.products), null) : null,
       products: undefined,
     })),
+    delivery_events: [...(order.delivery_events ?? [])].sort(
+      (left, right) =>
+        new Date(left.happened_at).getTime() - new Date(right.happened_at).getTime()
+    ),
+    return_evidence: [...(order.return_evidence ?? [])].sort(
+      (left, right) =>
+        new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+    ),
   };
 }
 
@@ -312,7 +333,7 @@ function customerSettingsResponse(
     shipping_city: profile.shipping_city ?? "",
     shipping_state: profile.shipping_state ?? "",
     shipping_postal_code: profile.shipping_postal_code ?? "",
-    shipping_country: profile.shipping_country ?? "Thailand",
+    shipping_country: profile.shipping_country ?? "Myanmar",
     preferred_language: profile.preferred_language ?? "en",
     order_updates_enabled: profile.order_updates_enabled ?? true,
     support_updates_enabled: profile.support_updates_enabled ?? true,
@@ -713,6 +734,10 @@ export async function addCartItem(
     throw notFound("Product not found.");
   }
 
+  if (!Number.isFinite(productRow.price) || productRow.price <= 0) {
+    throw badRequest("This product is awaiting a confirmed MMK price. Please contact support.");
+  }
+
   const available = availableStock(productRow);
 
   if (available <= 0) {
@@ -836,6 +861,15 @@ export async function createOrder(
     shipping_country?: string;
     payment_method?: "cash_on_delivery";
     notes?: string | null;
+    cod_confirmation?: true;
+    cod_contact_confirmation?: true;
+    delivery_location_consent?: boolean;
+    delivery_location?: {
+      latitude: number;
+      longitude: number;
+      accuracy_m: number | null;
+      captured_at: string;
+    } | null;
     /** The total the client last saw. Used ONLY to detect price drift
      *  between the cart view and checkout; never to set prices. */
     expected_total?: number;
@@ -845,9 +879,15 @@ export async function createOrder(
     body.shipping_address_line1?.trim() || body.shipping_address?.trim() || "";
   const shippingAddressLine2 = body.shipping_address_line2?.trim() || null;
   const shippingCity = body.shipping_city?.trim() || "";
-  const shippingState = body.shipping_state?.trim() || "";
+  const shippingState = normalizeMyanmarRegion(body.shipping_state);
   const shippingPostalCode = body.shipping_postal_code?.trim() || "";
-  const shippingCountry = body.shipping_country?.trim() || "";
+  if (!isMyanmarCountry(body.shipping_country) || !shippingState) {
+    throw badRequest("We currently deliver within Myanmar only. Select a Myanmar state or region and enter the recipient’s complete address.");
+  }
+  const shippingCountry = "Myanmar";
+  if (body.delivery_location && (!body.delivery_location_consent || !isApproximatelyInMyanmar(body.delivery_location.latitude, body.delivery_location.longitude))) {
+    throw badRequest("A delivery pin needs your consent and must be in Myanmar. Remove an incorrect pin and ask staff to verify your written address.");
+  }
   const shippingAddress =
     body.shipping_address?.trim() ||
     [
@@ -886,6 +926,10 @@ export async function createOrder(
 
     if (!product) {
       throw badRequest("Cart contains an unavailable product.");
+    }
+
+    if (!Number.isFinite(product.price) || product.price <= 0) {
+      throw badRequest(`${product.name} is awaiting a confirmed MMK price. Remove it from the cart or contact support.`);
     }
 
     const available = availableStock(product);
@@ -948,6 +992,43 @@ export async function createOrder(
     });
   } catch (error) {
     throw mapCheckoutError(error, cart);
+  }
+
+  // Geolocation is optional and collected only after an explicit checkout
+  // action. It helps a courier find the address; it is not identity proof and
+  // is never used as the sole COD approval signal.
+  try {
+    const location =
+      body.delivery_location_consent && body.delivery_location
+        ? body.delivery_location
+        : null;
+    await updateOrderDeliveryService(result.order_id, {
+      cod_verification_status: "pending",
+      delivery_location_consent: Boolean(location),
+      delivery_latitude: location?.latitude ?? null,
+      delivery_longitude: location?.longitude ?? null,
+      delivery_accuracy_m: location?.accuracy_m != null ? Math.round(location.accuracy_m) : null,
+      delivery_location_captured_at: location?.captured_at ?? null,
+      delivery_last_event_at: new Date().toISOString(),
+      delivery_status_detail: location
+        ? "Order received; customer-selected delivery pin supplied. COD verification is pending."
+        : "Order received; confirm the written address by phone. No delivery pin supplied. COD verification is pending.",
+    });
+    await insertDeliveryEvent({
+      order_id: result.order_id,
+      stage: "order_placed",
+      title: "Order received",
+      description: "Your cash-on-delivery order is waiting for verification.",
+      created_by: user.id,
+    });
+  } catch (error) {
+    // Do not create a duplicate order by reporting checkout failure after the
+    // transaction already committed. The migration/setup guide explains how
+    // to enable these optional tracking fields.
+    console.error("[orders] delivery metadata setup is incomplete", {
+      order_id: result.order_id,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 
   // The order is committed; mirror the deduction into the production
@@ -1024,6 +1105,19 @@ export async function createOrder(
         shipping_country: shippingCountry,
         payment_method: "cash_on_delivery",
         payment_status: "unpaid",
+        cod_verification_status: "pending",
+        cod_verification_method: null,
+        cod_verified_at: null,
+        delivery_latitude: body.delivery_location?.latitude ?? null,
+        delivery_longitude: body.delivery_location?.longitude ?? null,
+        delivery_accuracy_m: body.delivery_location?.accuracy_m ?? null,
+        delivery_location_consent: Boolean(body.delivery_location_consent),
+        delivery_location_captured_at: body.delivery_location?.captured_at ?? null,
+        courier_name: null,
+        delivery_tracking_number: null,
+        estimated_delivery_at: null,
+        delivery_status_detail: "Order received; COD verification is pending.",
+        delivery_last_event_at: new Date().toISOString(),
         cancellation_request_status: "none",
         cancellation_reason: null,
         cancellation_requested_at: null,
@@ -1041,6 +1135,9 @@ export async function createOrder(
 }
 
 function mapCheckoutError(error: unknown, cart: CartItemRow[]) {
+  if (error instanceof Error && error.message.includes("COD_OPEN_LIMIT")) {
+    return conflict("You already have 3 pending COD orders. Contact support or cancel an accidental duplicate before placing another.");
+  }
   const message = error instanceof Error ? error.message : "";
 
   if (
@@ -1105,6 +1202,7 @@ export async function adminListWholesaleAccounts(
 async function resolveDefaultPriceListId(user: CurrentUser) {
   const lists = await selectPriceLists(user.accessToken);
   const standard =
+    lists.find((list) => list.name === "Sheet B2B (MMK)" && list.is_active) ??
     lists.find((list) => list.name === "Standard Wholesale" && list.is_active) ??
     lists.find((list) => list.is_active);
 
@@ -1121,7 +1219,7 @@ export async function adminUpdateWholesaleAccount(
   user: CurrentUser,
   targetUserId: string,
   update:
-    | { action: "grant"; price_list_id?: string | null }
+    | { action: "grant"; price_list_id?: string | null; business_name: string; business_review_note: string; business_verified: true }
     | { action: "revoke" }
     | { action: "suspend" }
     | { action: "reactivate" }
@@ -1136,6 +1234,9 @@ export async function adminUpdateWholesaleAccount(
   }
 
   if (update.action === "grant") {
+    if (!update.business_verified || update.business_name.trim().length < 2 || update.business_review_note.trim().length < 10) {
+      throw badRequest("Verify the business name, business contact and reseller purpose before granting B2B access.");
+    }
     // Four-eyes guard: an admin must not grant wholesale to their own
     // account, and admin accounts stay admin accounts.
     if (targetUserId === user.id) {
@@ -1146,7 +1247,7 @@ export async function adminUpdateWholesaleAccount(
       throw conflict("Admin accounts cannot be converted to wholesale.");
     }
 
-    if (profile.wholesale_status !== "not_applied") {
+    if (profile.wholesale_status !== "not_applied" && profile.business_verified_at) {
       throw conflict("This account already has wholesale access.");
     }
 
@@ -1158,6 +1259,7 @@ export async function adminUpdateWholesaleAccount(
       if (!priceList) {
         throw notFound("Price list not found.");
       }
+      if (!priceList.is_active) throw badRequest("Choose an active price list.");
     } else {
       priceListId = await resolveDefaultPriceListId(user);
     }
@@ -1166,6 +1268,8 @@ export async function adminUpdateWholesaleAccount(
       role: "wholesale",
       wholesale_status: "approved",
       price_list_id: priceListId,
+      business_name: update.business_name.trim(),
+      business_verified_at: new Date().toISOString(),
     });
 
     await insertAuditLog({
@@ -1182,6 +1286,8 @@ export async function adminUpdateWholesaleAccount(
         role: "wholesale",
         wholesale_status: "approved",
         price_list_id: priceListId,
+        business_name: update.business_name.trim(),
+        business_review_note: update.business_review_note.trim(),
       },
     });
 
@@ -1197,6 +1303,7 @@ export async function adminUpdateWholesaleAccount(
       role: profile.role === "admin" ? "admin" : "normal",
       wholesale_status: "not_applied",
       price_list_id: null,
+      business_verified_at: null,
     });
 
     await insertAuditLog({
@@ -1241,6 +1348,7 @@ export async function adminUpdateWholesaleAccount(
   }
 
   if (update.action === "reactivate") {
+    if (!profile.business_verified_at) throw conflict("Verify this business again before reactivating B2B access.");
     if (profile.wholesale_status !== "suspended") {
       throw conflict("Only a suspended wholesale account can be reactivated.");
     }
@@ -1556,6 +1664,13 @@ export async function patchOrderStatus(
 
   if (status === existing.status) return orderResponse(existing);
 
+  if (existing.cod_verification_status !== "approved") {
+    throw conflict("Open COD & delivery details, confirm the phone callback and address, and approve COD before fulfilment.");
+  }
+  if (["shipped", "delivered"].includes(status) && (!existing.courier_name || !existing.delivery_tracking_number)) {
+    throw conflict("Save the courier and tracking/reference number before shipping.");
+  }
+
   const now = new Date().toISOString();
   const receiptNumber =
     status === "confirmed"
@@ -1610,6 +1725,8 @@ export async function requestOrderAction(
         reason_code: ReturnReasonCode;
         pickup_method: ReturnPickupMethod;
         pickup_address?: string | null;
+        evidence_url?: string | null;
+        evidence_attestation: true;
       }
 ) {
   const existing = await selectOrderById(user, id);
@@ -1631,6 +1748,19 @@ export async function requestOrderAction(
     });
   } catch (error) {
     throw mapOrderLifecycleError(error);
+  }
+
+  if (input.action === "request_return" && input.evidence_url) {
+    await insertReturnEvidence({
+      order_id: id,
+      uploaded_by: user.id,
+      evidence_kind:
+        input.reason_code === "damaged_in_transit" || input.reason_code === "defective"
+          ? "unboxing_video"
+          : "other",
+      external_url: input.evidence_url,
+      file_name: "Customer evidence link",
+    });
   }
 
   const updated = await selectOrderById(user, id);
@@ -1731,6 +1861,101 @@ export async function advanceReturnWorkflow(
 
   const updated = await selectOrderById(user, id);
   return updated ? orderResponse(updated) : null;
+}
+
+export async function updateOrderDelivery(
+  user: CurrentUser,
+  id: string,
+  input: {
+    verification_status: CodVerificationStatus;
+    callback_confirmed: boolean;
+    address_confirmed: boolean;
+    verification_note?: string | null;
+    verification_method?: "phone_callback" | "cod_deposit" | "admin_review" | null;
+    courier_name?: string | null;
+    tracking_number?: string | null;
+    estimated_delivery_at?: string | null;
+    stage?: DeliveryEventStage | null;
+    event_title?: string | null;
+    event_description?: string | null;
+    event_location?: string | null;
+  }
+) {
+  requireAdmin(user);
+  const existing = await selectOrderById(user, id);
+  if (!existing) return null;
+  if (existing.status === "cancelled" || existing.status === "returned") {
+    throw conflict("Delivery details cannot be changed for a closed order.");
+  }
+
+  const problem = codReviewError(input);
+  if (problem) throw badRequest(problem);
+  // One transaction: row lock, staff evidence, order fields, event and audit.
+  await reviewOrderDeliveryRpc(user.id, id, input);
+
+  const updated = await selectOrderById(user, id);
+  return updated ? orderResponse(updated) : null;
+}
+
+const RETURN_EVIDENCE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "video/mp4",
+  "video/quicktime",
+]);
+const MAX_RETURN_EVIDENCE_BYTES = 25 * 1024 * 1024;
+
+export async function addReturnEvidence(
+  user: CurrentUser,
+  orderId: string,
+  file: File,
+  evidenceKind: ReturnEvidenceKind
+) {
+  const order = await selectOrderById(user, orderId);
+  if (!order) throw notFound("Order not found.");
+  if (order.status !== "delivered" || !order.delivered_at) {
+    throw conflict("Evidence can be uploaded after the order is delivered.");
+  }
+  if (Date.now() > new Date(order.delivered_at).getTime() + 7 * 24 * 60 * 60 * 1000) {
+    throw conflict("The 7-day online return request window has expired.");
+  }
+  if (!RETURN_EVIDENCE_TYPES.has(file.type)) {
+    throw badRequest("Upload a JPG, PNG, WebP, MP4, or MOV file.");
+  }
+  if (file.size <= 0 || file.size > MAX_RETURN_EVIDENCE_BYTES) {
+    throw badRequest("Each evidence file must be 25 MB or smaller. Use a secure HTTPS link for a longer video.");
+  }
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(-120) || "evidence";
+  const storagePath = `${user.id}/${orderId}/${randomUUID()}-${safeName}`;
+  await uploadReturnEvidenceObject(storagePath, await file.arrayBuffer(), file.type);
+  return insertReturnEvidence({
+    order_id: orderId,
+    uploaded_by: user.id,
+    evidence_kind: evidenceKind,
+    storage_path: storagePath,
+    file_name: file.name.slice(0, 200),
+    content_type: file.type,
+    size_bytes: file.size,
+  });
+}
+
+export async function getReturnEvidenceUrl(
+  user: CurrentUser,
+  orderId: string,
+  evidenceId: string
+) {
+  const [order, evidence] = await Promise.all([
+    selectOrderById(user, orderId),
+    selectReturnEvidenceById(evidenceId),
+  ]);
+  if (!order || !evidence || evidence.order_id !== order.id) {
+    throw notFound("Evidence not found.");
+  }
+  if (evidence.external_url) return evidence.external_url;
+  if (!evidence.storage_path) throw notFound("Evidence file is missing.");
+  return createReturnEvidenceSignedUrl(evidence.storage_path);
 }
 
 export async function resolveOrderRequest(

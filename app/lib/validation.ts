@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isApproximatelyInMyanmar, isMyanmarCountry, normalizeMyanmarRegion } from "./delivery-country";
 
 const productJsonSchema = z.record(z.string(), z.unknown());
 
@@ -77,16 +78,47 @@ export const orderInputSchema = z
     shipping_address_line1: z.string().trim().min(3).max(300).optional(),
     shipping_address_line2: z.string().trim().max(300).optional().nullable(),
     shipping_city: z.string().trim().min(2).max(120).optional(),
-    shipping_state: z.string().trim().min(2).max(120).optional(),
+    shipping_state: z.string().trim().refine((value) => Boolean(normalizeMyanmarRegion(value)), "Select a Myanmar state or region.").transform((value) => normalizeMyanmarRegion(value)!),
     shipping_postal_code: z.string().trim().min(2).max(20).optional(),
-    shipping_country: z.string().trim().min(2).max(120).optional(),
+    shipping_country: z.string().trim().refine(isMyanmarCountry, "We currently deliver within Myanmar only.").transform(() => "Myanmar"),
     payment_method: z.literal("cash_on_delivery").default("cash_on_delivery"),
+    cod_confirmation: z.literal(true, {
+      error: "Confirm that the delivery address and recipient are correct.",
+    }),
+    cod_contact_confirmation: z.literal(true, {
+      error: "Confirm that the recipient can answer the verification call.",
+    }),
+    delivery_location_consent: z.boolean().optional().default(false),
+    delivery_location: z
+      .object({
+        latitude: z.number().min(-90).max(90),
+        longitude: z.number().min(-180).max(180),
+        accuracy_m: z.number().nonnegative().max(100000).nullable(),
+        captured_at: z.string().datetime({ offset: true }),
+      })
+      .optional()
+      .nullable(),
     notes: z.string().trim().max(1000).optional().nullable(),
     // The total the client last displayed. Used only to detect price drift
     // (409 response); the authoritative total is always recomputed server-side.
     expected_total: z.number().int().nonnegative().optional(),
   })
   .superRefine((value, context) => {
+    if (value.delivery_location && !isApproximatelyInMyanmar(value.delivery_location.latitude, value.delivery_location.longitude)) {
+      context.addIssue({
+        code: "custom",
+        path: ["delivery_location"],
+        message: "This pin appears outside Myanmar. Select the recipient’s Myanmar location, or remove the pin and request written-address verification.",
+      });
+    }
+    if (value.delivery_location && !value.delivery_location_consent) {
+      context.addIssue({
+        code: "custom",
+        path: ["delivery_location_consent"],
+        message: "Location coordinates require the customer's consent.",
+      });
+    }
+
     if (value.shipping_address) return;
 
     const requiredStructuredFields = [
@@ -115,6 +147,9 @@ export const wholesaleAccountUpdateSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("grant"),
     price_list_id: z.string().uuid().optional().nullable(),
+    business_name: z.string().trim().min(2).max(160),
+    business_review_note: z.string().trim().min(10).max(500),
+    business_verified: z.literal(true),
   }),
   z.object({ action: z.literal("revoke") }),
   z.object({ action: z.literal("suspend") }),
@@ -187,6 +222,8 @@ export const customerOrderActionSchema = z.union([
     reason_code: returnReasonCode,
     pickup_method: z.literal("store_dropoff"),
     pickup_address: z.string().trim().max(500).optional().nullable(),
+    evidence_url: z.string().trim().url().max(1000).optional().nullable(),
+    evidence_attestation: z.literal(true),
   }),
   z.object({
     action: z.literal("request_return"),
@@ -198,6 +235,8 @@ export const customerOrderActionSchema = z.union([
       .trim()
       .min(5, "Enter the address where the courier should collect the item.")
       .max(500),
+    evidence_url: z.string().trim().url().max(1000).optional().nullable(),
+    evidence_attestation: z.literal(true),
   }),
 ]);
 
@@ -253,12 +292,60 @@ export const adminReturnWorkflowSchema = z.union([
   }),
 ]);
 
+export const adminDeliveryUpdateSchema = z
+  .object({
+    action: z.literal("update_delivery"),
+    callback_confirmed: z.boolean().default(false),
+    address_confirmed: z.boolean().default(false),
+    verification_note: z.string().trim().max(500).optional().nullable(),
+    verification_status: z.enum([
+      "pending",
+      "phone_verified",
+      "deposit_verified",
+      "approved",
+      "rejected",
+    ]),
+    verification_method: z
+      .enum(["phone_callback", "cod_deposit", "admin_review"])
+      .optional()
+      .nullable(),
+    courier_name: z.string().trim().max(120).optional().nullable(),
+    tracking_number: z.string().trim().max(120).optional().nullable(),
+    estimated_delivery_at: z.string().datetime({ offset: true }).optional().nullable(),
+    stage: z
+      .enum([
+        "verification_pending",
+        "verified",
+        "packed",
+        "handed_to_courier",
+        "in_transit",
+        "out_for_delivery",
+        "delivered",
+        "delivery_failed",
+      ])
+      .optional()
+      .nullable(),
+    event_title: z.string().trim().min(2).max(120).optional().nullable(),
+    event_description: z.string().trim().max(500).optional().nullable(),
+    event_location: z.string().trim().max(200).optional().nullable(),
+  })
+  .superRefine((value, context) => {
+    if (value.stage && !value.event_title) {
+      context.addIssue({
+        code: "custom",
+        path: ["event_title"],
+        message: "Add a customer-facing title for the delivery event.",
+      });
+    }
+  });
+
 export const orderMutationSchema = z.union([
   orderStatusSchema,
   customerOrderActionSchema,
   adminOrderResolutionSchema,
   adminOrderCancellationSchema,
   adminReturnWorkflowSchema,
+  adminDeliveryUpdateSchema,
 ]);
 
 export const supportMessageSchema = z.object({

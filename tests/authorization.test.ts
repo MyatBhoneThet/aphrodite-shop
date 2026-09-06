@@ -45,6 +45,7 @@ function profile(overrides: Partial<Profile> = {}): Profile {
     wholesale_status: "not_applied",
     price_list_id: null,
     phone: null,
+    business_verified_at: "2026-09-03T00:00:00Z",
     ...overrides,
   };
 }
@@ -56,6 +57,7 @@ function makeUser(overrides: Partial<Profile> = {}): CurrentUser {
 }
 
 const admin = () => makeUser({ id: "admin-1", role: "admin" });
+const business = { business_name: "Test reseller", business_review_note: "Called shop and verified business address and reseller purpose.", business_verified: true as const };
 
 beforeEach(() => {
   vi.mocked(selectProfileByIdService).mockReset().mockResolvedValue(profile());
@@ -96,7 +98,7 @@ describe("admin-only operations", () => {
 
   it("a non-admin cannot grant wholesale access", async () => {
     await expect(
-      adminUpdateWholesaleAccount(makeUser(), "user-2", { action: "grant" })
+      adminUpdateWholesaleAccount(makeUser(), "user-2", { action: "grant", ...business })
     ).rejects.toMatchObject({ status: 403 });
     expect(updateProfileWholesaleService).not.toHaveBeenCalled();
   });
@@ -122,7 +124,7 @@ describe("admin-only operations", () => {
 
   it("an admin cannot grant wholesale to their own account", async () => {
     await expect(
-      adminUpdateWholesaleAccount(admin(), "admin-1", { action: "grant" })
+      adminUpdateWholesaleAccount(admin(), "admin-1", { action: "grant", ...business })
     ).rejects.toMatchObject({ status: 403 });
     expect(updateProfileWholesaleService).not.toHaveBeenCalled();
   });
@@ -133,7 +135,7 @@ describe("admin-only operations", () => {
     );
 
     await expect(
-      adminUpdateWholesaleAccount(admin(), "admin-2", { action: "grant" })
+      adminUpdateWholesaleAccount(admin(), "admin-2", { action: "grant", ...business })
     ).rejects.toMatchObject({ status: 409 });
     expect(updateProfileWholesaleService).not.toHaveBeenCalled();
   });
@@ -141,6 +143,7 @@ describe("admin-only operations", () => {
   it("granting updates the profile and the audit log", async () => {
     await adminUpdateWholesaleAccount(admin(), "user-1", {
       action: "grant",
+      ...business,
       price_list_id: "list-1",
     });
 
@@ -148,6 +151,8 @@ describe("admin-only operations", () => {
       role: "wholesale",
       wholesale_status: "approved",
       price_list_id: "list-1",
+      business_name: business.business_name,
+      business_verified_at: expect.any(String),
     });
     expect(insertAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -163,7 +168,7 @@ describe("admin-only operations", () => {
     );
 
     await expect(
-      adminUpdateWholesaleAccount(admin(), "user-1", { action: "grant" })
+      adminUpdateWholesaleAccount(admin(), "user-1", { action: "grant", ...business })
     ).rejects.toMatchObject({ status: 409 });
     expect(updateProfileWholesaleService).not.toHaveBeenCalled();
   });
@@ -179,6 +184,7 @@ describe("admin-only operations", () => {
       role: "normal",
       wholesale_status: "not_applied",
       price_list_id: null,
+      business_verified_at: null,
     });
     expect(insertAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({ action: "wholesale.account.revoke" })
@@ -219,7 +225,7 @@ describe("admin-only operations", () => {
     // The only wholesale mutation in the API surface is the admin accounts
     // endpoint; a normal user calling it gets 403 before any write happens.
     await expect(
-      adminUpdateWholesaleAccount(makeUser(), "user-1", { action: "grant" })
+      adminUpdateWholesaleAccount(makeUser(), "user-1", { action: "grant", ...business })
     ).rejects.toMatchObject({ status: 403 });
     expect(updateProfileWholesaleService).not.toHaveBeenCalled();
     expect(insertAuditLog).not.toHaveBeenCalled();

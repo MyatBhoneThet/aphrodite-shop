@@ -11,6 +11,8 @@ type RequestStatus = "none" | "requested" | "approved" | "pickup_scheduled" | "r
 type OrderStatus = "pending" | "confirmed" | "shipped" | "delivered" | "cancelled" | "returned";
 type ReturnReason = "defective" | "wrong_item" | "wrong_color" | "wrong_storage" | "damaged_in_transit" | "other";
 type PickupMethod = "courier_pickup" | "store_dropoff";
+type DeliveryEvent = { id: string; stage: string; title: string; description?: string | null; happened_at: string };
+type ReturnEvidence = { id: string; evidence_kind: string; file_name?: string | null; created_at: string };
 
 type Order = {
   id: string;
@@ -35,12 +37,19 @@ type Order = {
   delivered_at?: string | null;
   receipt_number?: string | null;
   admin_order_note: string | null;
+  cod_verification_status?: string | null;
+  courier_name?: string | null;
+  delivery_tracking_number?: string | null;
+  estimated_delivery_at?: string | null;
+  delivery_status_detail?: string | null;
+  delivery_events?: DeliveryEvent[];
+  return_evidence?: ReturnEvidence[];
   created_at: string;
   order_items?: { id: string; product_id: number; quantity: number; unit_price: number; product?: { name: string } | null }[];
 };
 
-type ReturnForm = { reason: string; reasonCode: ReturnReason; pickupMethod: PickupMethod; pickupAddress: string };
-const EMPTY_RETURN_FORM: ReturnForm = { reason: "", reasonCode: "defective", pickupMethod: "courier_pickup", pickupAddress: "" };
+type ReturnForm = { reason: string; reasonCode: ReturnReason; pickupMethod: PickupMethod; pickupAddress: string; evidenceUrl: string; evidenceFiles: File[]; evidenceAttestation: boolean };
+const EMPTY_RETURN_FORM: ReturnForm = { reason: "", reasonCode: "defective", pickupMethod: "courier_pickup", pickupAddress: "", evidenceUrl: "", evidenceFiles: [], evidenceAttestation: false };
 
 const statusStyles: Record<OrderStatus, string> = {
   pending: "bg-amber-100 text-amber-800",
@@ -120,12 +129,32 @@ export default function OrdersPage() {
     const form = returnForm(order.id);
     if (form.reason.trim().length < 3) { setError("Please describe what is wrong with the item."); return; }
     if (form.pickupMethod === "courier_pickup" && form.pickupAddress.trim().length < 5) { setError("Enter the address where the courier should collect the item."); return; }
+    if (!form.evidenceAttestation) { setError("Confirm that the return details and evidence are truthful."); return; }
+    if (form.evidenceFiles.length === 0 && !form.evidenceUrl.trim().startsWith("https://")) { setError("Upload at least one photo/video or provide a secure HTTPS evidence link."); return; }
+
+    setProcessingOrderId(order.id);
+    try {
+      for (const file of form.evidenceFiles) {
+        const upload = new FormData();
+        upload.set("file", file);
+        upload.set("evidence_kind", file.type.startsWith("video/") ? "unboxing_video" : form.reasonCode === "damaged_in_transit" ? "shipping_damage_photo" : "product_photo");
+        const uploadResponse = await fetch(`/api/orders/${order.id}/return-evidence`, { method: "POST", headers: authHeaders(), body: upload });
+        const uploadData = (await uploadResponse.json().catch(() => null)) as { error?: string } | null;
+        if (!uploadResponse.ok) throw new Error(uploadData?.error ?? "Unable to upload return evidence.");
+      }
+    } catch (uploadError) {
+      setProcessingOrderId(null);
+      setError(uploadError instanceof Error ? uploadError.message : "Unable to upload return evidence.");
+      return;
+    }
     await submitRequest(order, {
       action: "request_return",
       reason: form.reason.trim(),
       reason_code: form.reasonCode,
       pickup_method: form.pickupMethod,
       pickup_address: form.pickupMethod === "courier_pickup" ? form.pickupAddress.trim() : null,
+      evidence_url: form.evidenceUrl.trim() || null,
+      evidence_attestation: true,
     });
   }
 
@@ -155,8 +184,18 @@ export default function OrdersPage() {
               <div className="p-6">
                 <div className="grid gap-6 md:grid-cols-[1fr_auto]"><div className="space-y-2 text-sm text-zinc-700">{(order.order_items ?? []).map((item) => <p key={item.id} className="flex justify-between gap-4"><span>{item.product?.name ?? `Product #${item.product_id}`} × {item.quantity}</span><span className="font-semibold">{formatCurrency(item.unit_price * item.quantity)}</span></p>)}</div><p className="text-2xl font-black">{formatCurrency(order.total_amount)}</p></div>
                 <div className="mt-5 grid gap-3 rounded-2xl bg-zinc-50 p-4 text-sm sm:grid-cols-3"><div><p className="text-xs uppercase text-zinc-400">Payment</p><p className="font-semibold">Cash on delivery</p></div><div><p className="text-xs uppercase text-zinc-400">Payment status</p><p className="font-semibold capitalize">{order.payment_status}</p></div><div><p className="text-xs uppercase text-zinc-400">Delivery address</p><p className="font-semibold">{order.shipping_address}</p></div></div>
+                <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-5 text-sm text-blue-950">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div><p className="text-xs uppercase text-blue-500">COD verification</p><p className="font-bold capitalize">{humanize(order.cod_verification_status ?? "pending")}</p></div>
+                    <div><p className="text-xs uppercase text-blue-500">Courier</p><p className="font-bold">{order.courier_name ?? "Not assigned"}</p></div>
+                    <div><p className="text-xs uppercase text-blue-500">Tracking / ETA</p><p className="font-bold">{order.delivery_tracking_number ?? "Pending"}</p>{order.estimated_delivery_at && <p className="text-xs">Estimated {formatDateTime(order.estimated_delivery_at)}</p>}</div>
+                  </div>
+                  {order.delivery_status_detail && <p className="mt-3">{order.delivery_status_detail}</p>}
+                  {(order.delivery_events ?? []).length > 0 && <ol className="mt-4 space-y-3 border-l-2 border-blue-200 pl-4">{(order.delivery_events ?? []).map((event) => <li key={event.id}><p className="font-bold">{event.title}</p><p className="text-xs text-blue-700">{formatDateTime(event.happened_at)}{event.description ? ` · ${event.description}` : ""}</p></li>)}</ol>}
+                </div>
                 {order.cancellation_request_status !== "none" && <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm text-red-950"><p className="font-bold capitalize">Cancellation: {humanize(order.cancellation_request_status)}</p>{order.cancellation_reason && <p className="mt-1">{order.cancellation_reason}</p>}</div>}
                 {order.return_request_status !== "none" && <div className="mt-4 rounded-2xl bg-orange-50 p-5 text-sm text-orange-950"><p className="font-bold capitalize">Return: {humanize(order.return_request_status)}</p>{order.return_reason_code && <p className="mt-1">Problem: {returnLabels[order.return_reason_code]}</p>}{order.return_reason && <p className="mt-1">Details: {order.return_reason}</p>}{order.return_pickup_method && <p className="mt-1">Method: {humanize(order.return_pickup_method)}</p>}{order.return_pickup_scheduled_for && <p className="mt-1">Scheduled: {formatDateTime(order.return_pickup_scheduled_for)}</p>}{order.return_pickup_instructions && <p className="mt-1">Instructions: {order.return_pickup_instructions}</p>}{order.return_pickup_tracking_number && <p className="mt-1">Tracking: {order.return_pickup_tracking_number}</p>}{order.return_received_at && <p className="mt-1">Received by store: {formatDateTime(order.return_received_at)}</p>}{order.refund_completed_at && <p className="mt-1 font-semibold">Refund recorded: {formatCurrency(order.refund_amount ?? 0)} by {humanize(order.refund_method ?? "selected method")}{order.refund_reference ? ` (${order.refund_reference})` : ""}</p>}</div>}
+                {(order.return_evidence ?? []).length > 0 && <div className="mt-3 flex flex-wrap gap-2">{(order.return_evidence ?? []).map((evidence) => <a key={evidence.id} href={`/api/orders/${order.id}/return-evidence/${evidence.id}`} target="_blank" rel="noreferrer" className="rounded-full border px-3 py-2 text-xs font-bold hover:border-red-500">Open {humanize(evidence.evidence_kind)}</a>)}</div>}
                 {order.admin_order_note && <p className="mt-3 rounded-xl bg-blue-50 p-3 text-sm text-blue-900">Administrator note: {order.admin_order_note}</p>}
                 {order.status === "delivered" && !returnOpen && order.return_request_status === "none" && <p className="mt-4 rounded-xl bg-zinc-100 p-3 text-sm text-zinc-600">The 7-day online return request window has closed. Contact support if you have a warranty question.</p>}
 
@@ -164,6 +203,9 @@ export default function OrdersPage() {
                   <div className="mt-4 grid gap-4 sm:grid-cols-2"><label className="text-sm font-semibold">Problem<select value={form.reasonCode} onChange={(event) => updateReturnForm(order.id, { reasonCode: event.target.value as ReturnReason })} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal outline-none focus:border-red-500">{Object.entries(returnLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="text-sm font-semibold">Return method<select value={form.pickupMethod} onChange={(event) => updateReturnForm(order.id, { pickupMethod: event.target.value as PickupMethod })} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal outline-none focus:border-red-500"><option value="courier_pickup">Courier pickup</option><option value="store_dropoff">Drop off at store</option></select></label></div>
                   {form.pickupMethod === "courier_pickup" && <label className="mt-4 block text-sm font-semibold">Pickup address<textarea rows={2} maxLength={500} value={form.pickupAddress} onChange={(event) => updateReturnForm(order.id, { pickupAddress: event.target.value })} className="mt-2 w-full rounded-xl border px-4 py-3 font-normal outline-none focus:border-red-500" /></label>}
                   <label className="mt-4 block text-sm font-semibold">What happened?<textarea rows={3} maxLength={500} value={form.reason} onChange={(event) => updateReturnForm(order.id, { reason: event.target.value })} placeholder="Example: I ordered black 512 GB, but received silver 256 GB." className="mt-2 w-full rounded-xl border px-4 py-3 font-normal outline-none focus:border-red-500" /></label>
+                  <label className="mt-4 block text-sm font-semibold">Photos or continuous unboxing video<input type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" onChange={(event) => updateReturnForm(order.id, { evidenceFiles: Array.from(event.target.files ?? []) })} className="mt-2 block w-full rounded-xl border bg-white px-4 py-3 font-normal" /></label>
+                  <label className="mt-4 block text-sm font-semibold">Secure evidence link (optional)<input type="url" placeholder="https://drive.google.com/..." value={form.evidenceUrl} onChange={(event) => updateReturnForm(order.id, { evidenceUrl: event.target.value })} className="mt-2 w-full rounded-xl border px-4 py-3 font-normal outline-none focus:border-red-500" /></label>
+                  <label className="mt-4 flex items-start gap-3 text-sm"><input type="checkbox" checked={form.evidenceAttestation} onChange={(event) => updateReturnForm(order.id, { evidenceAttestation: event.target.checked })} className="mt-1" /><span>I confirm these details and files show the item I received and have not been misleadingly edited.</span></label>
                   <p className="mt-3 text-xs text-zinc-500">Keep the machine, accessories, packaging, serial labels, and proof of order together. Remove passwords and back up personal data before handover.</p><button type="button" disabled={processingOrderId === order.id} onClick={() => submitReturn(order)} className="mt-4 rounded-full bg-red-600 px-6 py-3 text-sm font-bold text-white disabled:opacity-50">{processingOrderId === order.id ? "Sending request..." : "Send return request"}</button>
                 </div>}
                 {canCancel && !canReturn && <div className="mt-6 border-t pt-6"><label htmlFor={`cancel-${order.id}`} className="block text-sm font-semibold">Why are you cancelling this order?</label><textarea id={`cancel-${order.id}`} rows={2} maxLength={500} value={cancellationReasons[order.id] ?? ""} onChange={(event) => setCancellationReasons((current) => ({ ...current, [order.id]: event.target.value }))} className="mt-2 w-full rounded-xl border px-4 py-3 outline-none focus:border-red-500" /><button type="button" disabled={processingOrderId === order.id} onClick={() => submitCancellation(order)} className="mt-3 rounded-full border border-red-600 px-5 py-2 text-sm font-bold text-red-600 disabled:opacity-50">{processingOrderId === order.id ? "Sending request..." : "Request cancellation"}</button></div>}

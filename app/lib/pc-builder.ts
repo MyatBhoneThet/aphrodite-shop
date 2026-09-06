@@ -78,7 +78,7 @@ function needsDedicatedGpu(purpose: PcBuildPurpose) {
 function candidateGroups(products: Product[]) {
   const groups = new Map<Exclude<PcPartKind, "other">, Product[]>();
   for (const product of products) {
-    if (product.stock !== "In Stock" || product.price < 0) continue;
+    if (product.stock !== "In Stock" || !Number.isFinite(product.price) || product.price <= 0) continue;
     if (getProductFamily(product) !== "pc_part") continue;
     const kind = classifyPcPart(product);
     if (kind === "other") continue;

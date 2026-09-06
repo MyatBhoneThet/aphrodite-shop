@@ -17,7 +17,7 @@ function escapeHtml(value: unknown) {
 function formatMoney(value: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: process.env.RECEIPT_CURRENCY || "THB",
+    currency: process.env.RECEIPT_CURRENCY || "MMK",
     maximumFractionDigits: 0,
   }).format(value);
 }

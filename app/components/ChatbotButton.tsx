@@ -12,12 +12,12 @@ type SupportConversation = { id: string; status: "open" | "resolved" };
 type SupportResponse = { conversation: SupportConversation | null; messages: SupportMessage[]; error?: string };
 type LocalMessage = { id: number; role: "assistant" | "user"; body: string; products?: Product[] };
 
-const quickQuestions = ["Recommend a laptop", "Build a ฿50,000 PC", "How do returns work?", "Show Acer products"];
+const quickQuestions = ["Recommend a laptop", "Build a MMK 6,700,000 PC", "How do returns work?", "Show Acer products"];
 const messageTime = (value: string) => new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 function assistantReply(question: string, products: Product[]) {
   const text = question.toLowerCase();
-  const available = products.filter((product) => product.stock === "In Stock");
+  const available = products.filter((product) => product.stock === "In Stock" && product.price > 0);
   const brand = Array.from(new Set(products.map((product) => product.brand))).find((value) => text.includes(value.toLowerCase()));
   let matches: Product[] = [];
 
@@ -31,7 +31,7 @@ function assistantReply(question: string, products: Product[]) {
   matches = matches.sort((left, right) => left.price - right.price).slice(0, 3);
 
   if (/return|wrong|defect|error|broken|color|colour|storage/.test(text)) return { body: "You can request a return from My Orders within 7 days after delivery. Choose the exact problem, then select courier pickup or store drop-off. The refund is recorded only after the machine is received and inspected." };
-  if (/build.*pc|pc.*build|computer.*budget/.test(text)) return { body: "Open the PC Build Planner from the header. Enter your minimum and maximum budget (for example ฿50,000–฿60,000) and choose gaming, office, development, streaming, creative, or 3D work. It will generate demo parts lists from current in-stock PC parts." };
+  if (/build.*pc|pc.*build|computer.*budget/.test(text)) return { body: "Open the PC Build Planner from the header. Enter your minimum and maximum budget (for example MMK 6,700,000–8,040,000) and choose gaming, office, development, streaming, creative, or 3D work. It will generate demo parts lists from current in-stock PC parts." };
   if (/receipt|invoice/.test(text)) return { body: "Your digital receipt appears in My Orders after an administrator confirms the order. Open it and choose Print / Save PDF. A confirmation email is also sent when email delivery is configured." };
   if (/deliver|shipping|arrive|track/.test(text)) return { body: "Open My Orders to see Pending, Confirmed, Shipped, or Delivered status. For a specific delivery time, use Live support so the admin team can check your order." };
   if (/cancel|out of stock/.test(text)) return { body: "Pending or confirmed orders can be cancelled. Customers can send a cancellation request, and administrators can cancel directly when stock is unavailable. Reserved stock is restored automatically." };

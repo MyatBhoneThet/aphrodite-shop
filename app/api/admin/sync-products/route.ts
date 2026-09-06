@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { authenticate } from "@/app/lib/backend";
 import { handleRouteError, serviceUnavailable } from "@/app/lib/errors";
 import { fetchProductsSheet } from "@/app/lib/google-sheets";
-import { requireAdmin, upsertProductionProducts } from "@/app/lib/supabase";
+import { requireAdmin, upsertProductionProducts, syncSheetWholesale } from "@/app/lib/supabase";
 import { readJsonBody } from "@/app/lib/request";
 
 export const runtime = "nodejs";
@@ -30,8 +30,15 @@ export async function POST(request: NextRequest) {
     }
 
     let syncedProducts: Awaited<ReturnType<typeof upsertProductionProducts>>;
+    let wholesale: Awaited<ReturnType<typeof syncSheetWholesale>> | null = null;
     try {
       syncedProducts = await upsertProductionProducts(products);
+      const managed = products.filter(product => product.sheetWholesale !== undefined);
+      if (managed.length) wholesale = await syncSheetWholesale(managed.map(product => ({
+        source_key: product.sourceKey,
+        unit_price: product.sheetWholesale?.unitPrice ?? null,
+        min_quantity: product.sheetWholesale?.minQuantity ?? null,
+      })));
     } catch (syncError) {
       if (
         syncError instanceof Error &&
@@ -47,6 +54,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      wholesale,
       count: syncedProducts.length,
       skippedRows,
       summary,

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Product, UserRole } from "../data/products";
 import { getProductSpecifications } from "../lib/product-specifications";
+import { formatCurrency, formatProductPrice } from "../lib/format";
 
 type Props = {
   // The API only attaches `tiers` for approved wholesale viewers; prices
@@ -23,9 +24,9 @@ export default function ProductCard({ product }: Props) {
     .slice(0, 3);
 
   return (
-    <article className="rounded-[2rem] bg-zinc-100 p-5 text-center transition hover:-translate-y-1 hover:shadow-xl">
+    <article className="flex h-full flex-col rounded-[2rem] border border-zinc-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-1 hover:border-red-200 hover:shadow-xl">
       <Link href={`/products/${product.id}`} className="block">
-        <div className="relative h-64 overflow-hidden rounded-[1.5rem] bg-white">
+        <div className="relative h-64 overflow-hidden rounded-[1.5rem] bg-zinc-50">
           <img
             src={product.image}
             alt={product.name}
@@ -39,13 +40,13 @@ export default function ProductCard({ product }: Props) {
         </div>
       </Link>
 
-      <Link href={`/products/${product.id}`}>
-        <h3 className="mt-6 text-xl font-bold hover:text-red-600">
+      <Link href={`/products/${product.id}`} className="mt-5">
+        <h3 className="min-h-14 line-clamp-2 text-xl font-bold hover:text-red-600">
           {product.name}
         </h3>
       </Link>
 
-      <p className="text-sm text-zinc-500">
+      <p className="mt-1 text-sm text-zinc-500">
         {product.brand} • {product.category}
       </p>
 
@@ -57,13 +58,13 @@ export default function ProductCard({ product }: Props) {
         {product.stock}
       </p>
 
-      <p className="mt-4 text-2xl font-bold">
-        ฿{displayPrice.toLocaleString()}
+      <p className="mt-4 text-2xl font-black">
+        {formatProductPrice(displayPrice)}
       </p>
 
-      {bestTier && (
+      {displayPrice > 0 && bestTier && (
         <p className="mt-1 text-xs font-semibold text-red-600">
-          Wholesale from ฿{bestTier.unitPrice.toLocaleString()} ({bestTier.minQuantity}+ units)
+          Wholesale from {formatCurrency(bestTier.unitPrice)} ({bestTier.minQuantity}+ units)
         </p>
       )}
 

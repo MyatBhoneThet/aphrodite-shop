@@ -2,7 +2,9 @@ import type { Product, ProductType, UserRole } from "../data/products";
 import type { PriceTierRow } from "./pricing";
 import { ADMIN_SESSION_COOKIE, parseCookieHeader } from "./admin-session";
 import { USER_SESSION_COOKIE } from "./user-session";
+import * as galleryHelpers from "./product-gallery";
 import { forbidden, notFound, unauthorized } from "./errors";
+import { conflict, serviceUnavailable } from "./errors";
 
 export type { PriceTierRow } from "./pricing";
 
@@ -17,6 +19,8 @@ export type Profile = {
   full_name: string | null;
   role: UserRole;
   wholesale_status: WholesaleStatus;
+  business_name?: string | null;
+  business_verified_at?: string | null;
   price_list_id: string | null;
   phone: string | null;
   shipping_address_line1?: string | null;
@@ -124,6 +128,54 @@ export type ReturnReasonCode =
 
 export type ReturnPickupMethod = "courier_pickup" | "store_dropoff";
 export type RefundMethod = "cash" | "bank_transfer" | "mobile_wallet" | "store_credit";
+export type CodVerificationStatus =
+  | "pending"
+  | "phone_verified"
+  | "deposit_verified"
+  | "approved"
+  | "rejected";
+export type DeliveryEventStage =
+  | "order_placed"
+  | "verification_pending"
+  | "verified"
+  | "packed"
+  | "handed_to_courier"
+  | "in_transit"
+  | "out_for_delivery"
+  | "delivered"
+  | "delivery_failed";
+export type ReturnEvidenceKind =
+  | "product_photo"
+  | "shipping_damage_photo"
+  | "unboxing_video"
+  | "serial_photo"
+  | "other";
+
+export type DeliveryEventRow = {
+  id: string;
+  order_id: string;
+  stage: DeliveryEventStage;
+  title: string;
+  description: string | null;
+  location_label: string | null;
+  happened_at: string;
+  created_by: string | null;
+  visible_to_customer: boolean;
+  created_at: string;
+};
+
+export type ReturnEvidenceRow = {
+  id: string;
+  order_id: string;
+  uploaded_by: string;
+  evidence_kind: ReturnEvidenceKind;
+  storage_path: string | null;
+  external_url: string | null;
+  file_name: string | null;
+  content_type: string | null;
+  size_bytes: number | null;
+  created_at: string;
+};
 
 export type OrderRow = {
   id: string;
@@ -170,11 +222,26 @@ export type OrderRow = {
   receipt_sent_at?: string | null;
   receipt_email_status?: "not_sent" | "sent" | "not_configured" | "failed";
   receipt_email_error?: string | null;
+  cod_verification_status?: CodVerificationStatus;
+  cod_verification_method?: "phone_callback" | "cod_deposit" | "admin_review" | null;
+  cod_verified_at?: string | null;
+  delivery_latitude?: number | null;
+  delivery_longitude?: number | null;
+  delivery_accuracy_m?: number | null;
+  delivery_location_consent?: boolean;
+  delivery_location_captured_at?: string | null;
+  courier_name?: string | null;
+  delivery_tracking_number?: string | null;
+  estimated_delivery_at?: string | null;
+  delivery_status_detail?: string | null;
+  delivery_last_event_at?: string | null;
   admin_order_note: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
   order_items?: OrderItemRow[];
+  delivery_events?: DeliveryEventRow[];
+  return_evidence?: ReturnEvidenceRow[];
   profiles?: Pick<Profile, "email" | "full_name" | "role"> | null;
 };
 
@@ -284,6 +351,32 @@ const PUBLIC_PRODUCT_COLUMNS = [
 
 const UPSTREAM_TIMEOUT_MS = 10_000;
 
+// Private, explicit-consent location shares. Callers authenticate first; an
+// administrator must be checked before reading a different customer's row.
+export async function getLocationShare(userId: string) {
+  const rows = await supabaseRest<import("./location-share").LocationShare[]>(
+    `customer_location_shares?select=latitude,longitude,accuracy_m,captured_at,expires_at&user_id=eq.${encodeURIComponent(userId)}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`
+  );
+  return rows[0] ?? null;
+}
+
+export async function saveLocationShare(userId: string, coordinates: Pick<import("./location-share").LocationShare, "latitude" | "longitude" | "accuracy_m">) {
+  const { LOCATION_CONSENT_VERSION, LOCATION_RETENTION_DAYS } = await import("./location-share");
+  const now = new Date();
+  const rows = await supabaseRest<import("./location-share").LocationShare[]>("customer_location_shares?on_conflict=user_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify({ user_id: userId, ...coordinates, captured_at: now.toISOString(), consent_version: LOCATION_CONSENT_VERSION,
+      expires_at: new Date(now.getTime() + LOCATION_RETENTION_DAYS * 86400000).toISOString() }),
+  });
+  const row = rows[0];
+  return { latitude: row.latitude, longitude: row.longitude, accuracy_m: row.accuracy_m, captured_at: row.captured_at, expires_at: row.expires_at };
+}
+
+export async function removeLocationShare(userId: string) {
+  await supabaseRest(`customer_location_shares?user_id=eq.${encodeURIComponent(userId)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+}
+
 function upstreamSignal(signal?: AbortSignal | null) {
   return signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
 }
@@ -356,6 +449,66 @@ async function supabaseRest<T>(
   }
 
   return (await response.json()) as T;
+}
+
+const RETURN_EVIDENCE_BUCKET = "return-evidence";
+
+function encodeStoragePath(path: string) {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
+export async function uploadReturnEvidenceObject(
+  path: string,
+  bytes: ArrayBuffer,
+  contentType: string
+) {
+  const { url, serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
+  const response = await fetch(
+    `${url}/storage/v1/object/${RETURN_EVIDENCE_BUCKET}/${encodeStoragePath(path)}`,
+    {
+      method: "POST",
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": contentType,
+        "x-upsert": "false",
+      },
+      body: bytes,
+      cache: "no-store",
+      signal: upstreamSignal(),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+}
+
+export async function createReturnEvidenceSignedUrl(path: string) {
+  const { url, serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
+  const response = await fetch(
+    `${url}/storage/v1/object/sign/${RETURN_EVIDENCE_BUCKET}/${encodeStoragePath(path)}`,
+    {
+      method: "POST",
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ expiresIn: 300 }),
+      cache: "no-store",
+      signal: upstreamSignal(),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+
+  const result = (await response.json()) as { signedURL?: string; signedUrl?: string };
+  const signedPath = result.signedURL ?? result.signedUrl;
+  if (!signedPath) throw new Error("Supabase did not return an evidence URL.");
+  return signedPath.startsWith("http") ? signedPath : `${url}${signedPath}`;
 }
 
 // Returns an exact row count via PostgREST's Content-Range header instead of
@@ -843,6 +996,8 @@ type ProductionStockRow = {
   source_key: string;
   stock_quantity: number | null;
   sheet_stock_quantity: number | null;
+  image?: string;
+  full_specs?: Product["fullSpecs"];
 };
 
 const PRODUCT_SYNC_BATCH_SIZE = 100;
@@ -900,7 +1055,7 @@ async function selectProductionStock(sourceKeys: string[]) {
         .join(",");
       rows.push(
         ...(await supabaseRest<ProductionStockRow[]>(
-          `products?select=source_key,stock_quantity,sheet_stock_quantity&source_key=in.(${encodeURIComponent(
+          `products?select=source_key,stock_quantity,sheet_stock_quantity,image,full_specs&source_key=in.(${encodeURIComponent(
             list
           )})`
         ))
@@ -964,6 +1119,19 @@ export async function upsertProductionProducts(
 
   const rows = products.map((product) => {
     const row = mapProductionProductToRow(product);
+    const previous = existing?.get(product.sourceKey);
+    const { normalizeGallery } = galleryHelpers;
+    const suppliedGallery = normalizeGallery(product.fullSpecs?.gallery);
+    const oldGallery = normalizeGallery(previous?.full_specs?.gallery);
+    const keepAdminGallery = previous?.full_specs?.galleryManagedBy === "admin";
+    const gallery = keepAdminGallery ? oldGallery : suppliedGallery.length ? suppliedGallery : oldGallery;
+    row.full_specs = { ...product.fullSpecs, gallery,
+      galleryManagedBy: keepAdminGallery ? "admin" : "sheet",
+      photoSource: keepAdminGallery || !suppliedGallery.length ? previous?.full_specs?.photoSource ?? "" : product.fullSpecs?.photoSource ?? "" };
+    // Always provide a cover per row so mixed upsert batches cannot turn a
+    // previous manual cover into NULL. Preserve admin overrides and old covers.
+    row.image = keepAdminGallery ? previous?.image ?? gallery[0]?.url ?? galleryHelpers.PRODUCT_PLACEHOLDER
+      : gallery[0]?.url ?? previous?.image ?? galleryHelpers.PRODUCT_PLACEHOLDER;
     const sheetQuantity = product.stockQuantity ?? 0;
 
     if (!existing) return row;
@@ -1151,7 +1319,7 @@ export async function deleteWishlistItem(userId: string, id: string, accessToken
 }
 
 export function orderSelect() {
-  return `*,profiles(email,full_name,role),order_items(*,products(${PUBLIC_PRODUCT_COLUMNS}))`;
+  return `*,profiles(email,full_name,role),order_items(*,products(${PUBLIC_PRODUCT_COLUMNS})),delivery_events(*),return_evidence(*)`;
 }
 
 // Orders run under the caller's own access token, not the service role key.
@@ -1276,8 +1444,88 @@ export async function updateOrderStatus(
     },
     accessToken,
     anonKey
-  );
+  ).catch(throwCodError);
 
+  return rows[0] ?? null;
+}
+
+export async function updateOrderDeliveryService(
+  id: string,
+  fields: {
+    cod_verification_status?: CodVerificationStatus;
+    cod_verification_method?: "phone_callback" | "cod_deposit" | "admin_review" | null;
+    cod_verified_at?: string | null;
+    delivery_latitude?: number | null;
+    delivery_longitude?: number | null;
+    delivery_accuracy_m?: number | null;
+    delivery_location_consent?: boolean;
+    delivery_location_captured_at?: string | null;
+    courier_name?: string | null;
+    delivery_tracking_number?: string | null;
+    estimated_delivery_at?: string | null;
+    delivery_status_detail?: string | null;
+    delivery_last_event_at?: string | null;
+  }
+) {
+  const rows = await supabaseRest<OrderRow[]>(
+    `orders?id=eq.${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(fields) }
+  );
+  return rows[0] ?? null;
+}
+
+export async function insertDeliveryEvent(fields: {
+  order_id: string;
+  stage: DeliveryEventStage;
+  title: string;
+  description?: string | null;
+  location_label?: string | null;
+  happened_at?: string;
+  created_by?: string | null;
+  visible_to_customer?: boolean;
+}) {
+  const rows = await supabaseRest<DeliveryEventRow[]>("delivery_events", {
+    method: "POST",
+    body: JSON.stringify({
+      ...fields,
+      description: fields.description ?? null,
+      location_label: fields.location_label ?? null,
+      happened_at: fields.happened_at ?? new Date().toISOString(),
+      created_by: fields.created_by ?? null,
+      visible_to_customer: fields.visible_to_customer ?? true,
+    }),
+  });
+  return rows[0];
+}
+
+export async function insertReturnEvidence(fields: {
+  order_id: string;
+  uploaded_by: string;
+  evidence_kind: ReturnEvidenceKind;
+  storage_path?: string | null;
+  external_url?: string | null;
+  file_name?: string | null;
+  content_type?: string | null;
+  size_bytes?: number | null;
+}) {
+  const rows = await supabaseRest<ReturnEvidenceRow[]>("return_evidence", {
+    method: "POST",
+    body: JSON.stringify({
+      ...fields,
+      storage_path: fields.storage_path ?? null,
+      external_url: fields.external_url ?? null,
+      file_name: fields.file_name ?? null,
+      content_type: fields.content_type ?? null,
+      size_bytes: fields.size_bytes ?? null,
+    }),
+  });
+  return rows[0];
+}
+
+export async function selectReturnEvidenceById(id: string) {
+  const rows = await supabaseRest<ReturnEvidenceRow[]>(
+    `return_evidence?select=*&id=eq.${encodeURIComponent(id)}&limit=1`
+  );
   return rows[0] ?? null;
 }
 
@@ -1446,7 +1694,7 @@ export async function selectCustomerProfiles(
   filters: { search?: string | null; wholesaleOnly?: boolean } = {}
 ) {
   const params = new URLSearchParams({
-    select: "id,email,full_name,role,wholesale_status,price_list_id,created_at",
+    select: "id,email,full_name,role,wholesale_status,price_list_id,business_name,business_verified_at,created_at",
     role: "neq.admin",
     order: "created_at.desc",
     limit: "200",
@@ -1487,7 +1735,7 @@ export async function selectProfileByIdService(userId: string) {
 
 export async function updateProfileWholesaleService(
   userId: string,
-  fields: Partial<Pick<Profile, "role" | "wholesale_status" | "price_list_id">>
+  fields: Partial<Pick<Profile, "role" | "wholesale_status" | "price_list_id" | "business_name" | "business_verified_at">>
 ) {
   const rows = await supabaseRest<Profile[]>(
     `profiles?id=eq.${encodeURIComponent(userId)}`,
@@ -1860,4 +2108,33 @@ export async function deleteRecentlyViewedRows(userId: string) {
       headers: { Prefer: "return=minimal" },
     }
   );
+}
+
+function throwCodError(error: unknown): never {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("COD_REVIEW_REQUIRED")) throw conflict("Complete the phone callback and address checks, then approve COD in COD & delivery details.");
+    if (message.includes("COD_COURIER_REQUIRED")) throw conflict("Enter the courier and tracking/reference number before dispatch.");
+    if (message.includes("COD_EVENT_STATUS")) throw conflict("Update the order status before adding this delivery event. Delivered events require a delivered order.");
+    if (message.includes("COD_ORDER_CLOSED")) throw conflict("This order is closed.");
+    if (message.includes("COD_OPEN_LIMIT")) throw conflict("You already have 3 pending COD orders. Please contact support or cancel an accidental duplicate first.");
+    if (/schema cache|does not exist|could not find the function/i.test(message)) throw serviceUnavailable("Apply the COD/B2B migration in the supplied setup guide, then try again.");
+    throw error;
+}
+
+async function codRpc<T>(name: string, body: Record<string, unknown>): Promise<T> {
+  try {
+    return await supabaseRest<T>(`rpc/${name}`, { method: "POST", body: JSON.stringify(body) });
+  } catch (error) { return throwCodError(error); }
+}
+
+export function reviewOrderDeliveryRpc(actorId: string, orderId: string, input: object) {
+  return codRpc("review_cod_delivery", { p_actor_id: actorId, p_order_id: orderId, p_input: input });
+}
+
+export function getCodReviewContext(actorId: string, orderId: string) {
+  return codRpc("cod_review_context", { p_actor_id: actorId, p_order_id: orderId });
+}
+
+export function syncSheetWholesale(rows: { source_key: string; unit_price: number | null; min_quantity: number | null }[]) {
+  return codRpc<{ synced: number; price_list_id: string }>("sync_sheet_b2b", { p_rows: rows });
 }

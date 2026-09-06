@@ -7,6 +7,7 @@ import {
   patchOrderStatus,
   requestOrderAction,
   resolveOrderRequest,
+  updateOrderDelivery,
 } from "@/app/lib/backend";
 import { handleRouteError } from "@/app/lib/errors";
 import { readJsonBody } from "@/app/lib/request";
@@ -53,6 +54,8 @@ export async function PATCH(
             ? await adminCancelOrder(user, id, parsed.data)
             : parsed.data.action === "advance_return"
               ? await advanceReturnWorkflow(user, id, parsed.data)
+              : parsed.data.action === "update_delivery"
+                ? await updateOrderDelivery(user, id, parsed.data)
           : await requestOrderAction(user, id, parsed.data);
 
     if (!order) {

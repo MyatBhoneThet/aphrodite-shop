@@ -4,8 +4,10 @@ import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { Product } from "../data/products";
 import { authHeaders } from "../lib/client-auth";
-import { formatCurrency } from "../lib/format";
+import { formatCurrency, formatProductPrice } from "../lib/format";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import { MYANMAR_REGIONS, normalizeMyanmarRegion } from "../lib/delivery-country";
+import DeliveryPinPicker, { type DeliveryPin } from "../components/DeliveryPinPicker";
 
 type LinePricing = {
   quantity: number;
@@ -53,8 +55,13 @@ export default function CartPage() {
   const [shippingCity, setShippingCity] = useState("");
   const [shippingState, setShippingState] = useState("");
   const [postalCode, setPostalCode] = useState("");
-  const [shippingCountry, setShippingCountry] = useState("Thailand");
+  const shippingCountry = "Myanmar";
   const [notes, setNotes] = useState("");
+  const [codConfirmed, setCodConfirmed] = useState(false);
+  const [codContactConfirmed, setCodContactConfirmed] = useState(false);
+  const [deliveryLocation, setDeliveryLocation] = useState<DeliveryPin | null>(null);
+  const [addressByPhone, setAddressByPhone] = useState(false);
+  const hasPendingPrices = cart?.items.some((item) => !Number.isFinite(item.product.price) || item.product.price <= 0) ?? false;
 
   const loadCart = useCallback(async () => {
     setIsLoading(true);
@@ -81,12 +88,9 @@ export default function CartPage() {
           (current) => current || user.shipping_address_line2 || ""
         );
         setShippingCity((current) => current || user.shipping_city || "");
-        setShippingState((current) => current || user.shipping_state || "");
+        setShippingState((current) => current || normalizeMyanmarRegion(user.shipping_state) || "");
         setPostalCode(
           (current) => current || user.shipping_postal_code || ""
-        );
-        setShippingCountry(
-          (current) => current || user.shipping_country || "Thailand"
         );
       } else if (userStatus === "ready") {
         setIsLoading(false);
@@ -140,6 +144,16 @@ export default function CartPage() {
     // avoids ever issuing the duplicate request.
     if (isPlacingOrder) return;
 
+    if (hasPendingPrices) {
+      setError("A cart item is waiting for a confirmed price. Remove it or contact support before ordering.");
+      return;
+    }
+
+    if (!deliveryLocation && !addressByPhone) {
+      setError("Confirm a delivery map pin, or request written-address confirmation by phone.");
+      return;
+    }
+
     setError("");
     setIsPlacingOrder(true);
 
@@ -157,6 +171,10 @@ export default function CartPage() {
           shipping_postal_code: postalCode.trim(),
           shipping_country: shippingCountry.trim(),
           payment_method: "cash_on_delivery",
+          cod_confirmation: codConfirmed,
+          cod_contact_confirmation: codContactConfirmed,
+          delivery_location_consent: Boolean(deliveryLocation),
+          delivery_location: deliveryLocation,
           notes: notes.trim() || null,
           // Server detects price drift against this and answers 409;
           // authoritative prices are always recomputed server-side.
@@ -229,8 +247,8 @@ export default function CartPage() {
           <h1 className="mt-4 text-3xl font-bold">Order placed</h1>
           <p className="mt-3 text-zinc-500">
             Order #{placedOrderId.slice(0, 8)} has been received and is now
-            pending confirmation. Pay the order total to the delivery driver
-            when it arrives.
+            pending COD verification. Keep your phone available; the store may
+            call before approving and shipping the order.
           </p>
           <div className="mt-6 flex justify-center gap-3">
             <Link
@@ -263,6 +281,7 @@ export default function CartPage() {
 
       <section className="mx-auto max-w-5xl px-5 py-10">
         <h1 className="text-4xl font-bold">Your Cart</h1>
+        {hasPendingPrices && <p className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">Some items are waiting for confirmed MMK prices. They are not free. Remove these items or contact support before placing an order.</p>}
 
         {error && (
           <p className="mt-4 rounded-2xl bg-red-50 p-4 text-sm font-semibold text-red-700">
@@ -297,8 +316,9 @@ export default function CartPage() {
                   <div className="flex-1">
                     <p className="font-bold">{item.product.name}</p>
                     <p className="text-sm text-zinc-500">
-                      {formatCurrency(item.pricing.unitPrice)} each
-                      {item.pricing.unitPrice < item.pricing.retailUnitPrice && (
+                      {formatProductPrice(item.product.price > 0 ? item.pricing.unitPrice : 0)}
+                      {item.product.price > 0 && " each"}
+                      {item.product.price > 0 && item.pricing.unitPrice < item.pricing.retailUnitPrice && (
                         <>
                           {" "}
                           <span className="line-through">
@@ -308,7 +328,7 @@ export default function CartPage() {
                       )}
                     </p>
 
-                    {item.pricing.tierMinQuantity ? (
+                    {item.product.price <= 0 ? null : item.pricing.tierMinQuantity ? (
                       <p className="mt-1 text-xs font-semibold text-green-700">
                         {item.pricing.label} · save{" "}
                         {formatCurrency(item.pricing.savings)}
@@ -319,7 +339,7 @@ export default function CartPage() {
                       </p>
                     ) : null}
 
-                    {item.pricing.nextTier && (
+                    {item.product.price > 0 && item.pricing.nextTier && (
                       <p className="mt-1 text-xs text-zinc-500">
                         Add {item.pricing.nextTier.unitsAway} more to pay{" "}
                         {formatCurrency(item.pricing.nextTier.unitPrice)}/unit
@@ -352,7 +372,7 @@ export default function CartPage() {
                   </div>
 
                   <div className="text-right">
-                    <p className="font-bold">{formatCurrency(item.lineTotal)}</p>
+                    <p className="font-bold">{item.product.price > 0 ? formatCurrency(item.lineTotal) : "Price pending"}</p>
                     <button
                       type="button"
                       onClick={() => removeItem(item.id)}
@@ -369,7 +389,7 @@ export default function CartPage() {
               <h2 className="text-xl font-bold">Checkout</h2>
 
               <div className="mt-4 space-y-2 text-sm">
-                {cart.totalSavings > 0 && (
+                {!hasPendingPrices && cart.totalSavings > 0 && (
                   <>
                     <div className="flex items-center justify-between text-zinc-500">
                       <span>Retail subtotal</span>
@@ -389,7 +409,7 @@ export default function CartPage() {
                     {cart.totalQuantity} item(s)
                   </span>
                   <span className="text-2xl font-bold">
-                    {formatCurrency(cart.total)}
+                    {hasPendingPrices ? "Awaiting prices" : formatCurrency(cart.total)}
                   </span>
                 </div>
 
@@ -464,11 +484,14 @@ export default function CartPage() {
                   </div>
                   <div>
                     <label htmlFor="shipping-state" className="mb-1 block text-sm font-semibold">
-                      Province / State
+                      Myanmar state / region
                     </label>
-                    <input id="shipping-state" required value={shippingState}
+                    <select id="shipping-state" required value={shippingState}
                       onChange={(event) => setShippingState(event.target.value)}
-                      className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500" />
+                      className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500">
+                      <option value="">Select state / region</option>
+                      {MYANMAR_REGIONS.map((region) => <option key={region} value={region}>{region}</option>)}
+                    </select>
                   </div>
                   <div>
                     <label htmlFor="postal-code" className="mb-1 block text-sm font-semibold">
@@ -482,11 +505,20 @@ export default function CartPage() {
                     <label htmlFor="shipping-country" className="mb-1 block text-sm font-semibold">
                       Country
                     </label>
-                    <input id="shipping-country" required value={shippingCountry}
-                      onChange={(event) => setShippingCountry(event.target.value)}
+                    <input id="shipping-country" readOnly value={shippingCountry}
                       className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500" />
+                    <p className="mt-1 text-xs text-zinc-500">Myanmar delivery addresses only. No international shipping.</p>
                   </div>
                 </div>
+
+                <DeliveryPinPicker value={deliveryLocation} onChange={(pin) => {
+                  setDeliveryLocation(pin);
+                  if (pin) setAddressByPhone(false);
+                }} />
+                {!deliveryLocation && <label className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">
+                  <input type="checkbox" required checked={addressByPhone} onChange={(event) => setAddressByPhone(event.target.checked)} className="mt-1" />
+                  <span>I cannot confirm a map pin. Please call to confirm my written Myanmar address. My COD order must be reviewed before dispatch.</span>
+                </label>}
 
                 <fieldset className="rounded-2xl border border-green-200 bg-green-50 p-4">
                   <legend className="px-1 text-sm font-bold">Payment method</legend>
@@ -499,6 +531,14 @@ export default function CartPage() {
                         Pay the delivery driver after checking your package.
                       </span>
                     </span>
+                  </label>
+                  <label className="mt-4 flex items-start gap-3 text-sm">
+                    <input type="checkbox" required checked={codConfirmed} onChange={(event) => setCodConfirmed(event.target.checked)} className="mt-1" />
+                    <span>I confirm the recipient name and delivery address are correct.</span>
+                  </label>
+                  <label className="mt-3 flex items-start gap-3 text-sm">
+                    <input type="checkbox" required checked={codContactConfirmed} onChange={(event) => setCodContactConfirmed(event.target.checked)} className="mt-1" />
+                    <span>I confirm this phone is reachable for COD verification. Unverified orders may be held or cancelled.</span>
                   </label>
                 </fieldset>
 
@@ -517,7 +557,7 @@ export default function CartPage() {
 
                 <button
                   type="submit"
-                  disabled={isPlacingOrder}
+                  disabled={isPlacingOrder || hasPendingPrices}
                   className="w-full rounded-full bg-red-600 px-5 py-4 font-semibold text-white disabled:bg-zinc-400"
                 >
                   {isPlacingOrder

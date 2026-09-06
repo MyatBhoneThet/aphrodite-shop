@@ -399,7 +399,7 @@ export default function PricingPanel() {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-semibold">Unit price (฿)</label>
+            <label className="mb-1 block text-xs font-semibold">Unit price (MMK)</label>
             <input
               type="number"
               min={0}

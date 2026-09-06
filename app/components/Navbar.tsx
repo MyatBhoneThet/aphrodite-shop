@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import BrandLogo from "./BrandLogo";
 import LanguageSwitcher from "./LanguageSwitcher";
 import type { Product, UserRole } from "../data/products";
 
@@ -35,7 +36,7 @@ function SearchBox({ search, setSearch, suggestions, language }: {
           <p className="border-b px-4 py-2 text-xs font-bold uppercase tracking-wider text-zinc-400">Suggestions</p>
           {suggestions.map((product) => (
             <Link key={product.id} href={`/products/${product.id}`} className="flex items-center gap-3 border-b px-4 py-3 last:border-0 hover:bg-red-50">
-              <div className="relative h-11 w-11 overflow-hidden rounded-xl bg-zinc-100"><Image src={product.image} alt="" fill sizes="44px" className="object-contain p-1" /></div>
+              <div className="relative h-11 w-11 overflow-hidden rounded-xl bg-zinc-100"><Image src={product.image} unoptimized alt="" fill sizes="44px" className="object-contain p-1" /></div>
               <div className="min-w-0"><p className="truncate text-sm font-bold">{product.name}</p><p className="truncate text-xs text-zinc-500">{product.brand} · {product.category}</p></div>
               <span className="ml-auto text-red-600">→</span>
             </Link>
@@ -54,7 +55,7 @@ export default function Navbar({ search, setSearch, searchSuggestions, language,
   return (
     <header className="sticky top-0 z-50 border-b bg-white/95 shadow-sm backdrop-blur-xl">
       <div className="mx-auto flex max-w-[92rem] items-center gap-4 px-4 py-3 lg:px-6">
-        <Link href="/" aria-label="Aphrodite Myanmar home" className="shrink-0"><Image src="/brand/aphrodite-myanmar.png" alt="Aphrodite Myanmar" width={218} height={77} className="h-12 w-auto lg:h-14" priority /></Link>
+        <Link href="/" aria-label="Aphrodite Myanmar home" className="w-36 shrink-0 sm:w-44"><BrandLogo /></Link>
         <nav className="hidden items-center gap-5 text-sm font-semibold xl:flex"><Link href="/catalog/laptops" className="hover:text-red-600">Laptops</Link><Link href="/catalog/accessories" className="hover:text-red-600">Accessories</Link><Link href="/catalog/pc-parts" className="hover:text-red-600">PC Parts</Link><Link href="/pc-builder" className="rounded-full bg-red-50 px-3 py-2 text-red-700 hover:bg-red-100">PC Builder</Link><Link href="/returns" className="hover:text-red-600">Returns</Link><Link href="/#support" className="hover:text-red-600">Support</Link></nav>
         <div className="hidden min-w-[16rem] max-w-lg flex-1 md:block"><SearchBox search={search} setSearch={setSearch} suggestions={searchSuggestions} language={language} /></div>
         <div className="ml-auto flex items-center gap-2 text-sm">
@@ -65,6 +66,7 @@ export default function Navbar({ search, setSearch, searchSuggestions, language,
             <select aria-label="Account and settings menu" value="" onChange={(event) => navigateAccount(event.target.value)} className="max-w-28 rounded-full border bg-white px-3 py-2 font-semibold outline-none hover:border-red-400 sm:max-w-none">
               <option value="" disabled>Account</option>
               <option value="/orders">My orders</option>
+              <option value="/location">Location sharing</option>
               <option value="/wishlist">Wishlist</option>
               <option value="/cart">Cart</option>
               <option value="/pc-builder">PC Build Planner</option>
@@ -78,6 +80,7 @@ export default function Navbar({ search, setSearch, searchSuggestions, language,
         </div>
       </div>
       <div className="px-4 pb-3 md:hidden"><SearchBox search={search} setSearch={setSearch} suggestions={searchSuggestions} language={language} /></div>
+      <nav aria-label="Product categories" className="flex gap-5 overflow-x-auto border-t border-zinc-100 px-5 py-3 text-sm font-semibold xl:hidden"><Link href="/catalog/laptops" className="whitespace-nowrap">Laptops</Link><Link href="/catalog/accessories" className="whitespace-nowrap">Accessories</Link><Link href="/catalog/pc-parts" className="whitespace-nowrap">PC Parts</Link><Link href="/pc-builder" className="whitespace-nowrap text-red-600">Build a PC →</Link></nav>
     </header>
   );
 }

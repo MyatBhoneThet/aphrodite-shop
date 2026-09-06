@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { Product, UserRole } from "../../data/products";
-import Product3DViewer from "../../components/Product3DViewer";
+import ProductGallery from "../../components/ProductGallery";
+import BrandLogo from "../../components/BrandLogo";
 import { authHeaders } from "../../lib/client-auth";
-import { formatCurrency } from "../../lib/format";
+import { formatCurrency, formatProductPrice } from "../../lib/format";
 import { getProductSpecifications } from "../../lib/product-specifications";
 import { useCurrentUser } from "../../lib/useCurrentUser";
 
@@ -246,7 +247,7 @@ export default function ProductDetailsPage() {
       <header className="border-b bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5">
           <Link href="/" className="text-2xl font-bold text-red-600">
-            Aphrodite
+            <BrandLogo />
           </Link>
 
           <div className="flex items-center gap-3">
@@ -273,20 +274,7 @@ export default function ProductDetailsPage() {
         <div className="grid gap-10 lg:grid-cols-2">
           <div>
             <div className="sticky top-8">
-              <div className="h-[420px] overflow-hidden rounded-[2rem] bg-zinc-100 md:h-[560px]">
-                <Product3DViewer
-                  modelUrl={product.model3D}
-                  imageUrl={product.image}
-                  productName={product.name}
-                  interactive={true}
-                />
-              </div>
-
-              {product.model3D && (
-                <p className="mt-4 text-center text-sm text-zinc-500">
-                  Drag to rotate • Scroll to zoom • 3D view
-                </p>
-              )}
+              <ProductGallery key={product.id} product={product} />
             </div>
           </div>
 
@@ -313,13 +301,13 @@ export default function ProductDetailsPage() {
 
             <div className="mt-8">
               <p className="text-4xl font-bold">
-                {formatCurrency(displayPrice)}
-                <span className="ml-2 text-base font-semibold text-zinc-400">
+                {formatProductPrice(product.price > 0 ? displayPrice : 0)}
+                {product.price > 0 && <span className="ml-2 text-base font-semibold text-zinc-400">
                   / unit
-                </span>
+                </span>}
               </p>
 
-              {pricing && pricing.unitPrice < pricing.retailUnitPrice && (
+              {product.price > 0 && pricing && pricing.unitPrice < pricing.retailUnitPrice && (
                 <p className="mt-2 text-sm font-semibold text-red-600">
                   {pricing.label} — retail{" "}
                   <span className="line-through">
@@ -328,13 +316,13 @@ export default function ProductDetailsPage() {
                 </p>
               )}
 
-              {pricing?.wholesaleEligible && !pricing.tierMinQuantity && (
+              {product.price > 0 && pricing?.wholesaleEligible && !pricing.tierMinQuantity && (
                 <p className="mt-2 text-sm font-semibold text-zinc-500">
                   Retail price — quantity below wholesale tier
                 </p>
               )}
 
-              {isWholesale && pricing?.nextTier && (
+              {product.price > 0 && isWholesale && pricing?.nextTier && (
                 <p className="mt-1 text-sm text-zinc-500">
                   Add {pricing.nextTier.unitsAway} more unit(s) to pay{" "}
                   {formatCurrency(pricing.nextTier.unitPrice)}/unit
@@ -384,7 +372,7 @@ export default function ProductDetailsPage() {
                   </button>
                 </div>
 
-                {pricing && (
+                {product.price > 0 && pricing && (
                   <span className="text-sm text-zinc-500">
                     Total:{" "}
                     <span className="font-bold text-zinc-900">
@@ -399,7 +387,7 @@ export default function ProductDetailsPage() {
                 )}
               </div>
 
-              {isWholesale && product.tiers && product.tiers.length > 0 && (
+              {product.price > 0 && isWholesale && product.tiers && product.tiers.length > 0 && (
                 <div className="mt-6 overflow-hidden rounded-2xl border">
                   <p className="border-b bg-zinc-100 px-4 py-3 text-sm font-bold">
                     Your wholesale quantity pricing
@@ -424,7 +412,7 @@ export default function ProductDetailsPage() {
                           <td className="px-4 py-2">
                             1–{(product.tiers[0]?.minQuantity ?? 2) - 1}
                           </td>
-                          <td className="px-4 py-2">{formatCurrency(product.price)}</td>
+                          <td className="px-4 py-2">{formatProductPrice(product.price)}</td>
                           <td className="px-4 py-2 text-zinc-500">Retail</td>
                         </tr>
                       )}
@@ -478,9 +466,9 @@ export default function ProductDetailsPage() {
               {currentUser ? (
                 <>
                   <button onClick={() => addToCart(product)}
-                    disabled={product.stock === "Out of Stock"}
+                    disabled={product.stock === "Out of Stock" || product.price <= 0}
                     className="rounded-full bg-red-600 px-7 py-3 font-semibold text-white disabled:bg-zinc-400">
-                    Add to Cart
+                    {product.price <= 0 ? "Price pending — contact support" : "Add to Cart"}
                   </button>
                   <button onClick={() => toggleWishlist(product)}
                     className="rounded-full border px-7 py-3 font-semibold">
@@ -556,7 +544,7 @@ export default function ProductDetailsPage() {
                   <h3 className="mt-4 font-bold">{item.name}</h3>
 
                   <p className="mt-1 text-sm text-zinc-500">
-                    {formatCurrency(item.price)}
+                    {formatProductPrice(item.price)}
                   </p>
                 </Link>
               ))}

@@ -26,10 +26,10 @@ export default function PcBuilderPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
-  const [minimumBudget, setMinimumBudget] = useState("50000");
-  const [maximumBudget, setMaximumBudget] = useState("60000");
+  const [minimumBudget, setMinimumBudget] = useState("6700000");
+  const [maximumBudget, setMaximumBudget] = useState("8040000");
   const [purpose, setPurpose] = useState<PcBuildPurpose>("gaming");
-  const [request, setRequest] = useState<PcBuildInput>({ minimumBudget: 50000, maximumBudget: 60000, purpose: "gaming" });
+  const [request, setRequest] = useState<PcBuildInput>({ minimumBudget: 6700000, maximumBudget: 8040000, purpose: "gaming" });
 
   useEffect(() => {
     async function loadProducts() {
@@ -61,16 +61,16 @@ export default function PcBuilderPage() {
     event.preventDefault();
     const minimum = Number(minimumBudget);
     const maximum = Number(maximumBudget);
-    if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || minimum < 10000) {
-      setError("Enter a minimum budget of at least ฿10,000.");
+    if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || minimum < 1340000) {
+      setError("Enter a minimum budget of at least MMK 1,340,000.");
       return;
     }
     if (maximum < minimum) {
       setError("Maximum budget must be equal to or higher than the minimum budget.");
       return;
     }
-    if (maximum > 1000000) {
-      setError("Maximum budget must be ฿1,000,000 or less.");
+    if (maximum > 134000000) {
+      setError("Maximum budget must be MMK 134,000,000 or less.");
       return;
     }
     setError("");
@@ -84,9 +84,9 @@ export default function PcBuilderPage() {
       <div className="overflow-hidden rounded-[2rem] bg-zinc-950 p-8 text-white sm:p-12"><p className="text-sm font-black uppercase tracking-[0.25em] text-red-400">PC Build Planner</p><h1 className="mt-3 max-w-4xl text-4xl font-black sm:text-6xl">Turn your budget into a complete demo PC setup.</h1><p className="mt-5 max-w-3xl text-zinc-300">Choose how much you can spend and what you want to do. The planner uses current in-stock Aphrodite PC parts and creates value, balanced, and performance estimates.</p><div className="mt-6 flex flex-wrap gap-3 text-sm"><span className="rounded-full bg-white/10 px-4 py-2">{pcParts.length} PC-part products loaded</span><span className="rounded-full bg-white/10 px-4 py-2">{availableCategories} part categories available</span><span className="rounded-full bg-white/10 px-4 py-2">Live catalogue prices</span></div></div>
 
       <div className="mt-8 grid gap-8 xl:grid-cols-[380px_1fr]">
-        <aside><form onSubmit={generate} className="sticky top-6 rounded-3xl bg-white p-6 shadow-sm"><h2 className="text-2xl font-black">Your requirements</h2><p className="mt-2 text-sm text-zinc-500">Example: ฿50,000 minimum and ฿60,000 maximum.</p>
-          <label className="mt-6 block text-sm font-bold">Minimum budget (฿)<input type="number" min={10000} max={1000000} step={1000} value={minimumBudget} onChange={(event) => setMinimumBudget(event.target.value)} className="mt-2 w-full rounded-xl border px-4 py-3 text-lg font-bold outline-none focus:border-red-500" /></label>
-          <label className="mt-4 block text-sm font-bold">Maximum budget (฿)<input type="number" min={10000} max={1000000} step={1000} value={maximumBudget} onChange={(event) => setMaximumBudget(event.target.value)} className="mt-2 w-full rounded-xl border px-4 py-3 text-lg font-bold outline-none focus:border-red-500" /></label>
+        <aside><form onSubmit={generate} className="sticky top-6 rounded-3xl bg-white p-6 shadow-sm"><h2 className="text-2xl font-black">Your requirements</h2><p className="mt-2 text-sm text-zinc-500">Example: MMK 6,700,000 minimum and MMK 8,040,000 maximum.</p>
+          <label className="mt-6 block text-sm font-bold">Minimum budget (MMK)<input type="number" min={1340000} max={134000000} step={100000} value={minimumBudget} onChange={(event) => setMinimumBudget(event.target.value)} className="mt-2 w-full rounded-xl border px-4 py-3 text-lg font-bold outline-none focus:border-red-500" /></label>
+          <label className="mt-4 block text-sm font-bold">Maximum budget (MMK)<input type="number" min={1340000} max={134000000} step={100000} value={maximumBudget} onChange={(event) => setMaximumBudget(event.target.value)} className="mt-2 w-full rounded-xl border px-4 py-3 text-lg font-bold outline-none focus:border-red-500" /></label>
           <label className="mt-4 block text-sm font-bold">What will you use the PC for?<select value={purpose} onChange={(event) => setPurpose(event.target.value as PcBuildPurpose)} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal outline-none focus:border-red-500">{Object.entries(purposeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <button type="submit" disabled={isLoading} className="mt-6 w-full rounded-full bg-red-600 px-5 py-3 font-black text-white disabled:bg-zinc-400">{isLoading ? "Loading catalogue..." : "Generate PC builds"}</button>
           <p className="mt-4 text-xs leading-5 text-zinc-500">This is a demo estimate. Before ordering, staff must confirm CPU socket, motherboard, RAM, case clearance, cooling, and power-supply compatibility.</p>

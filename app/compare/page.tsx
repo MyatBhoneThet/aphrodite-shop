@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Product, UserRole } from "../data/products";
-import { formatCurrency } from "../lib/format";
+import { formatProductPrice } from "../lib/format";
 import { useCurrentUser } from "../lib/useCurrentUser";
 
 function ComparePageContent() {
@@ -111,7 +111,7 @@ function ComparePageContent() {
     },
     {
       label: "Price",
-      value: (product: Product) => formatCurrency(getDisplayPrice(product)),
+      value: (product: Product) => formatProductPrice(getDisplayPrice(product)),
     },
     {
       label: "Processor",
@@ -291,7 +291,7 @@ function ComparePageContent() {
               </p>
 
               <p className="mt-4 text-2xl font-bold">
-                {formatCurrency(getDisplayPrice(product))}
+                {formatProductPrice(getDisplayPrice(product))}
               </p>
 
               {userRole === "wholesale" && product.wholesalePrice && (

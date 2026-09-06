@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { Product } from "../data/products";
 import { authHeaders } from "../lib/client-auth";
-import { formatCurrency } from "../lib/format";
+import { formatProductPrice } from "../lib/format";
 import { useCurrentUser } from "../lib/useCurrentUser";
 
 type WishlistItem = {
@@ -154,7 +154,7 @@ export default function WishlistPage() {
                 </Link>
 
                 <p className="mt-1 text-sm text-zinc-500">
-                  {formatCurrency(item.product.price)}
+                  {formatProductPrice(item.product.price)}
                 </p>
 
                 <div className="mt-4 flex justify-center gap-2">

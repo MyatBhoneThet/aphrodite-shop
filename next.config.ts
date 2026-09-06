@@ -12,8 +12,9 @@ const nextConfig: NextConfig = {
   },
   // Produces a minimal .next/standalone server (see Dockerfile) instead of
   // requiring the full node_modules tree in the runtime image.
-  output: "standalone",
+  output: process.env.NEXT_BUILD_SKIP_STANDALONE === "1" ? undefined : "standalone",
   images: {
+    unoptimized: true,
     remotePatterns: supabaseHostname
       ? [
           {
@@ -54,7 +55,7 @@ const nextConfig: NextConfig = {
             key: "Strict-Transport-Security",
             value: "max-age=63072000; includeSubDomains",
           },
-          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(self)" },
         ],
       },
     ];

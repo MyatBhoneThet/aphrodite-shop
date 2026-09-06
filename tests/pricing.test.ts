@@ -73,6 +73,7 @@ describe("wholesale entitlement", () => {
         role: "wholesale",
         wholesale_status: "approved",
         price_list_id: "list-1",
+        business_verified_at: "2026-09-03T00:00:00Z",
       })
     ).toBe(true);
   });

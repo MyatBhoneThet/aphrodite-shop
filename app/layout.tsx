@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import LocationSharing from "./components/LocationSharing";
 
 export const metadata: Metadata = {
   title: "Aphrodite Store",
-  description: "Laptop ecommerce frontend",
+  description: "Explore laptops, accessories and PC parts at Aphrodite Myanmar. Compare specifications, plan a PC and track your orders.",
 };
 
 export default function RootLayout({
@@ -12,8 +13,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="en" data-scroll-behavior="smooth">
+      <body>{children}<LocationSharing /></body>
     </html>
   );
 }
