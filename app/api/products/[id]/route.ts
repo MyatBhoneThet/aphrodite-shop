@@ -62,13 +62,14 @@ export async function PATCH(
       return NextResponse.json({ error: firstIssueMessage(parsed.error) }, { status: 400 });
     }
 
-    const product = await patchProduct(user, productId, parsed.data);
+    const result = await patchProduct(user, productId, parsed.data);
 
-    if (!product) {
+    if (!result) {
       return NextResponse.json({ error: "Product not found." }, { status: 404 });
     }
 
-    return NextResponse.json({ product });
+    // sheetStock says which Google Sheet cells a stock change was written to.
+    return NextResponse.json(result);
   } catch (error) {
     return handleRouteError("products.update", error);
   }

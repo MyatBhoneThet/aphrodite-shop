@@ -9,6 +9,7 @@ vi.mock("../app/lib/supabase", async (importOriginal) => {
     selectCart: vi.fn(),
     selectPriceListById: vi.fn(),
     selectTiersForProducts: vi.fn(),
+    selectPercentBandsForList: vi.fn(),
     selectProductsByIdsService: vi.fn(),
     checkoutOrderRpc: vi.fn(),
     selectOrderById: vi.fn(),
@@ -26,6 +27,7 @@ import {
   selectPriceListById,
   selectProductsByIdsService,
   selectTiersForProducts,
+  selectPercentBandsForList,
   type CartItemRow,
   type CurrentUser,
   type Profile,
@@ -134,6 +136,8 @@ beforeEach(() => {
     is_active: true,
   });
   vi.mocked(selectTiersForProducts).mockReset().mockResolvedValue(LADDER);
+  // This list prices with fixed per-product tiers, not "% off retail" bands.
+  vi.mocked(selectPercentBandsForList).mockReset().mockResolvedValue([]);
   vi.mocked(selectProductsByIdsService)
     .mockReset()
     .mockResolvedValue([cartRow().products!]);

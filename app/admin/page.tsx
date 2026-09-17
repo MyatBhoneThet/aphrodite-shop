@@ -5,17 +5,29 @@
 import Image from "next/image";
 import BrandLogo from "../components/BrandLogo";
 import CustomerLocation from "./CustomerLocation";
-import { normalizeGallery, parseGalleryLines } from "../lib/product-gallery";
+import {
+  PRODUCT_PLACEHOLDER,
+  normalizeGallery,
+  productPhotos,
+  type ProductPhoto,
+} from "../lib/product-gallery";
+import ProductPhotoUploader from "./ProductPhotoUploader";
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { Product, ProductType, UserRole } from "../data/products";
 import { adminLogout, authHeaders } from "../lib/client-auth";
+import { useLanguage } from "../lib/language";
+import LanguageSwitcher from "../components/LanguageSwitcher";
 import { formatCurrency, formatDateTime } from "../lib/format";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import PricingPanel from "./PricingPanel";
 import SupportPanel from "./SupportPanel";
+import QueuePanel from "./QueuePanel";
 import WholesalePanel from "./WholesalePanel";
 import AdminOverviewPanel from "./AdminOverviewPanel";
+import CustomerLocationsPanel from "./CustomerLocationsPanel";
+import { orderTracking } from "../lib/order-tracking";
+import { orderNextStep, nextStepLabels } from "../lib/next-step";
 import CodDeliveryForm from "./CodDeliveryForm";
 
 type OrderStatus =
@@ -36,7 +48,38 @@ type OrderResolutionDraft = {
   adminNote: string;
 };
 
-type OrderWorkflowAction = "admin_cancel" | "schedule_pickup" | "mark_received" | "complete_refund";
+type OrderWorkflowAction = "admin_cancel" | "schedule_pickup" | "mark_received" | "complete_refund" | "delivery_attempt" | "payment_review";
+const paymentMethodLabels: Record<string, string> = {
+  cash_on_delivery: "Cash on delivery",
+  bank_transfer: "Bank transfer",
+  mmqr: "MMQR",
+};
+type PaymentCorrectionReason =
+  | "short_payment"
+  | "overpaid"
+  | "unclear_slip"
+  | "wrong_account"
+  | "other";
+const paymentCorrectionReasons: Record<PaymentCorrectionReason, string> = {
+  short_payment: "Less money arrived than the order total",
+  overpaid: "More money arrived than the order total",
+  unclear_slip: "The slip is unreadable or incomplete",
+  wrong_account: "Sent to the wrong account",
+  other: "Something else to correct",
+};
+type DeliveryAttemptReason = "no_answer" | "phone_off" | "address_problem" | "customer_rescheduled" | "nobody_home";
+const MAX_DELIVERY_ATTEMPTS = 3;
+const deliveryAttemptReasons: Record<DeliveryAttemptReason, string> = {
+  no_answer: "No answer on the phone",
+  phone_off: "Phone switched off or unreachable",
+  address_problem: "Address could not be found",
+  customer_rescheduled: "Customer asked to deliver later",
+  nobody_home: "Nobody available to receive the order",
+};
+
+function failedDeliveryAttempts(order: AdminOrder) {
+  return (order.delivery_events ?? []).filter((event) => event.stage === "delivery_failed").length;
+}
 type OrderWorkflowDraft = {
   orderId: string;
   totalAmount: number;
@@ -48,6 +91,14 @@ type OrderWorkflowDraft = {
   trackingNumber: string;
   inspectionNotes: string;
   restockApproved: "yes" | "no";
+  deliveryReason: DeliveryAttemptReason;
+  nextAttemptAt: string;
+  failedAttempts: number;
+  paymentDecision: "verified" | "rejected" | "correction_requested";
+  paymentReference: string;
+  /** Kept as text: an empty box means "not counted", which is not zero. */
+  amountReceived: string;
+  correctionReason: PaymentCorrectionReason;
   refundMethod: "cash" | "bank_transfer" | "mobile_wallet" | "store_credit";
   refundReference: string;
   refundAmount: string;
@@ -77,7 +128,7 @@ type AdminOrder = {
   shipping_state: string | null;
   shipping_postal_code: string | null;
   shipping_country: string | null;
-  payment_method: "cash_on_delivery";
+  payment_method: "cash_on_delivery" | "bank_transfer" | "mmqr";
   payment_status: "unpaid" | "collected" | "refunded";
   cancellation_request_status: OrderRequestStatus;
   cancellation_reason: string | null;
@@ -97,7 +148,21 @@ type AdminOrder = {
   refund_amount?: number | null;
   refund_completed_at?: string | null;
   receipt_number?: string | null;
+  payment_account?: "kbz" | "aya" | "mmqr" | null;
+  payment_verification_status?:
+    | "not_required"
+    | "pending"
+    | "verified"
+    | "rejected"
+    | "correction_requested";
+  payment_reference?: string | null;
+  payment_rejected_reason?: string | null;
+  payment_amount_received?: number | null;
+  payment_correction_reason?: PaymentCorrectionReason | null;
+  payment_slips?: { id: string; file_name?: string | null; created_at: string; note?: string | null }[];
   receipt_email_status?: string;
+  receipt_email_error?: string | null;
+  receipt_sent_at?: string | null;
   admin_order_note: string | null;
   cod_verification_status?: "pending" | "phone_verified" | "deposit_verified" | "approved" | "rejected" | null;
   cod_verification_method?: "phone_callback" | "cod_deposit" | "admin_review" | null;
@@ -109,6 +174,7 @@ type AdminOrder = {
   delivery_tracking_number?: string | null;
   estimated_delivery_at?: string | null;
   delivery_status_detail?: string | null;
+  delivery_events?: { stage: string; happened_at: string }[];
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -128,22 +194,85 @@ type ProductFormState = {
   brand: string;
   price: string;
   wholesalePrice: string;
-  image: string;
-  model3D: string;
   stock: Product["stock"];
   stockQuantity: string;
   specs: string;
   fullSpecs: string;
-  gallery: string;
+  gallery: ProductPhoto[];
+};
+
+type StockCorrectionView = {
+  id: number | null;
+  sourceKey: string;
+  name: string;
+  sourceSheet: string;
+  websiteQuantity: number;
+  sheetQuantity: number;
 };
 
 type SheetSyncReport = {
+  /** Products the sync brings back in line with the sheet (null if unknown). */
+  stockCorrections: {
+    aboveSheet: StockCorrectionView[];
+    removedFromSheet: StockCorrectionView[];
+    heldBack: StockCorrectionView[];
+  } | null;
   dryRun: boolean;
   count: number;
   skippedCount: number;
   warnings: string[];
   bySheet: { sheet: string; products: number }[];
 };
+
+type AutoSyncStatus = {
+  intervalMinutes: number | null;
+  scheduled: boolean;
+  running: boolean;
+  lastCheckAt: string | null;
+  lastResult: "synced" | "unchanged" | "failed" | null;
+  lastSyncAt: string | null;
+  lastSyncCount: number | null;
+  lastError: string | null;
+};
+
+/** Informational only: null when the status cannot be loaded. */
+async function fetchAutoSyncStatus(): Promise<AutoSyncStatus | null> {
+  try {
+    const response = await fetch("/api/admin/sync-products", {
+      headers: authHeaders(),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { automatic?: AutoSyncStatus };
+    return data.automatic ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function describeAutoSync(status: AutoSyncStatus | null) {
+  if (!status) return "Checking automatic sync…";
+
+  const parts = [
+    status.intervalMinutes
+      ? `Automatic sync is on: this server checks the sheet every ${status.intervalMinutes} min and saves only when it changed.`
+      : status.scheduled
+        ? "Automatic sync is on: Google Cloud Scheduler checks the sheet and saves only when it changed."
+        : "Automatic sync is off on this server. Click Sync Products after editing the sheet.",
+  ];
+  if (status.lastCheckAt) {
+    const outcome =
+      status.lastResult === "synced"
+        ? "sheet changes saved"
+        : status.lastResult === "unchanged"
+          ? "no changes"
+          : "failed";
+    parts.push(`Last check ${formatDateTime(status.lastCheckAt)}: ${outcome}.`);
+  }
+  if (status.lastSyncAt) parts.push(`Last saved ${formatDateTime(status.lastSyncAt)}.`);
+
+  return parts.join(" ");
+}
 
 function allowedOrderStatuses(order: AdminOrder) {
   if (order.status === "cancelled" || order.status === "returned") return [order.status];
@@ -163,9 +292,7 @@ function emptyProductForm(): ProductFormState {
     brand: "",
     price: "",
     wholesalePrice: "",
-    image: "/products/macbook-air.png",
-    model3D: "",
-    gallery: "",
+    gallery: [],
     stock: "In Stock",
     stockQuantity: "100",
     specs: JSON.stringify(
@@ -210,9 +337,7 @@ function productToForm(product: Product): ProductFormState {
     wholesalePrice: product.wholesalePrice
       ? String(product.wholesalePrice)
       : "",
-    image: product.image,
-    model3D: product.model3D ?? "",
-    gallery: normalizeGallery(product.fullSpecs.gallery).map(photo => `${photo.url} | ${photo.label}`).join("\n"),
+    gallery: productPhotos(product),
     stock: product.stock,
     stockQuantity:
       product.stockQuantity !== undefined ? String(product.stockQuantity) : "",
@@ -253,7 +378,7 @@ export default function AdminPage() {
       : "forbidden";
 
   const [activePanel, setActivePanel] = useState<
-    "dashboard" | "products" | "orders" | "support" | "wholesale" | "pricing" | "sync"
+    "dashboard" | "products" | "orders" | "queue" | "locations" | "support" | "wholesale" | "pricing" | "sync"
   >("dashboard");
 
   const [products, setProducts] = useState<Product[]>([]);
@@ -289,12 +414,16 @@ export default function AdminPage() {
         panel === "dashboard" ||
         panel === "products" ||
         panel === "orders" ||
+        panel === "locations" ||
+        panel === "queue" ||
+        // Old deep links to the separate Help Cases panel still land somewhere.
+        panel === "cases" ||
         panel === "support" ||
         panel === "wholesale" ||
         panel === "pricing" ||
         panel === "sync"
       ) {
-        setActivePanel(panel);
+        setActivePanel(panel === "cases" ? "queue" : panel);
       }
       if (panel === "products" && params.get("action") === "add") {
         setIsProductFormOpen(true);
@@ -425,12 +554,11 @@ export default function AdminPage() {
         brand: productForm.brand.trim(),
         price,
         wholesalePrice,
-        image: productForm.image.trim() || "/products/macbook-air.png",
-        model3D: productForm.model3D.trim() || undefined,
+        image: productForm.gallery[0]?.url ?? PRODUCT_PLACEHOLDER,
         stock: productForm.stock,
         stockQuantity,
         specs: parseJsonObject(productForm.specs, "Short specs"),
-        fullSpecs: { ...parseJsonObject(productForm.fullSpecs, "Full specs"), gallery: parseGalleryLines(productForm.gallery), galleryManagedBy: "admin" },
+        fullSpecs: { ...parseJsonObject(productForm.fullSpecs, "Full specs"), gallery: normalizeGallery(productForm.gallery), galleryManagedBy: "admin" },
       };
 
       const response = await fetch(
@@ -449,15 +577,36 @@ export default function AdminPage() {
         throw new Error(await getErrorMessage(response));
       }
 
+      const data = (await response.json().catch(() => null)) as {
+        sheetStock?: {
+          sheet: string;
+          cells: { row: number; from: number; to: number }[];
+          sheetQuantityBefore: number;
+          sheetQuantityAfter: number;
+          warning: string | null;
+        } | null;
+      } | null;
+      const sheetStock = data?.sheetStock;
+
       setProductForm(emptyProductForm());
       setIsProductFormOpen(false);
       await loadDashboardData();
 
-      setMessage(
-        productForm.id
-          ? "Product updated successfully."
-          : "Product added successfully."
-      );
+      if (sheetStock) {
+        const changedRows = sheetStock.cells.length
+          ? sheetStock.cells.map((cell) => `row ${cell.row}: ${cell.from} → ${cell.to}`).join(", ")
+          : "the sheet already had this number";
+        setMessage(
+          `Product updated. Google Sheet "${sheetStock.sheet}" stock is now ${sheetStock.sheetQuantityAfter} (was ${sheetStock.sheetQuantityBefore}; ${changedRows}).`
+        );
+        if (sheetStock.warning) setError(sheetStock.warning);
+      } else {
+        setMessage(
+          productForm.id
+            ? "Product updated successfully."
+            : "Product added successfully."
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to save product.");
     } finally {
@@ -492,6 +641,10 @@ export default function AdminPage() {
     }
   }
 
+  // Same switch as the shop: the admin's choice is remembered too.
+  const { t } = useLanguage();
+  const [resendingOrderId, setResendingOrderId] = useState<string | null>(null);
+
   async function handleOrderStatusChange(orderId: string, status: OrderStatus) {
     setMessage("");
     setError("");
@@ -513,7 +666,56 @@ export default function AdminPage() {
       await loadDashboardData();
       setMessage("Order status updated.");
     } catch (err) {
+      // A failed request can still have saved the new status. Reload first so
+      // the dropdown shows what the database really has -- otherwise it keeps
+      // the old status and the admin clicks again. The reload clears the
+      // error, so set it afterwards.
+      await loadDashboardData();
       setError(err instanceof Error ? err.message : "Unable to update order.");
+    }
+  }
+
+  async function handleResendReceipt(order: AdminOrder) {
+    const recipient = order.profiles?.email ?? "the customer";
+    if (!window.confirm(`Email the full receipt to ${recipient}?`)) return;
+
+    setMessage("");
+    setError("");
+    setResendingOrderId(order.id);
+
+    try {
+      const response = await fetch(`/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: {
+          ...authHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action: "resend_receipt" }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await getErrorMessage(response));
+      }
+
+      const data = (await response.json()) as {
+        email?: { status: string; recipient: string | null; error: string | null };
+      };
+      await loadDashboardData();
+
+      const status = data.email?.status;
+      if (status === "sent") {
+        setMessage(`Receipt email sent to ${data.email?.recipient ?? recipient}.`);
+      } else if (status === "not_sent") {
+        setError("Not sent: this customer turned off order emails in Settings.");
+      } else if (status === "not_configured") {
+        setError("Not sent: Gmail is not set up on the server, or this customer has no email address.");
+      } else {
+        setError(data.email?.error ?? "The receipt email could not be sent.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to send the receipt email.");
+    } finally {
+      setResendingOrderId(null);
     }
   }
 
@@ -589,6 +791,16 @@ export default function AdminPage() {
       trackingNumber: "",
       inspectionNotes: "",
       restockApproved: "no",
+      deliveryReason: "no_answer",
+      nextAttemptAt: tomorrow.toISOString().slice(0, 16),
+      failedAttempts: failedDeliveryAttempts(order),
+      paymentDecision: "verified",
+      paymentReference: order.payment_reference ?? "",
+      amountReceived:
+        typeof order.payment_amount_received === "number"
+          ? String(order.payment_amount_received)
+          : "",
+      correctionReason: order.payment_correction_reason ?? "short_payment",
       refundMethod: "bank_transfer",
       refundReference: "",
       refundAmount: String(order.total_amount),
@@ -632,6 +844,63 @@ export default function AdminPage() {
         stage: "mark_received",
         inspection_notes: orderWorkflow.inspectionNotes.trim() || null,
         restock_approved: orderWorkflow.restockApproved === "yes",
+        admin_note: orderWorkflow.adminNote.trim() || null,
+      };
+    } else if (orderWorkflow.action === "payment_review") {
+      if (orderWorkflow.paymentDecision === "rejected" && orderWorkflow.reason.trim().length < 3) {
+        setError("Tell the customer why the payment could not be confirmed.");
+        return;
+      }
+
+      const correction = orderWorkflow.paymentDecision === "correction_requested";
+      const typed = orderWorkflow.amountReceived.trim();
+      // Empty stays null: "not counted" and "nothing arrived" read differently
+      // to the customer, so they must not collapse into 0 here.
+      const counted = correction && typed !== "" ? Number(typed) : null;
+      const needsAmount =
+        orderWorkflow.correctionReason === "short_payment" ||
+        orderWorkflow.correctionReason === "overpaid";
+
+      if (correction && orderWorkflow.reason.trim().length < 10) {
+        setError("Explain the correction so the customer knows exactly what to send.");
+        return;
+      }
+      if (correction && needsAmount && typed === "") {
+        setError("Enter how much actually arrived so the customer sees the exact amount.");
+        return;
+      }
+      if (counted !== null && (!Number.isInteger(counted) || counted < 0)) {
+        setError("The amount received must be a whole number of kyat, or empty.");
+        return;
+      }
+      if (counted !== null && counted === orderWorkflow.totalAmount) {
+        setError(
+          "That is the full order total — verify the payment instead of asking for a correction."
+        );
+        return;
+      }
+
+      payload = {
+        action: "verify_payment",
+        decision: orderWorkflow.paymentDecision,
+        payment_reference: orderWorkflow.paymentReference.trim() || null,
+        reason: orderWorkflow.reason.trim() || null,
+        ...(correction
+          ? { amount_received: counted, correction_reason: orderWorkflow.correctionReason }
+          : {}),
+      };
+    } else if (orderWorkflow.action === "delivery_attempt") {
+      const nextAttempt = orderWorkflow.nextAttemptAt
+        ? new Date(orderWorkflow.nextAttemptAt)
+        : null;
+      if (nextAttempt && Number.isNaN(nextAttempt.getTime())) {
+        setError("Choose a valid date for the next delivery attempt, or leave it empty.");
+        return;
+      }
+      payload = {
+        action: "delivery_attempt_failed",
+        reason: orderWorkflow.deliveryReason,
+        next_attempt_at: nextAttempt ? nextAttempt.toISOString() : null,
         admin_note: orderWorkflow.adminNote.trim() || null,
       };
     } else {
@@ -679,6 +948,26 @@ export default function AdminPage() {
     }
   }
 
+  const [autoSync, setAutoSync] = useState<AutoSyncStatus | null>(null);
+
+  // While the sync panel is open, refresh the automatic sync status every 30 s.
+  useEffect(() => {
+    if (activePanel !== "sync") return;
+    let cancelled = false;
+
+    async function refresh() {
+      const status = await fetchAutoSyncStatus();
+      if (!cancelled && status) setAutoSync(status);
+    }
+
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activePanel]);
+
   async function handleSyncProducts(dryRun: boolean) {
     setMessage("");
     setError("");
@@ -699,6 +988,7 @@ export default function AdminPage() {
         count?: number;
         skippedRows?: unknown[];
         warnings?: string[];
+        stockCorrections?: SheetSyncReport["stockCorrections"];
         summary?: { bySheet?: { sheet: string; products: number }[] };
         error?: string;
       } | null;
@@ -707,11 +997,21 @@ export default function AdminPage() {
         throw new Error(data?.error ?? "Unable to sync products.");
       }
 
-      if (!dryRun) await loadDashboardData();
+      if (!dryRun) {
+        await loadDashboardData();
+        const status = await fetchAutoSyncStatus();
+        if (status) setAutoSync(status);
+      }
 
       const skippedCount = data?.skippedRows?.length ?? 0;
       const warningCount = data?.warnings?.length ?? 0;
-      const details = `${skippedCount} rows skipped; ${warningCount} mapping warnings.`;
+      const stockCorrections = data?.stockCorrections ?? null;
+      const correctionCount =
+        (stockCorrections?.aboveSheet.length ?? 0) +
+        (stockCorrections?.removedFromSheet.length ?? 0);
+      const details = `${skippedCount} rows skipped; ${warningCount} warnings; ${correctionCount} stock ${
+        dryRun ? "corrections to make" : "corrections made"
+      }.`;
 
       setSheetSyncReport({
         dryRun,
@@ -719,6 +1019,7 @@ export default function AdminPage() {
         skippedCount,
         warnings: data?.warnings ?? [],
         bySheet: data?.summary?.bySheet ?? [],
+        stockCorrections,
       });
 
       setMessage(
@@ -798,48 +1099,60 @@ export default function AdminPage() {
           <SidebarButton
             active={activePanel === "dashboard"}
             icon="📊"
-            label="Overview"
+            label={t("admin.overview")}
             onClick={() => setActivePanel("dashboard")}
           />
           <SidebarButton
             active={activePanel === "products"}
             icon="💻"
-            label="Products"
+            label={t("admin.products")}
             onClick={() => setActivePanel("products")}
           />
           <SidebarButton
             active={activePanel === "orders"}
             icon="🧾"
-            label="Customer Purchases"
+            label={t("admin.purchases")}
             onClick={() => setActivePanel("orders")}
+          />
+          <SidebarButton
+            active={activePanel === "queue"}
+            icon="📋"
+            label={t("admin.queue")}
+            onClick={() => setActivePanel("queue")}
+          />
+          <SidebarButton
+            active={activePanel === "locations"}
+            icon="📍"
+            label={t("admin.locations")}
+            onClick={() => setActivePanel("locations")}
           />
           <SidebarButton
             active={activePanel === "support"}
             icon="💬"
-            label="Live Chat"
+            label={t("admin.liveChat")}
             onClick={() => setActivePanel("support")}
           />
           <SidebarButton
             active={activePanel === "wholesale"}
             icon="🏢"
-            label="Wholesale"
+            label={t("admin.wholesale")}
             onClick={() => setActivePanel("wholesale")}
           />
           <SidebarButton
             active={activePanel === "pricing"}
             icon="🏷️"
-            label="Price Lists & Tiers"
+            label={t("admin.priceLists")}
             onClick={() => setActivePanel("pricing")}
           />
           <SidebarButton
             active={activePanel === "sync"}
             icon="🔄"
-            label="Google Sheet Sync"
+            label={t("admin.sheetSync")}
             onClick={() => setActivePanel("sync")}
           />
 
           <div className="px-3 pb-2 pt-6 text-xs font-semibold uppercase text-white/40">
-            Shop
+            {t("admin.shop")}
           </div>
 
           <Link
@@ -847,7 +1160,7 @@ export default function AdminPage() {
             className="flex items-center gap-3 rounded px-4 py-3 text-white/80 hover:bg-white/10"
           >
             <span>🏪</span>
-            Back to Store
+            {t("admin.backToStore")}
           </Link>
 
           <button
@@ -855,7 +1168,7 @@ export default function AdminPage() {
             className="flex w-full items-center gap-3 rounded px-4 py-3 text-left text-white/80 hover:bg-white/10"
           >
             <span>🚪</span>
-            Logout
+            {t("nav.logout")}
           </button>
         </nav>
       </aside>
@@ -864,26 +1177,28 @@ export default function AdminPage() {
         <header className="sticky top-0 z-30 border-b bg-white shadow-sm">
           <div className="flex min-h-16 items-center justify-between gap-4 px-5 py-3">
             <div>
-              <h1 className="text-xl font-bold">Manage</h1>
+              <h1 className="text-xl font-bold">{t("admin.manage")}</h1>
               <p className="text-xs text-zinc-500">
                 {activePanel.replaceAll("_", " ")} / Aphrodite Admin Panel
               </p>
             </div>
 
             <div className="flex items-center gap-3">
+              <LanguageSwitcher />
+
               <button
                 onClick={loadDashboardData}
                 disabled={isLoadingData}
                 className="rounded-full border px-4 py-2 text-sm font-semibold disabled:bg-zinc-100"
               >
-                {isLoadingData ? "Refreshing..." : "Refresh"}
+                {isLoadingData ? t("common.loading") : t("common.refresh")}
               </button>
 
               <button
                 onClick={handleLogout}
                 className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white"
               >
-                Logout
+                {t("nav.logout")}
               </button>
             </div>
           </div>
@@ -907,7 +1222,7 @@ export default function AdminPage() {
           {activePanel === "products" && (
             <section
               className={`mt-6 grid gap-6 ${
-                isProductFormOpen ? "xl:grid-cols-[420px_1fr]" : ""
+                isProductFormOpen ? "xl:grid-cols-[520px_1fr]" : ""
               }`}
             >
               {isProductFormOpen && (
@@ -1093,84 +1408,59 @@ export default function AdminPage() {
                     />
                     <p className="mt-1 text-xs text-zinc-400">
                       Authoritative inventory for checkout. The In/Out of Stock
-                      label follows this number automatically.
+                      label follows this number automatically. For products from
+                      the Google Sheet, a new number is also written to the sheet.
                     </p>
                   </div>
 
-                  <div>
-                    <label className="mb-1 block text-sm font-semibold">
-                      Image Path
-                    </label>
-                    <input
-                      value={productForm.image}
-                      onChange={(event) =>
-                        setProductForm({
-                          ...productForm,
-                          image: event.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border px-4 py-3 outline-none focus:border-red-500"
-                      placeholder="/products/macbook-air.png"
-                    />
-                  </div>
+                  <ProductPhotoUploader
+                    photos={productForm.gallery}
+                    onChange={(gallery) =>
+                      setProductForm({ ...productForm, gallery })
+                    }
+                  />
 
-                  <div>
-                    <label className="mb-1 block text-sm font-semibold">
-                      Model 3D Path
-                    </label>
-                    <input
-                      value={productForm.model3D}
-                      onChange={(event) =>
-                        setProductForm({
-                          ...productForm,
-                          model3D: event.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border px-4 py-3 outline-none focus:border-red-500"
-                      placeholder="/models/laptop.glb"
-                    />
-                  </div>
+                  <details className="rounded-xl border px-4 py-3">
+                    <summary className="cursor-pointer text-sm font-semibold text-zinc-700">
+                      Advanced: specifications (optional)
+                    </summary>
 
-                  <div className="md:col-span-2">
-                    <label htmlFor="product-gallery" className="mb-1 block text-sm font-semibold">Product photos</label>
-                    <textarea id="product-gallery" rows={5} value={productForm.gallery} onChange={event => setProductForm({ ...productForm, gallery: event.target.value })} placeholder={"/products/my-product/front.jpg | Front view\n/products/my-product/rear.jpg | Rear view\n/products/my-product/side.jpg | Side view"} className="w-full rounded-xl border px-4 py-3 text-sm outline-none focus:border-red-500" />
-                    <p className="mt-2 text-xs text-zinc-500">One HTTPS image URL or local image path per line, followed by | and its view name. Up to 12 photos. Saving here keeps this gallery during later sheet syncs.</p>
-                    <div className="mt-3 flex gap-3 overflow-x-auto">{normalizeGallery(productForm.gallery.split("\n").map(line => ({ url: line.split("|")[0], label: line.split("|")[1] }))).map(photo => <img key={photo.url} src={photo.url} alt={photo.label} className="h-20 w-20 rounded-xl border object-contain p-2" />)}</div>
-                  </div>
+                    <div className="mt-4 space-y-4">
+                      <div>
+                        <label className="mb-1 block text-sm font-semibold">
+                          Short Specs JSON
+                        </label>
+                        <textarea
+                          value={productForm.specs}
+                          onChange={(event) =>
+                            setProductForm({
+                              ...productForm,
+                              specs: event.target.value,
+                            })
+                          }
+                          rows={5}
+                          className="w-full rounded-xl border px-4 py-3 font-mono text-xs outline-none focus:border-red-500"
+                        />
+                      </div>
 
-                  <div>
-                    <label className="mb-1 block text-sm font-semibold">
-                      Short Specs JSON
-                    </label>
-                    <textarea
-                      value={productForm.specs}
-                      onChange={(event) =>
-                        setProductForm({
-                          ...productForm,
-                          specs: event.target.value,
-                        })
-                      }
-                      rows={5}
-                      className="w-full rounded-xl border px-4 py-3 font-mono text-xs outline-none focus:border-red-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-sm font-semibold">
-                      Full Specs JSON
-                    </label>
-                    <textarea
-                      value={productForm.fullSpecs}
-                      onChange={(event) =>
-                        setProductForm({
-                          ...productForm,
-                          fullSpecs: event.target.value,
-                        })
-                      }
-                      rows={7}
-                      className="w-full rounded-xl border px-4 py-3 font-mono text-xs outline-none focus:border-red-500"
-                    />
-                  </div>
+                      <div>
+                        <label className="mb-1 block text-sm font-semibold">
+                          Full Specs JSON
+                        </label>
+                        <textarea
+                          value={productForm.fullSpecs}
+                          onChange={(event) =>
+                            setProductForm({
+                              ...productForm,
+                              fullSpecs: event.target.value,
+                            })
+                          }
+                          rows={7}
+                          className="w-full rounded-xl border px-4 py-3 font-mono text-xs outline-none focus:border-red-500"
+                        />
+                      </div>
+                    </div>
+                  </details>
 
                   <div className="flex gap-3">
                     <button
@@ -1264,9 +1554,15 @@ export default function AdminPage() {
                 onResolveRequest={openOrderRequestResolution}
                 onWorkflow={openOrderWorkflow}
                 onDelivery={handleDeliveryUpdate}
+                onResendReceipt={handleResendReceipt}
+                resendingOrderId={resendingOrderId}
               />
             </section>
           )}
+
+          {activePanel === "queue" && <QueuePanel />}
+
+          {activePanel === "locations" && <CustomerLocationsPanel />}
 
           {activePanel === "support" && <SupportPanel />}
 
@@ -1301,6 +1597,15 @@ export default function AdminPage() {
                 </button>
               </div>
 
+              <p className="mt-4 max-w-2xl text-sm text-zinc-600">
+                {describeAutoSync(autoSync)}
+              </p>
+              {autoSync?.lastResult === "failed" && autoSync.lastError && (
+                <p className="mt-1 max-w-2xl text-sm font-semibold text-red-700">
+                  Last automatic sync failed: {autoSync.lastError}
+                </p>
+              )}
+
               {sheetSyncReport && (
                 <div className="mt-6 rounded-2xl border border-zinc-200 bg-zinc-50 p-5">
                   <p className="font-bold">
@@ -1333,6 +1638,35 @@ export default function AdminPage() {
                       </ul>
                     </div>
                   )}
+                  {sheetSyncReport.stockCorrections &&
+                    (sheetSyncReport.stockCorrections.aboveSheet.length > 0 ||
+                      sheetSyncReport.stockCorrections.removedFromSheet.length > 0) && (
+                      <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950">
+                        <p className="font-bold">
+                          {sheetSyncReport.dryRun
+                            ? "Stock that will be corrected to match the sheet"
+                            : "Stock corrected to match the sheet"}
+                        </p>
+                        <p className="mt-1 text-xs text-sky-800">
+                          The website never shows more units than the Google Sheet.
+                        </p>
+                        <ul className="mt-2 list-disc space-y-1 pl-5">
+                          {sheetSyncReport.stockCorrections.aboveSheet.map((item) => (
+                            <li key={`above-${item.sourceKey}`}>
+                              <span className="font-semibold">{item.name}</span> ({item.sourceSheet}):
+                              website {item.websiteQuantity} → sheet {item.sheetQuantity}
+                              {item.sheetQuantity === 0 ? " · Out of Stock" : ""}
+                            </li>
+                          ))}
+                          {sheetSyncReport.stockCorrections.removedFromSheet.map((item) => (
+                            <li key={`removed-${item.sourceKey}`}>
+                              <span className="font-semibold">{item.name}</span> ({item.sourceSheet}):
+                              no longer in the sheet → Out of Stock
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                 </div>
               )}
             </section>
@@ -1405,6 +1739,8 @@ function ProductsTable({
   onEdit: (product: Product) => void;
   onDelete: (product: Product) => void;
 }) {
+  const { t } = useLanguage();
+
   if (products.length === 0) {
     return <p className="p-5 text-sm text-zinc-500">No products found.</p>;
   }
@@ -1414,11 +1750,11 @@ function ProductsTable({
       <table className="w-full min-w-[820px] text-left text-sm">
         <thead className="bg-zinc-50 text-xs uppercase text-zinc-500">
           <tr>
-            <th className="p-4">Product</th>
-            <th className="p-4">Type</th>
-            <th className="p-4">Price</th>
-            <th className="p-4">Stock</th>
-            <th className="p-4">Action</th>
+            <th className="p-4">{t("adminTable.product")}</th>
+            <th className="p-4">{t("adminTable.type")}</th>
+            <th className="p-4">{t("adminTable.price")}</th>
+            <th className="p-4">{t("adminTable.stock")}</th>
+            <th className="p-4">{t("adminTable.action")}</th>
           </tr>
         </thead>
 
@@ -1501,6 +1837,8 @@ function OrdersTable({
   onResolveRequest,
   onWorkflow,
   onDelivery,
+  onResendReceipt,
+  resendingOrderId,
 }: {
   orders: AdminOrder[];
   onStatusChange: (orderId: string, status: OrderStatus) => void;
@@ -1511,7 +1849,11 @@ function OrdersTable({
   ) => void;
   onWorkflow: (order: AdminOrder, action: OrderWorkflowAction) => void;
   onDelivery: (order: AdminOrder) => void;
+  onResendReceipt: (order: AdminOrder) => void;
+  resendingOrderId: string | null;
 }) {
+  const { t } = useLanguage();
+
   if (orders.length === 0) {
     return (
       <p className="p-5 text-sm text-zinc-500">
@@ -1525,14 +1867,14 @@ function OrdersTable({
       <table className="w-full min-w-[1180px] text-left text-sm">
         <thead className="bg-zinc-50 text-xs uppercase text-zinc-500">
           <tr>
-            <th className="p-4">Order</th>
-            <th className="p-4">Customer</th>
-            <th className="p-4">Items</th>
-            <th className="p-4">Total</th>
-            <th className="p-4">Status</th>
-            <th className="p-4">COD Payment</th>
-            <th className="p-4">Customer Request</th>
-            <th className="p-4">Shipping</th>
+            <th className="p-4">{t("adminTable.order")}</th>
+            <th className="p-4">{t("adminTable.customer")}</th>
+            <th className="p-4">{t("adminTable.items")}</th>
+            <th className="p-4">{t("adminTable.total")}</th>
+            <th className="p-4">{t("adminTable.status")}</th>
+            <th className="p-4">{t("adminTable.payment")}</th>
+            <th className="p-4">{t("adminTable.request")}</th>
+            <th className="p-4">{t("adminTable.shipping")}</th>
           </tr>
         </thead>
 
@@ -1574,6 +1916,7 @@ function OrdersTable({
               </td>
 
               <td className="p-4">
+                <p className="mb-2 text-xs font-bold text-blue-700">{orderTracking(order).label}</p>
                 <select
                   value={order.status}
                   disabled={
@@ -1601,17 +1944,100 @@ function OrdersTable({
                     Cancel / out of stock
                   </button>
                 )}
+                {order.status === "shipped" && (
+                  <button
+                    type="button"
+                    onClick={() => onWorkflow(order, "delivery_attempt")}
+                    className="mt-2 block rounded-full bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-100"
+                  >
+                    Delivery attempt failed
+                  </button>
+                )}
+                {failedDeliveryAttempts(order) > 0 && (
+                  <p className="mt-2 text-[10px] font-bold uppercase text-amber-700">
+                    {failedDeliveryAttempts(order)} of {MAX_DELIVERY_ATTEMPTS} attempts failed
+                    {failedDeliveryAttempts(order) >= MAX_DELIVERY_ATTEMPTS && " — consider cancelling"}
+                  </p>
+                )}
               </td>
 
               <td className="p-4">
-                <p className="font-semibold">Cash on delivery</p>
+                <p className="font-semibold">
+                  {paymentMethodLabels[order.payment_method ?? "cash_on_delivery"] ?? "Cash on delivery"}
+                  {order.payment_account && ` · ${order.payment_account.toUpperCase()}`}
+                </p>
                 <span className="mt-1 inline-block rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold capitalize">
                   {order.payment_status}
                 </span>
+                {/* The same sentence the customer is reading right now, from
+                    the same helper, so staff never have to guess. */}
+                <p className="mt-1 max-w-[11rem] text-[10px] text-zinc-500">
+                  Customer sees: <span className="font-semibold text-zinc-700">{nextStepLabels[orderNextStep(order).key]}</span>
+                </p>
+                {order.payment_method && order.payment_method !== "cash_on_delivery" && (
+                  <div className="mt-2">
+                    <p className={`text-[10px] font-bold uppercase ${
+                      order.payment_verification_status === "verified" ? "text-emerald-700"
+                        : order.payment_verification_status === "rejected" ? "text-red-700" : "text-amber-700"
+                    }`}>
+                      Payment {(order.payment_verification_status ?? "pending").replaceAll("_", " ")}
+                    </p>
+                    {order.payment_reference && (
+                      <p className="max-w-[11rem] break-all text-[10px] text-zinc-500">Ref: {order.payment_reference}</p>
+                    )}
+                    {order.payment_rejected_reason && (
+                      <p className="max-w-[11rem] text-[10px] text-red-700">{order.payment_rejected_reason}</p>
+                    )}
+                    {typeof order.payment_amount_received === "number" && (
+                      <p className="max-w-[11rem] text-[10px] font-semibold text-amber-800">
+                        Received {formatCurrency(order.payment_amount_received)} of {formatCurrency(order.total_amount)}
+                        {order.payment_amount_received < order.total_amount &&
+                          ` · ${formatCurrency(order.total_amount - order.payment_amount_received)} still owed`}
+                        {order.payment_amount_received > order.total_amount &&
+                          ` · ${formatCurrency(order.payment_amount_received - order.total_amount)} to refund`}
+                      </p>
+                    )}
+                    {(order.payment_slips ?? []).map((slip, index) => (
+                      <a key={slip.id} href={`/api/orders/${order.id}/payment-slip/${slip.id}`} target="_blank" rel="noreferrer"
+                        className="mt-1 block text-[10px] font-bold text-blue-700 underline">
+                        Open slip {index + 1} · {formatDateTime(slip.created_at)}
+                      </a>
+                    ))}
+                    {(order.payment_slips ?? []).length === 0 && (
+                      <p className="text-[10px] text-zinc-500">No slip uploaded yet</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onWorkflow(order, "payment_review")}
+                      className="mt-2 block rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100"
+                    >
+                      Check payment
+                    </button>
+                  </div>
+                )}
                 {order.receipt_number && (
                   <p className="mt-2 max-w-[11rem] break-all text-[10px] text-zinc-500">
-                    {order.receipt_number}<br />Email: {order.receipt_email_status ?? "not sent"}
+                    {order.receipt_number}<br />Email: {(order.receipt_email_status ?? "not sent").replaceAll("_", " ")}
                   </p>
+                )}
+                {order.receipt_email_status === "failed" && order.receipt_email_error && (
+                  <p className="mt-1 max-w-[11rem] text-[10px] font-semibold text-red-700">
+                    {order.receipt_email_error}
+                  </p>
+                )}
+                {order.status === "delivered" && (
+                  <button
+                    type="button"
+                    onClick={() => onResendReceipt(order)}
+                    disabled={resendingOrderId === order.id}
+                    className="mt-2 block rounded-full bg-zinc-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-zinc-700 disabled:bg-zinc-400"
+                  >
+                    {resendingOrderId === order.id
+                      ? "Sending…"
+                      : order.receipt_email_status === "sent"
+                        ? "Send receipt again"
+                        : "Send receipt email"}
+                  </button>
                 )}
                 <p className="mt-2 text-[10px] font-bold uppercase text-zinc-500">Verification: {(order.cod_verification_status ?? "pending").replaceAll("_", " ")}</p>
               </td>
@@ -1676,7 +2102,7 @@ function OrdersTable({
                 {order.estimated_delivery_at && <p className="mt-1 text-xs text-zinc-500">ETA {formatDateTime(order.estimated_delivery_at)}</p>}
                 {order.delivery_location_consent && order.delivery_latitude != null && order.delivery_longitude != null && <a href={`https://www.google.com/maps?q=${order.delivery_latitude},${order.delivery_longitude}`} target="_blank" rel="noreferrer" className="mt-2 block text-xs font-bold text-blue-600 hover:underline">Open customer-selected delivery pin{order.delivery_accuracy_m != null ? ` (device accuracy ±${Math.round(order.delivery_accuracy_m)} m; not identity proof)` : " (manually placed; not verified)"}</a>}
                 <CustomerLocation userId={order.user_id} />
-                <button type="button" onClick={() => onDelivery(order)} className="mt-3 rounded-full bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100">COD & delivery details</button>
+                <button type="button" onClick={() => onDelivery(order)} className="mt-3 rounded-full bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100">Update tracking / COD</button>
               </td>
             </tr>
           ))}
@@ -1845,6 +2271,8 @@ function OrderWorkflowDialog({
     schedule_pickup: "Schedule return handover",
     mark_received: "Receive and inspect item",
     complete_refund: "Record completed refund",
+    delivery_attempt: "Delivery attempt failed",
+    payment_review: "Check the transfer slip",
   };
 
   return (
@@ -1869,6 +2297,28 @@ function OrderWorkflowDialog({
             <label className="block text-sm font-semibold">Inspection notes<textarea value={draft.inspectionNotes} onChange={(event) => onChange({ inspectionNotes: event.target.value })} rows={4} maxLength={500} placeholder="Model, serial, condition, accessories, fault test..." className="mt-2 w-full rounded-xl border px-4 py-3 font-normal" /></label>
             <label className="block text-sm font-semibold">Can this item be returned to sellable inventory?<select value={draft.restockApproved} onChange={(event) => onChange({ restockApproved: event.target.value as "yes" | "no" })} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal"><option value="no">No — damaged, defective, or not sellable</option><option value="yes">Yes — inspected and sellable</option></select></label>
             <p className="rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900">Inventory is restored only when “Yes” is selected. This avoids selling a faulty returned machine.</p>
+          </>}
+
+          {draft.action === "payment_review" && <>
+            <label className="block text-sm font-semibold">Decision<select value={draft.paymentDecision} onChange={(event) => onChange({ paymentDecision: event.target.value as OrderWorkflowDraft["paymentDecision"] })} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal"><option value="verified">Payment received — verified</option><option value="correction_requested">Ask the customer to correct it</option><option value="rejected">Cannot confirm — rejected</option></select></label>
+
+            {draft.paymentDecision === "correction_requested" && <>
+              <label className="block text-sm font-semibold">What needs correcting?<select value={draft.correctionReason} onChange={(event) => onChange({ correctionReason: event.target.value as PaymentCorrectionReason })} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal">{Object.entries(paymentCorrectionReasons).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <label className="block text-sm font-semibold">How much actually arrived?<input type="number" min={0} step={1} value={draft.amountReceived} onChange={(event) => onChange({ amountReceived: event.target.value })} placeholder="Leave empty if you could not read the slip" className="mt-2 w-full rounded-xl border px-4 py-3 font-normal" /><span className="mt-1 block text-xs font-normal text-zinc-500">The customer is shown this against the {formatCurrency(draft.totalAmount)} total, so they see the exact amount still to pay. Leave it empty if the slip is unreadable — an empty box is not the same as zero.</span></label>
+            </>}
+
+            <label className="block text-sm font-semibold">Bank / transaction reference (optional)<input value={draft.paymentReference} onChange={(event) => onChange({ paymentReference: event.target.value })} maxLength={200} placeholder="Reference you matched against your bank statement" className="mt-2 w-full rounded-xl border px-4 py-3 font-normal" /></label>
+            <label className="block text-sm font-semibold">{draft.paymentDecision === "rejected" ? "Why can it not be confirmed?" : draft.paymentDecision === "correction_requested" ? "What should the customer do? (shown to them)" : "Note (optional)"}<textarea value={draft.reason} onChange={(event) => onChange({ reason: event.target.value })} rows={2} maxLength={500} placeholder={draft.paymentDecision === "correction_requested" ? "Example: We received 300,000 by KBZ on 16 Sept. Please send the rest to the same account and upload the new slip." : ""} className="mt-2 w-full rounded-xl border px-4 py-3 font-normal" /></label>
+            <p className="rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900">Check the slip against your own bank or MMQR record before verifying. Verifying marks the money as collected and lets the order move to confirmed and shipped. Asking for a correction keeps the order and the money already received, and shows the customer exactly what is still owed — use it for a short payment or an unclear slip. Reject only when the payment cannot be used at all.</p>
+          </>}
+
+          {draft.action === "delivery_attempt" && <>
+            <label className="block text-sm font-semibold">What happened?<select value={draft.deliveryReason} onChange={(event) => onChange({ deliveryReason: event.target.value as DeliveryAttemptReason })} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal">{Object.entries(deliveryAttemptReasons).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label className="block text-sm font-semibold">Next attempt (optional)<input type="datetime-local" value={draft.nextAttemptAt} onChange={(event) => onChange({ nextAttemptAt: event.target.value })} className="mt-2 w-full rounded-xl border px-4 py-3 font-normal" /><span className="mt-1 block text-xs font-normal text-zinc-500">Shown to the customer as the new estimated arrival. Clear it if you do not have a date yet.</span></label>
+            <p className="rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+              This is attempt {draft.failedAttempts + 1} of {MAX_DELIVERY_ATTEMPTS}. The order stays shipped and waits for the next attempt; nothing is cancelled and no stock is returned. The customer sees the update in English and Burmese, and gets an email if they have order emails switched on.
+              {draft.failedAttempts + 1 >= MAX_DELIVERY_ATTEMPTS && " This is the last planned attempt — after this, consider cancelling the order so the stock goes back."}
+            </p>
           </>}
 
           {draft.action === "complete_refund" && <>

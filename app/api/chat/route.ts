@@ -12,6 +12,8 @@ import {
   supportMessageSchema,
 } from "@/app/lib/validation";
 
+export const runtime = "nodejs";
+
 export async function GET(request: NextRequest) {
   try {
     const user = await authenticate(request);
@@ -33,6 +35,46 @@ export async function POST(request: NextRequest) {
 
   try {
     const user = await authenticate(request);
+
+    // Two shapes are accepted: plain JSON for a text message, and multipart
+    // when the customer attaches a photo or asks about a specific product.
+    if (request.headers.get("content-type")?.includes("multipart/form-data")) {
+      const form = await request.formData();
+      const file = form.get("file");
+      const productValue = form.get("product_id");
+      const message = String(form.get("message") ?? "");
+
+      const productId =
+        typeof productValue === "string" && productValue.trim()
+          ? Number(productValue)
+          : null;
+
+      if (productId !== null && !Number.isInteger(productId)) {
+        return NextResponse.json({ error: "That product is not valid." }, { status: 400 });
+      }
+
+      const attachment =
+        file instanceof File
+          ? {
+              bytes: await file.arrayBuffer(),
+              contentType: file.type,
+              fileName: file.name,
+            }
+          : null;
+
+      if (!attachment && !productId && !message.trim()) {
+        return NextResponse.json(
+          { error: "Type a message, attach a photo, or choose a product." },
+          { status: 400 }
+        );
+      }
+
+      return NextResponse.json(
+        await sendCustomerSupportMessage(user, message, { attachment, productId }),
+        { status: 201 }
+      );
+    }
+
     const parsed = supportMessageSchema.safeParse(await readJsonBody(request));
 
     if (!parsed.success) {

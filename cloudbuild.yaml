@@ -81,5 +81,6 @@ steps:
       - --max-instances=3
       - --timeout=60
       - --cpu-boost
-      - --set-env-vars=NODE_ENV=production,NEXT_PUBLIC_SUPABASE_URL=${_SUPABASE_URL},NEXT_PUBLIC_SUPABASE_ANON_KEY=${_SUPABASE_ANON_KEY}
-      - --set-secrets=SUPABASE_SERVICE_ROLE_KEY=supabase-service-role-key:latest,GOOGLE_SHEETS_CLIENT_EMAIL=sheets-client-email:latest,GOOGLE_SHEETS_PRIVATE_KEY=sheets-private-key:latest,GOOGLE_SHEETS_SPREADSHEET_ID=sheets-spreadsheet-id:latest
+      - --set-env-vars=NODE_ENV=production,NEXT_PUBLIC_SUPABASE_URL=${_SUPABASE_URL},NEXT_PUBLIC_SUPABASE_ANON_KEY=${_SUPABASE_ANON_KEY},GMAIL_USER=aphrodite.store.mm@gmail.com,APP_URL=https://aphrodite-shop-wef6nwkwva-as.a.run.app
+      - --set-secrets=SUPABASE_SERVICE_ROLE_KEY=supabase-service-role-key:latest,GOOGLE_SHEETS_CLIENT_EMAIL=sheets-client-email:latest,GOOGLE_SHEETS_PRIVATE_KEY=sheets-private-key:latest,GOOGLE_SHEETS_SPREADSHEET_ID=sheets-spreadsheet-id:latest,CRON_SECRET=cron-secret:latest,GMAIL_APP_PASSWORD=gmail-app-password:latest
+

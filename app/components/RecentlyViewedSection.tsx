@@ -1,6 +1,7 @@
 "use client";
 
 import type { Product, UserRole } from "../data/products";
+import { useLanguage } from "../lib/language";
 import ProductCard from "./ProductCard";
 
 type Props = {
@@ -14,6 +15,7 @@ export default function RecentlyViewedSection({
   userRole,
   onClear,
 }: Props) {
+  const { t } = useLanguage();
   if (products.length === 0) return null;
 
   function scrollToHistory() {
@@ -30,17 +32,15 @@ export default function RecentlyViewedSection({
       >
         <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-3xl font-bold">Recently viewed</h2>
-            <p className="mt-1 text-sm text-zinc-500">
-              Saved privately to this customer account.
-            </p>
+            <h2 className="text-3xl font-bold">{t("recent.title")}</h2>
+            <p className="mt-1 text-sm text-zinc-500">{t("recent.subtitle")}</p>
           </div>
           <button
             type="button"
             onClick={onClear}
             className="rounded-full border px-5 py-2 text-sm font-semibold hover:border-red-500 hover:text-red-600"
           >
-            Clear history
+            {t("recent.clear")}
           </button>
         </div>
 
@@ -59,9 +59,9 @@ export default function RecentlyViewedSection({
         type="button"
         onClick={scrollToHistory}
         className="fixed bottom-5 right-5 z-40 rounded-full border border-zinc-200 bg-white px-4 py-3 text-sm font-bold shadow-xl transition hover:-translate-y-1 hover:border-red-500"
-        aria-label="Show recently viewed products"
+        aria-label={t("recent.title")}
       >
-        🕘 Recently viewed ({products.length})
+        🕘 {t("recent.title")} ({products.length})
       </button>
     </>
   );

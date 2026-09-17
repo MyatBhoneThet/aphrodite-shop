@@ -3,9 +3,13 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { Product } from "../data/products";
+import ProductAlertButtons, {
+  type FollowedAlert,
+} from "../components/ProductAlertButtons";
 import { authHeaders } from "../lib/client-auth";
 import { formatProductPrice } from "../lib/format";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import { useLanguage } from "../lib/language";
 
 type WishlistItem = {
   id: string;
@@ -15,18 +19,30 @@ type WishlistItem = {
 
 export default function WishlistPage() {
   const { user, status: userStatus } = useCurrentUser();
+  const { t } = useLanguage();
   const [items, setItems] = useState<WishlistItem[]>([]);
+  const [alerts, setAlerts] = useState<FollowedAlert[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
   const loadWishlist = useCallback(async () => {
     setIsLoading(true);
 
-    const response = await fetch("/api/wishlist", { headers: authHeaders() });
+    // Alerts ride along with the wishlist so each card can show whether the
+    // customer is watching it, without one request per product.
+    const [wishlistResponse, alertResponse] = await Promise.all([
+      fetch("/api/wishlist", { headers: authHeaders() }),
+      fetch("/api/alerts", { headers: authHeaders(), cache: "no-store" }),
+    ]);
 
-    if (response.ok) {
-      const data = (await response.json()) as { items: WishlistItem[] };
+    if (wishlistResponse.ok) {
+      const data = (await wishlistResponse.json()) as { items: WishlistItem[] };
       setItems(data.items);
+    }
+
+    if (alertResponse.ok) {
+      const data = (await alertResponse.json()) as { alerts: FollowedAlert[] };
+      setAlerts(data.alerts);
     }
 
     setIsLoading(false);
@@ -89,13 +105,13 @@ export default function WishlistPage() {
     return (
       <main className="flex min-h-screen items-center justify-center bg-white px-5 text-center text-zinc-950">
         <div>
-          <h1 className="text-3xl font-bold">Login to view your wishlist</h1>
+          <h1 className="text-3xl font-bold">{t("wishlist.loginTitle")}</h1>
           <div className="mt-6 flex justify-center gap-3">
             <Link
               href="/login"
               className="rounded-full bg-red-600 px-6 py-3 font-semibold text-white"
             >
-              Login
+              {t("nav.login")}
             </Link>
             <Link href="/" className="rounded-full border px-6 py-3 font-semibold">
               Back to Store
@@ -105,6 +121,11 @@ export default function WishlistPage() {
       </main>
     );
   }
+
+  const news = alerts.filter((alert) => alert.status.triggered);
+  const productName = (productId: number) =>
+    items.find((item) => item.product_id === productId)?.product.name ??
+    "A product you follow";
 
   return (
     <main className="min-h-screen bg-white text-zinc-950">
@@ -120,7 +141,11 @@ export default function WishlistPage() {
       </header>
 
       <section className="mx-auto max-w-5xl px-5 py-10">
-        <h1 className="text-4xl font-bold">Your Wishlist</h1>
+        <h1 className="text-4xl font-bold">{t("wishlist.title")}</h1>
+        <p className="mt-2 text-zinc-500">
+          Follow a product and we will tell you here when it comes back in stock
+          or the price drops.
+        </p>
 
         {error && (
           <p className="mt-4 rounded-2xl bg-red-50 p-4 text-sm font-semibold text-red-700">
@@ -128,9 +153,44 @@ export default function WishlistPage() {
           </p>
         )}
 
+        {/* Good news first */}
+        {news.length > 0 && (
+          <section
+            aria-label={t("wishlist.alerts")}
+            className="mt-6 rounded-[2rem] border border-emerald-200 bg-emerald-50 p-6"
+          >
+            <h2 className="text-lg font-black text-emerald-900">
+              🎉 {news.length} update{news.length === 1 ? "" : "s"} for you
+            </h2>
+            <ul className="mt-4 space-y-3">
+              {news.map((alert) => (
+                <li
+                  key={alert.id}
+                  className="rounded-2xl border border-emerald-200 bg-white p-4"
+                >
+                  <p className="text-sm font-black text-emerald-800">
+                    {alert.status.headline}
+                  </p>
+                  <p className="mt-1 font-bold">
+                    <Link
+                      href={`/products/${alert.product_id}`}
+                      className="hover:text-red-600"
+                    >
+                      {productName(alert.product_id)}
+                    </Link>
+                  </p>
+                  <p className="mt-1 text-sm text-zinc-600">
+                    {alert.status.detail}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         {items.length === 0 ? (
           <div className="mt-8 rounded-[2rem] bg-zinc-100 p-10 text-center">
-            <p className="text-lg font-semibold">Your wishlist is empty.</p>
+            <p className="text-lg font-semibold">{t("wishlist.empty")}</p>
             <Link
               href="/"
               className="mt-5 inline-block rounded-full bg-red-600 px-6 py-3 font-semibold text-white"
@@ -157,6 +217,16 @@ export default function WishlistPage() {
                   {formatProductPrice(item.product.price)}
                 </p>
 
+                <p
+                  className={`mt-1 text-xs font-bold ${
+                    item.product.stock === "In Stock"
+                      ? "text-green-600"
+                      : "text-red-600"
+                  }`}
+                >
+                  {item.product.stock}
+                </p>
+
                 <div className="mt-4 flex justify-center gap-2">
                   <button
                     onClick={() => addToCart(item.product.id)}
@@ -171,6 +241,15 @@ export default function WishlistPage() {
                   >
                     Remove
                   </button>
+                </div>
+
+                <div className="mt-4 border-t border-zinc-200 pt-4">
+                  <ProductAlertButtons
+                    product={item.product}
+                    alerts={alerts}
+                    onChange={setAlerts}
+                    compact
+                  />
                 </div>
               </article>
             ))}

@@ -134,11 +134,17 @@ describe("private customer support chat", () => {
     await sendCustomerSupportMessage(user(), "  Where is my order?  ");
 
     expect(ensureSupportConversation).toHaveBeenCalledWith("customer-1");
+    // A plain text message carries no photo and no product reference, and the
+    // nulls are asserted explicitly so a future change that silently attaches
+    // something to every message would fail here.
     expect(insertSupportMessage).toHaveBeenCalledWith({
       conversation_id: "conversation-1",
       sender_id: "customer-1",
       sender_role: "customer",
       body: "Where is my order?",
+      attachment_path: null,
+      attachment_type: null,
+      product_id: null,
     });
   });
 

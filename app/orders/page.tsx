@@ -1,11 +1,19 @@
 "use client";
 
 import Image from "next/image";
+import OrderTracking from "../components/OrderTracking";
+import OrderHelpButton from "../components/OrderHelpButton";
+import ReturnWizard from "../components/ReturnWizard";
+import RefundTracker from "../components/RefundTracker";
+import NextStep from "../components/NextStep";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
 import { formatCurrency, formatDateTime } from "../lib/format";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import { useLanguage } from "../lib/language";
+
+const MAX_DELIVERY_ATTEMPTS = 3;
 
 type RequestStatus = "none" | "requested" | "approved" | "pickup_scheduled" | "received" | "refunded" | "rejected";
 type OrderStatus = "pending" | "confirmed" | "shipped" | "delivered" | "cancelled" | "returned";
@@ -14,12 +22,62 @@ type PickupMethod = "courier_pickup" | "store_dropoff";
 type DeliveryEvent = { id: string; stage: string; title: string; description?: string | null; happened_at: string };
 type ReturnEvidence = { id: string; evidence_kind: string; file_name?: string | null; created_at: string };
 
+/** One returned line, with its own decision — see ReturnWizard. */
+type ItemReturnStatus =
+  | "requested"
+  | "more_info_needed"
+  | "approved"
+  | "declined"
+  | "collected"
+  | "inspected"
+  | "refund_approved"
+  | "completed"
+  | "cancelled";
+
+type ItemReturn = {
+  id: string;
+  order_id: string;
+  quantity: number;
+  reason_code: ReturnReason;
+  description: string;
+  preferred_resolution: "replacement" | "refund" | "repair";
+  resolution_granted: "replacement" | "refund" | "repair" | null;
+  status: ItemReturnStatus;
+  admin_decision_note: string | null;
+  review_requested_at: string | null;
+  refund_amount?: number | null;
+  refund_reference?: string | null;
+  refund_sent_at?: string | null;
+  expected_refund_at?: string | null;
+  delay_reason?: string | null;
+  created_at: string;
+  order_items?: { products?: { name?: string | null } | null } | null;
+};
+
 type Order = {
   id: string;
   status: OrderStatus;
   total_amount: number;
   shipping_address: string;
   payment_status: "unpaid" | "collected" | "refunded";
+  payment_method?: "cash_on_delivery" | "bank_transfer" | "mmqr";
+  payment_account?: "kbz" | "aya" | "mmqr" | null;
+  payment_verification_status?:
+    | "not_required"
+    | "pending"
+    | "verified"
+    | "rejected"
+    | "correction_requested";
+  payment_rejected_reason?: string | null;
+  payment_amount_received?: number | null;
+  payment_correction_reason?:
+    | "short_payment"
+    | "overpaid"
+    | "unclear_slip"
+    | "wrong_account"
+    | "other"
+    | null;
+  payment_slips?: { id: string; file_name?: string | null; created_at: string }[];
   cancellation_request_status: RequestStatus;
   cancellation_reason: string | null;
   return_request_status: RequestStatus;
@@ -48,9 +106,6 @@ type Order = {
   order_items?: { id: string; product_id: number; quantity: number; unit_price: number; product?: { name: string } | null }[];
 };
 
-type ReturnForm = { reason: string; reasonCode: ReturnReason; pickupMethod: PickupMethod; pickupAddress: string; evidenceUrl: string; evidenceFiles: File[]; evidenceAttestation: boolean };
-const EMPTY_RETURN_FORM: ReturnForm = { reason: "", reasonCode: "defective", pickupMethod: "courier_pickup", pickupAddress: "", evidenceUrl: "", evidenceFiles: [], evidenceAttestation: false };
-
 const statusStyles: Record<OrderStatus, string> = {
   pending: "bg-amber-100 text-amber-800",
   confirmed: "bg-blue-100 text-blue-800",
@@ -73,33 +128,103 @@ const returnWindowIsOpen = (order: Order) =>
 
 export default function OrdersPage() {
   const { user, status: userStatus } = useCurrentUser();
+  const { t } = useLanguage();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [itemReturns, setItemReturns] = useState<ItemReturn[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [cancellationReasons, setCancellationReasons] = useState<Record<string, string>>({});
-  const [returnForms, setReturnForms] = useState<Record<string, ReturnForm>>({});
   const [processingOrderId, setProcessingOrderId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [slipFiles, setSlipFiles] = useState<Record<string, File | null>>({});
+  const [uploadingOrderId, setUploadingOrderId] = useState<string | null>(null);
+  // Which order currently has the three-step return wizard open.
+  const [returnOrderId, setReturnOrderId] = useState<string | null>(null);
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+
+  const refreshOrders = useCallback(async () => {
+    const response = await fetch("/api/orders", { headers: authHeaders(), cache: "no-store" });
+    if (!response.ok) return;
+    const data = (await response.json()) as { orders: Order[] };
+    setOrders(data.orders);
+  }, []);
+
+  const refreshReturns = useCallback(async () => {
+    const response = await fetch("/api/returns", { headers: authHeaders(), cache: "no-store" });
+    if (!response.ok) return;
+    const data = (await response.json()) as { requests: ItemReturn[] };
+    setItemReturns(data.requests ?? []);
+  }, []);
+
+  /** Sends the transfer slip, then refreshes just this order. */
+  async function submitSlip(order: Order) {
+    const file = slipFiles[order.id];
+    if (!file || uploadingOrderId) return;
+
+    setError("");
+    setMessage("");
+    setUploadingOrderId(order.id);
+
+    try {
+      const body = new FormData();
+      body.append("file", file);
+
+      const response = await fetch(`/api/orders/${order.id}/payment-slip`, {
+        method: "POST",
+        headers: authHeaders(),
+        body,
+      });
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(data?.error ?? "Unable to upload the slip.");
+
+      const refreshed = await fetch(`/api/orders/${order.id}`, {
+        headers: authHeaders(),
+        cache: "no-store",
+      });
+      const refreshedData = (await refreshed.json().catch(() => null)) as { order?: Order } | null;
+      if (refreshed.ok && refreshedData?.order) {
+        const updated = refreshedData.order;
+        setOrders((current) => current.map((item) => (item.id === order.id ? updated : item)));
+      }
+
+      setSlipFiles((current) => ({ ...current, [order.id]: null }));
+      setMessage("Thank you. We will check your payment and update this order.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to upload the slip.");
+    } finally {
+      setUploadingOrderId(null);
+    }
+  }
 
   useEffect(() => {
+    let active = true;
+    let loading = false;
+    const controller = new AbortController();
     async function loadOrders() {
       if (userStatus !== "ready" || !user) { setIsLoading(false); return; }
-      const response = await fetch("/api/orders", { headers: authHeaders() });
-      if (response.ok) {
+      if (loading) return;
+      loading = true;
+      try {
+        const response = await fetch("/api/orders", { headers: authHeaders(), cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error("Unable to refresh your orders. Please try again.");
         const data = (await response.json()) as { orders: Order[] };
-        setOrders(data.orders);
-      } else setError("Unable to load your orders. Please refresh the page.");
-      setIsLoading(false);
+        if (active) setOrders(data.orders);
+        // Returns are listed separately: one order can hold several, each with
+        // its own decision.
+        if (active) await refreshReturns();
+      } catch (error) {
+        if (active) setError(error instanceof Error ? error.message : "Unable to load orders.");
+      } finally {
+        loading = false;
+        if (active) setIsLoading(false);
+      }
     }
     void loadOrders();
-  }, [userStatus, user]);
-
-  function returnForm(orderId: string) {
-    return returnForms[orderId] ?? { ...EMPTY_RETURN_FORM, pickupAddress: orders.find((order) => order.id === orderId)?.shipping_address ?? "" };
-  }
-  function updateReturnForm(orderId: string, update: Partial<ReturnForm>) {
-    setReturnForms((current) => ({ ...current, [orderId]: { ...returnForm(orderId), ...update } }));
-  }
+    const refresh = () => { if (document.visibilityState === "visible") void loadOrders(); };
+    const interval = window.setInterval(refresh, 30000);
+    window.addEventListener("focus", refresh);
+    return () => { active = false; controller.abort(); window.clearInterval(interval); window.removeEventListener("focus", refresh); };
+  }, [userStatus, user, refreshReturns]);
 
   async function submitRequest(order: Order, body: Record<string, unknown>) {
     setError(""); setMessage(""); setProcessingOrderId(order.id);
@@ -113,8 +238,7 @@ export default function OrdersPage() {
       if (!response.ok || !data?.order) throw new Error(data?.error ?? "Unable to submit your request.");
       setOrders((current) => current.map((item) => item.id === order.id ? data.order! : item));
       setCancellationReasons((current) => ({ ...current, [order.id]: "" }));
-      setReturnForms((current) => ({ ...current, [order.id]: { ...EMPTY_RETURN_FORM } }));
-      setMessage(body.action === "request_return" ? "Return request sent. Our team will review it before arranging pickup or drop-off." : "Cancellation request sent for administrator review.");
+      setMessage("Cancellation request sent for administrator review.");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to submit your request.");
     } finally { setProcessingOrderId(null); }
@@ -125,37 +249,29 @@ export default function OrdersPage() {
     if (reason.length < 3) { setError("Please enter a short reason for the cancellation."); return; }
     await submitRequest(order, { action: "request_cancellation", reason });
   }
-  async function submitReturn(order: Order) {
-    const form = returnForm(order.id);
-    if (form.reason.trim().length < 3) { setError("Please describe what is wrong with the item."); return; }
-    if (form.pickupMethod === "courier_pickup" && form.pickupAddress.trim().length < 5) { setError("Enter the address where the courier should collect the item."); return; }
-    if (!form.evidenceAttestation) { setError("Confirm that the return details and evidence are truthful."); return; }
-    if (form.evidenceFiles.length === 0 && !form.evidenceUrl.trim().startsWith("https://")) { setError("Upload at least one photo/video or provide a secure HTTPS evidence link."); return; }
 
-    setProcessingOrderId(order.id);
+  /** Asks a second person to look at a declined return again. */
+  async function askForReview(request: ItemReturn) {
+    const note = reviewNotes[request.id]?.trim() ?? "";
+    if (note.length < 10) { setError(t("return.askReviewHelp")); return; }
+
+    setError(""); setMessage("");
+
     try {
-      for (const file of form.evidenceFiles) {
-        const upload = new FormData();
-        upload.set("file", file);
-        upload.set("evidence_kind", file.type.startsWith("video/") ? "unboxing_video" : form.reasonCode === "damaged_in_transit" ? "shipping_damage_photo" : "product_photo");
-        const uploadResponse = await fetch(`/api/orders/${order.id}/return-evidence`, { method: "POST", headers: authHeaders(), body: upload });
-        const uploadData = (await uploadResponse.json().catch(() => null)) as { error?: string } | null;
-        if (!uploadResponse.ok) throw new Error(uploadData?.error ?? "Unable to upload return evidence.");
-      }
-    } catch (uploadError) {
-      setProcessingOrderId(null);
-      setError(uploadError instanceof Error ? uploadError.message : "Unable to upload return evidence.");
-      return;
+      const response = await fetch(`/api/returns/${request.id}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "request_review", note }),
+      });
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(data?.error ?? "Unable to send your request.");
+
+      setReviewNotes((current) => ({ ...current, [request.id]: "" }));
+      setMessage(t("return.reviewSent"));
+      await refreshReturns();
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : "Unable to send your request.");
     }
-    await submitRequest(order, {
-      action: "request_return",
-      reason: form.reason.trim(),
-      reason_code: form.reasonCode,
-      pickup_method: form.pickupMethod,
-      pickup_address: form.pickupMethod === "courier_pickup" ? form.pickupAddress.trim() : null,
-      evidence_url: form.evidenceUrl.trim() || null,
-      evidence_attestation: true,
-    });
   }
 
   if (userStatus === "checking" || isLoading) return <main className="flex min-h-screen items-center justify-center bg-white">Loading your orders...</main>;
@@ -165,50 +281,226 @@ export default function OrdersPage() {
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
       <header className="border-b bg-white"><div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4">
         <Link href="/" aria-label="Aphrodite Myanmar home"><Image src="/brand/aphrodite-myanmar.png" alt="Aphrodite Myanmar" width={218} height={77} className="h-12 w-auto" priority /></Link>
-        <div className="flex gap-2"><Link href="/returns" className="rounded-full border px-4 py-2 text-sm font-semibold">Return policy</Link><Link href="/" className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">Store</Link></div>
+        <div className="flex gap-2"><Link href="/returns" className="rounded-full border px-4 py-2 text-sm font-semibold">{t("nav.returnPolicy")}</Link><Link href="/" className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">Store</Link></div>
       </div></header>
 
       <section className="mx-auto max-w-5xl px-5 py-10">
-        <div className="rounded-3xl bg-zinc-950 p-8 text-white"><p className="text-sm font-bold uppercase tracking-[0.25em] text-red-400">Customer care</p><h1 className="mt-2 text-4xl font-black">Orders, receipts and returns</h1><p className="mt-3 max-w-2xl text-zinc-300">Track delivery, print your receipt, and request an eligible return within 7 days after delivery.</p></div>
+        <div className="rounded-3xl bg-zinc-950 p-8 text-white"><p className="text-sm font-bold uppercase tracking-[0.25em] text-red-400">Customer care</p><h1 className="mt-2 text-4xl font-black">Orders, receipts and returns</h1><p className="mt-3 max-w-2xl text-zinc-300">Tracking refreshes every 30 seconds. Track delivery, print your receipt, and request an eligible return within 7 days after delivery.</p></div>
         {error && <p role="alert" className="mt-5 rounded-2xl bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</p>}
         {message && <p role="status" className="mt-5 rounded-2xl bg-green-50 p-4 text-sm font-semibold text-green-700">{message}</p>}
 
         {orders.length === 0 ? <p className="mt-8 rounded-3xl bg-white p-10 text-center text-zinc-500 shadow-sm">You haven&apos;t placed any orders yet.</p> : (
           <div className="mt-8 space-y-6">{orders.map((order) => {
             const canCancel = (order.status === "pending" || order.status === "confirmed") && !["requested", "approved"].includes(order.cancellation_request_status);
+            // Bank transfer and MMQR are checked against a slip, so the COD
+            // callback wording below does not apply to them.
+            const isPrepaid =
+              order.payment_method === "bank_transfer" || order.payment_method === "mmqr";
             const returnOpen = returnWindowIsOpen(order);
-            const canReturn = order.status === "delivered" && returnOpen && !["requested", "approved", "pickup_scheduled", "received", "refunded"].includes(order.return_request_status);
-            const form = returnForm(order.id);
+            const canReturn = order.status === "delivered" && returnOpen;
+            const orderReturns = itemReturns.filter((request) => request.order_id === order.id);
+            const deliveryEvents = [...(order.delivery_events ?? [])].sort(
+              (left, right) => Date.parse(left.happened_at) - Date.parse(right.happened_at)
+            );
+            const failedAttempts = deliveryEvents.filter((event) => event.stage === "delivery_failed").length;
+            // Only while the newest update is a failed attempt: once the courier
+            // is on the way again, the normal delivery details come back.
+            const awaitingRetry =
+              order.status === "shipped" &&
+              deliveryEvents[deliveryEvents.length - 1]?.stage === "delivery_failed";
             return <article key={order.id} className="overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4 border-b p-6"><div><p className="text-xl font-black">Order #{order.id.slice(0, 8).toUpperCase()}</p><p className="mt-1 text-sm text-zinc-500">{formatDateTime(order.created_at)}</p>{order.receipt_number && <p className="mt-1 text-xs font-semibold text-zinc-500">Receipt {order.receipt_number}</p>}</div><div className="flex flex-wrap items-center gap-2">{order.receipt_number && <Link href={`/orders/${order.id}/receipt`} className="rounded-full border px-4 py-2 text-xs font-bold hover:border-red-500 hover:text-red-600">View / print receipt</Link>}<span className={`rounded-full px-3 py-2 text-xs font-bold capitalize ${statusStyles[order.status]}`}>{order.status}</span></div></div>
               <div className="p-6">
+                {/* The one thing to do next, derived from this order rather
+                    than stored — see lib/next-step.ts. */}
+                <NextStep order={order} note={order.payment_rejected_reason} />
+                <OrderTracking order={order} />
                 <div className="grid gap-6 md:grid-cols-[1fr_auto]"><div className="space-y-2 text-sm text-zinc-700">{(order.order_items ?? []).map((item) => <p key={item.id} className="flex justify-between gap-4"><span>{item.product?.name ?? `Product #${item.product_id}`} × {item.quantity}</span><span className="font-semibold">{formatCurrency(item.unit_price * item.quantity)}</span></p>)}</div><p className="text-2xl font-black">{formatCurrency(order.total_amount)}</p></div>
-                <div className="mt-5 grid gap-3 rounded-2xl bg-zinc-50 p-4 text-sm sm:grid-cols-3"><div><p className="text-xs uppercase text-zinc-400">Payment</p><p className="font-semibold">Cash on delivery</p></div><div><p className="text-xs uppercase text-zinc-400">Payment status</p><p className="font-semibold capitalize">{order.payment_status}</p></div><div><p className="text-xs uppercase text-zinc-400">Delivery address</p><p className="font-semibold">{order.shipping_address}</p></div></div>
+                <div className="mt-5 grid gap-3 rounded-2xl bg-zinc-50 p-4 text-sm sm:grid-cols-3"><div><p className="text-xs uppercase text-zinc-400">Payment</p><p className="font-semibold">{t(`payment.method.${order.payment_method ?? "cash_on_delivery"}`)}{order.payment_account ? ` · ${order.payment_account.toUpperCase()}` : ""}</p></div><div><p className="text-xs uppercase text-zinc-400">Payment status</p><p className="font-semibold capitalize">{order.payment_status}</p></div><div><p className="text-xs uppercase text-zinc-400">Delivery address</p><p className="font-semibold">{order.shipping_address}</p></div></div>
                 <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-5 text-sm text-blue-950">
                   <div className="grid gap-3 sm:grid-cols-3">
-                    <div><p className="text-xs uppercase text-blue-500">COD verification</p><p className="font-bold capitalize">{humanize(order.cod_verification_status ?? "pending")}</p></div>
+                    <div><p className="text-xs uppercase text-blue-500">{isPrepaid ? t("payment.verification") : "COD verification"}</p><p className="font-bold capitalize">{humanize(isPrepaid ? order.payment_verification_status ?? "pending" : order.cod_verification_status ?? "pending")}</p></div>
                     <div><p className="text-xs uppercase text-blue-500">Courier</p><p className="font-bold">{order.courier_name ?? "Not assigned"}</p></div>
                     <div><p className="text-xs uppercase text-blue-500">Tracking / ETA</p><p className="font-bold">{order.delivery_tracking_number ?? "Pending"}</p>{order.estimated_delivery_at && <p className="text-xs">Estimated {formatDateTime(order.estimated_delivery_at)}</p>}</div>
                   </div>
-                  {order.delivery_status_detail && <p className="mt-3">{order.delivery_status_detail}</p>}
-                  {(order.delivery_events ?? []).length > 0 && <ol className="mt-4 space-y-3 border-l-2 border-blue-200 pl-4">{(order.delivery_events ?? []).map((event) => <li key={event.id}><p className="font-bold">{event.title}</p><p className="text-xs text-blue-700">{formatDateTime(event.happened_at)}{event.description ? ` · ${event.description}` : ""}</p></li>)}</ol>}
+                  {awaitingRetry ? (
+                    // Written in the reader's language rather than showing the
+                    // stored bilingual note twice.
+                    <div className="mt-3 rounded-xl bg-amber-50 p-4 text-amber-950">
+                      <p className="font-bold">{t("delivery.attempt.heading")}</p>
+                      <p className="mt-1">{t("delivery.attempt.message")}</p>
+                      <p className="mt-2 text-xs font-semibold">
+                        {t("delivery.attempt.count", { attempt: failedAttempts, max: MAX_DELIVERY_ATTEMPTS })}
+                      </p>
+                      {order.estimated_delivery_at && (
+                        <p className="mt-1 text-xs">
+                          {t("delivery.attempt.nextAttempt", { date: formatDateTime(order.estimated_delivery_at) })}
+                        </p>
+                      )}
+                      {failedAttempts >= MAX_DELIVERY_ATTEMPTS && (
+                        <p className="mt-2 text-xs font-semibold">{t("delivery.attempt.lastAttempt")}</p>
+                      )}
+                    </div>
+                  ) : (
+                    order.delivery_status_detail && <p className="mt-3">{order.delivery_status_detail}</p>
+                  )}
+                  {(order.delivery_events ?? []).length > 0 && <ol className="mt-4 space-y-3 border-l-2 border-blue-200 pl-4">{(order.delivery_events ?? []).map((event) => <li key={event.id}><p className="font-bold">{event.stage === "delivery_failed" ? t("delivery.attempt.heading") : event.title}</p><p className="text-xs text-blue-700">{formatDateTime(event.happened_at)}{event.description ? ` · ${event.description}` : ""}</p></li>)}</ol>}
                 </div>
                 {order.cancellation_request_status !== "none" && <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm text-red-950"><p className="font-bold capitalize">Cancellation: {humanize(order.cancellation_request_status)}</p>{order.cancellation_reason && <p className="mt-1">{order.cancellation_reason}</p>}</div>}
                 {order.return_request_status !== "none" && <div className="mt-4 rounded-2xl bg-orange-50 p-5 text-sm text-orange-950"><p className="font-bold capitalize">Return: {humanize(order.return_request_status)}</p>{order.return_reason_code && <p className="mt-1">Problem: {returnLabels[order.return_reason_code]}</p>}{order.return_reason && <p className="mt-1">Details: {order.return_reason}</p>}{order.return_pickup_method && <p className="mt-1">Method: {humanize(order.return_pickup_method)}</p>}{order.return_pickup_scheduled_for && <p className="mt-1">Scheduled: {formatDateTime(order.return_pickup_scheduled_for)}</p>}{order.return_pickup_instructions && <p className="mt-1">Instructions: {order.return_pickup_instructions}</p>}{order.return_pickup_tracking_number && <p className="mt-1">Tracking: {order.return_pickup_tracking_number}</p>}{order.return_received_at && <p className="mt-1">Received by store: {formatDateTime(order.return_received_at)}</p>}{order.refund_completed_at && <p className="mt-1 font-semibold">Refund recorded: {formatCurrency(order.refund_amount ?? 0)} by {humanize(order.refund_method ?? "selected method")}{order.refund_reference ? ` (${order.refund_reference})` : ""}</p>}</div>}
                 {(order.return_evidence ?? []).length > 0 && <div className="mt-3 flex flex-wrap gap-2">{(order.return_evidence ?? []).map((evidence) => <a key={evidence.id} href={`/api/orders/${order.id}/return-evidence/${evidence.id}`} target="_blank" rel="noreferrer" className="rounded-full border px-3 py-2 text-xs font-bold hover:border-red-500">Open {humanize(evidence.evidence_kind)}</a>)}</div>}
+                {order.payment_method && order.payment_method !== "cash_on_delivery" && (
+                  <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 p-5 text-sm text-emerald-950">
+                    <p className="font-bold">
+                      {t(`payment.method.${order.payment_method}`)}
+                      {order.payment_account && ` · ${order.payment_account.toUpperCase()}`}
+                    </p>
+                    <p className="mt-1">
+                      {order.payment_verification_status === "verified"
+                        ? t("payment.status.verified")
+                        : order.payment_verification_status === "rejected"
+                          ? t("payment.status.rejected")
+                          : order.payment_verification_status === "correction_requested"
+                            ? t("payment.status.correctionRequested")
+                            : (order.payment_slips ?? []).length > 0
+                              ? t("payment.status.pending")
+                              : t("payment.status.awaitingSlip")}
+                    </p>
+                    {/* Both figures side by side, so a short payment never
+                        leaves the customer working out the difference. */}
+                    {order.payment_verification_status === "correction_requested" &&
+                      typeof order.payment_amount_received === "number" && (
+                        <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+                          <div className="rounded-xl bg-white/70 px-3 py-2">
+                            <dt className="text-xs uppercase opacity-70">
+                              {t("payment.amountReceived")}
+                            </dt>
+                            <dd className="font-black tabular-nums">
+                              {formatCurrency(order.payment_amount_received)}
+                            </dd>
+                          </div>
+                          <div className="rounded-xl bg-white/70 px-3 py-2">
+                            <dt className="text-xs uppercase opacity-70">
+                              {t("payment.amountRemaining")}
+                            </dt>
+                            <dd className="font-black tabular-nums">
+                              {formatCurrency(
+                                Math.max(0, order.total_amount - order.payment_amount_received)
+                              )}
+                            </dd>
+                          </div>
+                        </dl>
+                      )}
+                    {order.payment_rejected_reason && (
+                      <p className="mt-1 font-semibold text-red-700">{order.payment_rejected_reason}</p>
+                    )}
+                    {(order.payment_slips ?? []).map((slip, index) => (
+                      <a key={slip.id} href={`/api/orders/${order.id}/payment-slip/${slip.id}`} target="_blank" rel="noreferrer"
+                        className="mt-2 inline-block rounded-full border border-emerald-300 px-3 py-1 text-xs font-bold hover:border-emerald-600">
+                        {t("payment.slip.uploaded")} {index + 1} · {formatDateTime(slip.created_at)}
+                      </a>
+                    ))}
+                    {order.payment_verification_status !== "verified" && (
+                      <div className="mt-3">
+                        <label className="block text-sm font-semibold" htmlFor={`slip-${order.id}`}>
+                          {t("payment.slip.title")}
+                        </label>
+                        <p className="mt-1 text-xs">{t("payment.slip.help")}</p>
+                        <input id={`slip-${order.id}`} type="file" accept="image/jpeg,image/png,image/webp,application/pdf"
+                          onChange={(event) => setSlipFiles((current) => ({ ...current, [order.id]: event.target.files?.[0] ?? null }))}
+                          className="mt-2 block w-full rounded-xl border bg-white px-4 py-3 text-sm" />
+                        <button type="button" disabled={!slipFiles[order.id] || uploadingOrderId === order.id}
+                          onClick={() => submitSlip(order)}
+                          className="mt-3 rounded-full bg-emerald-700 px-5 py-2 text-sm font-bold text-white disabled:bg-zinc-400">
+                          {uploadingOrderId === order.id ? "Uploading..." : t("payment.slip.title")}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {order.admin_order_note && <p className="mt-3 rounded-xl bg-blue-50 p-3 text-sm text-blue-900">Administrator note: {order.admin_order_note}</p>}
-                {order.status === "delivered" && !returnOpen && order.return_request_status === "none" && <p className="mt-4 rounded-xl bg-zinc-100 p-3 text-sm text-zinc-600">The 7-day online return request window has closed. Contact support if you have a warranty question.</p>}
 
-                {canReturn && <div className="mt-6 border-t pt-6"><div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="text-lg font-black">Request a return</h2><p className="text-sm text-zinc-500">Choose the exact problem and how you want to hand the machine back.</p></div><Link href="/returns" className="text-sm font-semibold text-red-600 hover:underline">Read the return policy</Link></div>
-                  <div className="mt-4 grid gap-4 sm:grid-cols-2"><label className="text-sm font-semibold">Problem<select value={form.reasonCode} onChange={(event) => updateReturnForm(order.id, { reasonCode: event.target.value as ReturnReason })} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal outline-none focus:border-red-500">{Object.entries(returnLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="text-sm font-semibold">Return method<select value={form.pickupMethod} onChange={(event) => updateReturnForm(order.id, { pickupMethod: event.target.value as PickupMethod })} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal outline-none focus:border-red-500"><option value="courier_pickup">Courier pickup</option><option value="store_dropoff">Drop off at store</option></select></label></div>
-                  {form.pickupMethod === "courier_pickup" && <label className="mt-4 block text-sm font-semibold">Pickup address<textarea rows={2} maxLength={500} value={form.pickupAddress} onChange={(event) => updateReturnForm(order.id, { pickupAddress: event.target.value })} className="mt-2 w-full rounded-xl border px-4 py-3 font-normal outline-none focus:border-red-500" /></label>}
-                  <label className="mt-4 block text-sm font-semibold">What happened?<textarea rows={3} maxLength={500} value={form.reason} onChange={(event) => updateReturnForm(order.id, { reason: event.target.value })} placeholder="Example: I ordered black 512 GB, but received silver 256 GB." className="mt-2 w-full rounded-xl border px-4 py-3 font-normal outline-none focus:border-red-500" /></label>
-                  <label className="mt-4 block text-sm font-semibold">Photos or continuous unboxing video<input type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" onChange={(event) => updateReturnForm(order.id, { evidenceFiles: Array.from(event.target.files ?? []) })} className="mt-2 block w-full rounded-xl border bg-white px-4 py-3 font-normal" /></label>
-                  <label className="mt-4 block text-sm font-semibold">Secure evidence link (optional)<input type="url" placeholder="https://drive.google.com/..." value={form.evidenceUrl} onChange={(event) => updateReturnForm(order.id, { evidenceUrl: event.target.value })} className="mt-2 w-full rounded-xl border px-4 py-3 font-normal outline-none focus:border-red-500" /></label>
-                  <label className="mt-4 flex items-start gap-3 text-sm"><input type="checkbox" checked={form.evidenceAttestation} onChange={(event) => updateReturnForm(order.id, { evidenceAttestation: event.target.checked })} className="mt-1" /><span>I confirm these details and files show the item I received and have not been misleadingly edited.</span></label>
-                  <p className="mt-3 text-xs text-zinc-500">Keep the machine, accessories, packaging, serial labels, and proof of order together. Remove passwords and back up personal data before handover.</p><button type="button" disabled={processingOrderId === order.id} onClick={() => submitReturn(order)} className="mt-4 rounded-full bg-red-600 px-6 py-3 text-sm font-bold text-white disabled:opacity-50">{processingOrderId === order.id ? "Sending request..." : "Send return request"}</button>
-                </div>}
-                {canCancel && !canReturn && <div className="mt-6 border-t pt-6"><label htmlFor={`cancel-${order.id}`} className="block text-sm font-semibold">Why are you cancelling this order?</label><textarea id={`cancel-${order.id}`} rows={2} maxLength={500} value={cancellationReasons[order.id] ?? ""} onChange={(event) => setCancellationReasons((current) => ({ ...current, [order.id]: event.target.value }))} className="mt-2 w-full rounded-xl border px-4 py-3 outline-none focus:border-red-500" /><button type="button" disabled={processingOrderId === order.id} onClick={() => submitCancellation(order)} className="mt-3 rounded-full border border-red-600 px-5 py-2 text-sm font-bold text-red-600 disabled:opacity-50">{processingOrderId === order.id ? "Sending request..." : "Request cancellation"}</button></div>}
+                {/* Every return this customer opened on this order, each with
+                    its own decision and its own way back if it was declined. */}
+                {orderReturns.length > 0 && (
+                  <div className="mt-4 space-y-3">
+                    <p className="text-sm font-black">{t("return.myRequests")}</p>
+                    {orderReturns.map((request) => (
+                      <div key={request.id} className="rounded-2xl border border-orange-200 bg-orange-50 p-4 text-sm">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <p className="font-bold">
+                            {request.order_items?.products?.name ?? "Item"} × {request.quantity}
+                          </p>
+                          <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-orange-800">
+                            {t(`return.status.${request.status}`)}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-zinc-600">
+                          {returnLabels[request.reason_code]} · {t(`return.resolution.${request.resolution_granted ?? request.preferred_resolution}`)}
+                        </p>
+                        {request.admin_decision_note && (
+                          <p className="mt-2 rounded-xl bg-white p-3 text-xs">{request.admin_decision_note}</p>
+                        )}
+                        {/* The five steps, read from the same helper the admin
+                            inbox uses, so the two views cannot disagree. */}
+                        <RefundTracker request={request} />
+                        {(request.status === "declined" || request.status === "more_info_needed") && !request.review_requested_at && (
+                          <div className="mt-3">
+                            <p className="text-xs text-zinc-600">{t("return.askReviewHelp")}</p>
+                            <textarea
+                              rows={2}
+                              maxLength={1000}
+                              value={reviewNotes[request.id] ?? ""}
+                              onChange={(event) => setReviewNotes((current) => ({ ...current, [request.id]: event.target.value }))}
+                              className="mt-2 w-full rounded-xl border px-3 py-2 text-sm outline-none focus:border-red-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => askForReview(request)}
+                              className="mt-2 rounded-full bg-zinc-900 px-5 py-2 text-xs font-bold text-white"
+                            >
+                              {t("return.askReview")}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="mt-6 flex flex-wrap gap-2 border-t pt-6">
+                  <OrderHelpButton orderId={order.id} />
+                  {canReturn && returnOrderId !== order.id && (
+                    <button
+                      type="button"
+                      onClick={() => setReturnOrderId(order.id)}
+                      className="rounded-full bg-red-600 px-5 py-2.5 text-xs font-bold text-white"
+                    >
+                      {t("return.start")}
+                    </button>
+                  )}
+                  <Link href="/returns" className="self-center text-xs font-semibold text-red-600 hover:underline">
+                    {t("nav.returnPolicy")}
+                  </Link>
+                </div>
+
+                {canReturn && returnOrderId === order.id && (
+                  <ReturnWizard
+                    order={order}
+                    onSubmitted={() => {
+                      setReturnOrderId(null);
+                      setMessage(t("return.sent"));
+                      void refreshReturns();
+                      void refreshOrders();
+                    }}
+                  />
+                )}
+
+                {order.status === "delivered" && !returnOpen && orderReturns.length === 0 && (
+                  <p className="mt-4 rounded-xl bg-zinc-100 p-3 text-sm text-zinc-600">{t("return.deadlinePassed")}</p>
+                )}
+
+                {canCancel && <div className="mt-6 border-t pt-6"><label htmlFor={`cancel-${order.id}`} className="block text-sm font-semibold">Why are you cancelling this order?</label><textarea id={`cancel-${order.id}`} rows={2} maxLength={500} value={cancellationReasons[order.id] ?? ""} onChange={(event) => setCancellationReasons((current) => ({ ...current, [order.id]: event.target.value }))} className="mt-2 w-full rounded-xl border px-4 py-3 outline-none focus:border-red-500" /><button type="button" disabled={processingOrderId === order.id} onClick={() => submitCancellation(order)} className="mt-3 rounded-full border border-red-600 px-5 py-2 text-sm font-bold text-red-600 disabled:opacity-50">{processingOrderId === order.id ? "Sending request..." : "Request cancellation"}</button></div>}
               </div>
             </article>;
           })}</div>

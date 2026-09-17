@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
 import { formatCurrency, formatDateTime } from "../lib/format";
+import { trackingLabels } from "../lib/order-tracking";
+import type { DeliveryEventStage } from "../lib/supabase";
 import { codReviewError, codReviewSignals } from "../lib/cod-verification";
 
 type Order = {
@@ -14,7 +16,7 @@ type Order = {
 type Review = { callback_confirmed: boolean; address_confirmed: boolean; note: string; reviewed_at: string };
 type Context = { review: Review | null; delivered: number; open: number; cancelled: number };
 const field = "mt-1 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm focus:outline-red-600";
-const stages = ["verified", "packed", "handed_to_courier", "in_transit", "out_for_delivery", "delivered", "delivery_failed"];
+const stages: DeliveryEventStage[] = ["order_placed", "verified", "packed", "handed_to_courier", "in_transit", "out_for_delivery", "delivered", "delivery_failed"];
 
 function localDateTime(value?: string | null) {
   if (!value) return "";
@@ -88,7 +90,7 @@ export default function CodDeliveryForm({ order, onClose, onSaved }: {
   }
   return <section className="m-4 rounded-2xl border border-blue-200 bg-blue-50/40 p-5" aria-labelledby="cod-heading">
     <div className="flex items-start justify-between gap-4">
-      <div><h3 id="cod-heading" ref={heading} tabIndex={-1} className="text-xl font-bold outline-none">COD & delivery details</h3>
+      <div><h3 id="cod-heading" ref={heading} tabIndex={-1} className="text-xl font-bold outline-none">Order tracking & COD</h3>
         <p className="mt-1 text-sm">Order {order.id.slice(0, 8)} · {order.shipping_name} · {formatCurrency(order.total_amount)}</p></div>
       <button type="button" disabled={busy} onClick={onClose} className="rounded-full border bg-white px-4 py-2">Close</button>
     </div>
@@ -116,7 +118,7 @@ export default function CodDeliveryForm({ order, onClose, onSaved }: {
           <label className="text-sm font-semibold">Courier<input className={field} maxLength={120} value={courier} onChange={e => setCourier(e.target.value)} /></label>
           <label className="text-sm font-semibold">Tracking / courier reference<input className={field} maxLength={120} value={tracking} onChange={e => setTracking(e.target.value)} /></label>
           <label className="text-sm font-semibold">Estimated arrival<input type="datetime-local" className={field} value={eta} onChange={e => setEta(e.target.value)} /></label>
-          <label className="text-sm font-semibold">Add timeline event<select className={field} value={stage} onChange={e => { setStage(e.target.value); setTitle(e.target.value.replaceAll("_", " ")); }}><option value="">No new event</option>{stages.map(value => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}</select></label>
+          <label className="text-sm font-semibold">Customer tracking status<select className={field} value={stage} onChange={e => { setStage(e.target.value); setTitle(trackingLabels[e.target.value as DeliveryEventStage] ?? ""); }}><option value="">No new event</option>{stages.map(value => <option key={value} value={value}>{trackingLabels[value]}</option>)}</select></label>
         </div>
         {stage && <div className="space-y-3">
           <label className="block text-sm font-semibold">Customer-facing title<input required minLength={2} maxLength={120} className={field} value={title} onChange={e => setTitle(e.target.value)} /></label>

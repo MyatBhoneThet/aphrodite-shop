@@ -1,19 +1,6 @@
 # Aphrodite Shop
 
-For this update, start with [COD_B2B_SETUP.md](./COD_B2B_SETUP.md): COD form fix,
-staff verification, business-only wholesale pricing and the required migration.
-Its instructions supersede older wholesale-sync instructions below.
-
 Aphrodite Shop is a Next.js ecommerce application for laptops, PC parts, and accessories. It supports category-specific product specifications, a catalogue-based PC Build Planner, customer accounts, login-gated wishlist/cart/COD purchasing, detailed delivery addresses, cancellation and return requests, server-authoritative pricing, inventory-safe checkout, and administrator purchase management.
-
-For the security and architecture review, see [AUDIT_REPORT.md](./AUDIT_REPORT.md).
-For the new customer purchase setup and workflow, see [PURCHASE_FLOW_SETUP.md](./PURCHASE_FLOW_SETUP.md).
-For receipts, returns, pickup, inspection, refunds, and admin cancellation, see [RETURN_AND_RECEIPT_SETUP.md](./RETURN_AND_RECEIPT_SETUP.md).
-For customer settings, catalogue filters, recently viewed products, and the
-GLTF texture error fix, see
-[CUSTOMER_SETTINGS_FILTERS_RECENT_SETUP.md](./CUSTOMER_SETTINGS_FILTERS_RECENT_SETUP.md).
-For category-specific product tables and the budget-based PC Build Planner, see
-[PC_BUILDER_AND_SPECIFICATIONS.md](./PC_BUILDER_AND_SPECIFICATIONS.md).
 
 ## Stack and architecture
 
@@ -78,8 +65,10 @@ The browser calls only same-origin `/api/*` routes. `app/lib/backend.ts` contain
 | `RESEND_API_KEY` | Optional | Secret, server only | Sends the order-confirmation receipt email. The website receipt still works without it. |
 | `RECEIPT_FROM_EMAIL` | With Resend | Server only | Verified sender, for example `Aphrodite Myanmar <receipts@example.com>`. |
 | `RECEIPT_CURRENCY` | Optional | Server only | Currency used in receipt formatting; defaults to `MMK`. |
+| `GEMINI_API_KEY` | Optional | Secret, server only | Turns on AI answers in the storefront **Instant help** assistant. Without it the assistant still works using its free built-in rules. Never prefix with `NEXT_PUBLIC_`. |
+| `GEMINI_MODEL` | Optional | Server only | Pins one Gemini model id. Left unset, the server asks Google which models the key can use and picks a `flash` one, so an upstream rename cannot break the assistant. |
 
-Do not set `NODE_ENV` in `.env.local`; Next.js selects it for `dev`, `build`, and tests. Use separate credentials/projects for development, staging, and production. Google sync expects the production `Laptops`, `Accessories`, and `PC Parts` tabs described in `docs/production-google-sheet-sync.md`.
+Do not set `NODE_ENV` in `.env.local`; Next.js selects it for `dev`, `build`, and tests. Use separate credentials/projects for development, staging, and production. Google sync expects the production `Laptops`, `Accessories`, and `PC Parts` tabs (see Google Sheets product sync below).
 
 ## Authentication and roles
 
@@ -135,11 +124,79 @@ For horizontally scaled self-hosting, replace the in-memory login limiter with a
 
 ## Google Sheets product sync
 
-Configure the Google service-account email and private key, share the APD Sheet with that email, apply the database migrations, and use **Admin → Google Sheet Sync**. The shared spreadsheet ID is built in; `GOOGLE_SHEETS_SPREADSHEET_ID` is only needed to override it. **Dry Run** parses, groups, and validates without writing; **Sync Products** performs a batched source-key upsert after an authenticated administrator check. The storefront loads the complete catalogue in pages and separates laptops, accessories, and PC parts. See [docs/production-google-sheet-sync.md](./docs/production-google-sheet-sync.md) for the live header mapping, current audit counts, access requirements, and the important price-data warning.
+Configure the Google service-account email and private key, share the APD Sheet with that email, apply the database migrations, and use **Admin → Google Sheet Sync**. The shared spreadsheet ID is built in; `GOOGLE_SHEETS_SPREADSHEET_ID` is only needed to override it. **Dry Run** parses, groups, and validates without writing; **Sync Products** performs a batched source-key upsert after an authenticated administrator check. The storefront loads the complete catalogue in pages and separates laptops, accessories, and PC parts.
+
+## Instant help assistant (optional Gemini)
+
+The storefront chat widget has two tabs: **Instant help** (automatic answers) and
+**Live support** (a private conversation with an administrator). Instant help
+works with no configuration at all, using the free offline rules in
+`app/lib/assistant-rules.ts`.
+
+To upgrade Instant help to AI answers with Google Gemini's free tier:
+
+1. Open <https://aistudio.google.com/app/apikey> and sign in with a Google account.
+2. Choose **Create API key**, then copy the key.
+3. Add it to `.env.local` (this file is gitignored and must never be committed):
+
+   ```bash
+   GEMINI_API_KEY=paste-your-key-here
+   ```
+
+4. Stop the dev server and run `npm run dev` again — environment variables are
+   only read at startup.
+
+Behaviour and limits:
+
+- The key is read only on the server in `app/lib/gemini.ts`. It is never sent to
+  the browser and never written to a log line; the browser only ever calls
+  same-origin `/api/assistant`.
+- The catalogue is loaded server-side, so a browser cannot tell the assistant
+  what the shop sells or what it costs. Product cards shown beside an answer
+  always come from real database rows, never from model output.
+- The assistant is scoped to shop topics (products, prices, delivery, orders,
+  receipts, returns, PC building) and declines anything else.
+- If the key is missing, the quota is exhausted, or Google is unreachable, the
+  route silently falls back to the built-in rules, and the disclaimer under the
+  chat box changes to say the message was not sent to an AI provider.
+- Requests are rate limited per IP (`assistant`, 20 per window).
+
+## Signup verification email
+
+The "confirm your email" message is sent by **Supabase Auth**, not by this
+application, so its design and its sender live in the Supabase dashboard rather
+than in this repository. Two settings, once:
+
+1. **Design** — Supabase → Authentication → Emails → **Confirm signup**. Paste
+   `docs/email-templates/supabase-confirm-signup.html` into the message body and
+   set the subject to `Confirm your Aphrodite Myanmar account`. Keep the
+   `{{ .ConfirmationURL }}` placeholder exactly as it is; Supabase fills it in.
+
+2. **Sender name and address** — Supabase → Project Settings → Authentication →
+   **SMTP Settings**. Set *Sender name* to `Aphrodite Myanmar` and *Sender
+   email* to your address. To send from a Gmail address you must enable custom
+   SMTP (`smtp.gmail.com`, port `465`, your address as the username) and use a
+   Google **App Password**, not the normal account password — create it at
+   <https://myaccount.google.com/apppasswords> with 2-Step Verification on.
+   Without custom SMTP, Supabase sends from its own shared address and is rate
+   limited to a few messages per hour, which is fine for testing only.
+
+The contact footer in that template is a copy of `app/lib/email-footer.ts`,
+which the order-receipt email imports. Supabase renders its template on its own
+servers and cannot import from this codebase, so **if you change one, change the
+other**.
 
 ## Admin setup
 
-See [ADMIN_SETUP.md](./ADMIN_SETUP.md) for creating/granting an administrator and [docs/wholesale-pricing.md](./docs/wholesale-pricing.md) for wholesale rules. Never create an admin through public signup metadata.
+Create the user in Supabase Authentication, then give the profile the `admin` role in the Supabase SQL Editor:
+
+```sql
+insert into public.profiles (id, email, full_name, role)
+select id, email, 'Admin', 'admin' from auth.users where email = 'you@example.com'
+on conflict (id) do update set role = 'admin';
+```
+
+Sign in at `/admin/login`. Never create an admin through public signup metadata.
 
 ## Common problems
 

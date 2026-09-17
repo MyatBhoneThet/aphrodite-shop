@@ -402,7 +402,7 @@ function parseLaptops(values: unknown[][]) {
   const warrantyIndex = requireColumn(headers, sheet, "warranty");
   const quantityIndex = requireColumn(headers, sheet, "qty");
   const retailMmkIndex = requireColumn(headers, sheet, "retail_price_mmk");
-  const products: ProductSheetRow[] = [];
+  const rows: SheetSourceRow[] = [];
 
   values.slice(headerIndex + 1).forEach((cells, offset) => {
     const rowNumber = headerIndex + offset + 2;
@@ -422,8 +422,9 @@ function parseLaptops(values: unknown[][]) {
     const { specs, fullSpecs } = laptopSpecifications(detail, warranty);
     Object.assign(fullSpecs, { gallery: sheetGallery(headers, cells), photoSource: cleanText(cells[headers.indexOf("photo_source_url")]) });
 
-    products.push(
-      productRow({
+    rows.push({
+      spec: detail,
+      product: productRow({
         rowNumber,
         sourceKey: createSourceKey(sheet, [brand, modelNumber || name]),
         sourceSheet: sheet,
@@ -436,11 +437,11 @@ function parseLaptops(values: unknown[][]) {
         stockQuantity,
         specs,
         fullSpecs,
-      })
-    );
+      }),
+    });
   });
 
-  return { products, quantityColumnIndex: quantityIndex };
+  return { rows, quantityColumnIndex: quantityIndex };
 }
 
 function parseInventorySheet(
@@ -482,7 +483,7 @@ function parseInventorySheet(
     subheaderAliases: ["qty", "quantity"],
     label: "Closing Qty",
   });
-  const products: ProductSheetRow[] = [];
+  const rows: SheetSourceRow[] = [];
 
   // The live workbook uses a dated group header followed by Qty/Pur Cost/Amt
   // subheaders. The legacy flattened layout remains supported. Header and
@@ -509,8 +510,11 @@ function parseInventorySheet(
     const { specs, fullSpecs } = detailSpecifications(detail, warranty);
     Object.assign(fullSpecs, { gallery: sheetGallery(headers, cells), photoSource: cleanText(cells[headers.indexOf("photo_source_url")]) });
 
-    products.push(
-      productRow({
+    rows.push({
+      // PC Parts has no specs column: its description is the name, which is
+      // already part of the product's identity.
+      spec: specsIndex === undefined ? "" : cleanText(cells[specsIndex]),
+      product: productRow({
         rowNumber,
         sourceKey: createSourceKey(sheet, [
           brand,
@@ -527,11 +531,127 @@ function parseInventorySheet(
         stockQuantity,
         specs,
         fullSpecs,
-      })
-    );
+      }),
+    });
   });
 
-  return { products, quantityColumnIndex: closingQuantityIndex };
+  return { rows, quantityColumnIndex: closingQuantityIndex };
+}
+
+/** One workbook row, with the raw specs text used to tell versions apart. */
+type SheetSourceRow = { product: ProductSheetRow; spec: string };
+
+export type SpecVariantGroup = {
+  sheet: ProductionSheetName;
+  name: string;
+  versions: { label: string; quantity: number; rows: number[] }[];
+};
+
+const VARIANT_KEY_SEPARATOR = ":v-";
+
+/** "16 GB RAM" and "16gb ram" are the same spec; spacing, case and bullets are ignored. */
+function specFingerprint(spec: string) {
+  return spec.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function specParts(spec: string) {
+  return spec
+    .split(/[•|;,\n]/)
+    .map((part) => cleanText(part))
+    .filter(Boolean);
+}
+
+/**
+ * The key of the product a spec version was split from, or null when the key
+ * is not a version. A new version copies that product's photos.
+ */
+export function specVariantBaseKey(sourceKey: string) {
+  const index = sourceKey.indexOf(VARIANT_KEY_SEPARATOR);
+  return index === -1 ? null : sourceKey.slice(0, index);
+}
+
+/**
+ * Rows of the same model whose specs differ (e.g. 256 GB vs 512 GB SSD) become
+ * separate products, so each version has its own stock and a sale of one never
+ * deducts the other.
+ *
+ * - The version in the model's first row keeps the model's existing key, so
+ *   the product already on the website (photos, wishlists, orders) stays
+ *   attached to it. Other versions get a key derived from their specs.
+ * - A row with blank specs is not a version of its own; it joins that first
+ *   version, as it always did.
+ * - Models whose rows all share one spec are untouched.
+ */
+function splitSpecVariants(sourceRows: SheetSourceRow[]) {
+  const byModel = new Map<string, SheetSourceRow[]>();
+  for (const row of sourceRows) {
+    const list = byModel.get(row.product.sourceKey) ?? [];
+    list.push(row);
+    byModel.set(row.product.sourceKey, list);
+  }
+
+  const groups: SpecVariantGroup[] = [];
+
+  for (const [baseKey, modelRows] of byModel) {
+    const versions = new Map<string, SheetSourceRow[]>();
+    for (const row of modelRows) {
+      const fingerprint = specFingerprint(row.spec);
+      if (!fingerprint) continue;
+      versions.set(fingerprint, [...(versions.get(fingerprint) ?? []), row]);
+    }
+    if (versions.size < 2) continue;
+
+    const blankRows = modelRows.filter((row) => !specFingerprint(row.spec));
+    const entries = [...versions.entries()];
+    entries[0][1].push(...blankRows);
+
+    const partSets = entries.map(([, rows]) =>
+      specParts(rows[0].spec).map((part) => ({ part, key: specFingerprint(part) }))
+    );
+    const model = modelRows[0].product;
+    const group: SpecVariantGroup = { sheet: model.sourceSheet, name: model.name, versions: [] };
+    // Shared by every version so the website can show them on one page. It is
+    // public, so it is derived from -- never equal to -- the server-only key.
+    const variantGroup = createHash("sha256")
+      .update(`variant-group:${baseKey}`)
+      .digest("hex")
+      .slice(0, 16);
+
+    entries.forEach(([fingerprint, rows], index) => {
+      // Name each version by the parts the other versions do not share.
+      const unique = partSets[index]
+        .filter(({ key }) => !partSets.every((parts) => parts.some((other) => other.key === key)))
+        .map(({ part }) => part)
+        .join(" · ");
+      const label = truncateLabel(unique || rows[0].spec);
+      const sourceKey =
+        index === 0
+          ? baseKey
+          : `${baseKey}${VARIANT_KEY_SEPARATOR}${createHash("sha256").update(fingerprint).digest("hex").slice(0, 12)}`;
+
+      for (const row of rows) {
+        row.product.sourceKey = sourceKey;
+        row.product.name = `${row.product.name} (${label})`;
+        row.product.fullSpecs = {
+          ...row.product.fullSpecs,
+          variant: { group: variantGroup, model: group.name, label },
+        };
+      }
+      group.versions.push({
+        label,
+        quantity: rows.reduce((sum, row) => sum + (row.product.stockQuantity ?? 0), 0),
+        rows: rows.map((row) => row.product.rowNumber).sort((a, b) => a - b),
+      });
+    });
+
+    groups.push(group);
+  }
+
+  return groups;
+}
+
+function truncateLabel(label: string) {
+  return label.length > 60 ? `${label.slice(0, 57).trim()}…` : label;
 }
 
 function mergeProductRows(rows: ProductSheetRow[]) {
@@ -573,11 +693,9 @@ export function parseProductionSheets(values: ProductionSheetsValues) {
     "Accessories"
   );
   const pcParts = parseInventorySheet(values["PC Parts"], "PC Parts");
-  const sourceProducts = [
-    ...laptops.products,
-    ...accessories.products,
-    ...pcParts.products,
-  ];
+  const sourceRows = [...laptops.rows, ...accessories.rows, ...pcParts.rows];
+  const specVariants = splitSpecVariants(sourceRows);
+  const sourceProducts = sourceRows.map((row) => row.product);
   const quantityColumns: Record<ProductionSheetName, number> = {
     Laptops: laptops.quantityColumnIndex,
     Accessories: accessories.quantityColumnIndex,
@@ -595,6 +713,12 @@ export function parseProductionSheets(values: ProductionSheetsValues) {
     ...(unknownBrandCount
       ? [`${unknownBrandCount} products have no production brand and use \"Unknown\".`]
       : []),
+    ...specVariants.map(
+      (group) =>
+        `${group.name} (${group.sheet}) has ${group.versions.length} versions with different specs, shown on one page with version buttons and separate stock: ${group.versions
+          .map((version) => `${version.label} = ${version.quantity} in stock (rows ${version.rows.join(", ")})`)
+          .join("; ")}. If they are the same laptop, make the specs text match in the sheet.`
+    ),
     ...(products.length > 10 && distinctPrices.size === 1
       ? [
           `All ${products.length} imported products currently use the same workbook price (${products[0]?.price.toLocaleString()}). Confirm that this is intentional before syncing.`,
@@ -606,6 +730,7 @@ export function parseProductionSheets(values: ProductionSheetsValues) {
     products,
     skippedRows,
     warnings,
+    specVariants,
     quantityColumns,
     summary: {
       sourceRows: sourceProducts.length,
@@ -774,31 +899,335 @@ export async function decrementSheetQuantities(
     });
   }
 
-  if (data.length > 0) {
-    const accessToken = await getAccessToken();
-    const response = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ valueInputOption: "RAW", data }),
-        cache: "no-store",
-        signal: AbortSignal.timeout(GOOGLE_API_TIMEOUT_MS),
-      }
-    );
-
-    if (!response.ok) {
-      console.error("[google-sheets] quantity write-back failed", {
-        status: response.status,
-      });
-      throw badRequest(
-        "Unable to write order quantities back to the production Google Sheet."
-      );
-    }
-  }
+  await writeQuantityCells(
+    spreadsheetId,
+    data,
+    "Unable to write order quantities back to the production Google Sheet."
+  );
 
   return updates;
+}
+
+/** Writes quantity cells in one batch. Shared by deduction and restock. */
+async function writeQuantityCells(
+  spreadsheetId: string,
+  data: { range: string; values: number[][] }[],
+  failureMessage: string
+) {
+  if (data.length === 0) return;
+
+  const accessToken = await getAccessToken();
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ valueInputOption: "RAW", data }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(GOOGLE_API_TIMEOUT_MS),
+    }
+  );
+
+  if (!response.ok) {
+    console.error("[google-sheets] quantity write-back failed", {
+      status: response.status,
+    });
+    throw badRequest(failureMessage);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Restocking a cancelled order
+// ---------------------------------------------------------------------------
+
+/** Units to put back for one product, optionally naming the rows they came from. */
+export type SheetRestockItem = {
+  sourceKey: string;
+  quantity: number;
+  rows?: { row: number; quantity: number }[];
+};
+
+export type SheetDeductionRecord = { items: SheetRestockItem[] };
+
+/**
+ * What a checkout actually removed from the workbook, per product and row.
+ * Stored in the audit log so a cancellation can put back exactly those units
+ * -- and nothing, if the deduction never reached the sheet.
+ */
+export function sheetDeductionRecord(
+  updates: SheetQuantityUpdate[]
+): SheetDeductionRecord {
+  return {
+    items: updates
+      .filter((update) => update.cells.length > 0)
+      .map((update) => {
+        const rows = update.cells.map((cell) => ({
+          row: cell.row,
+          quantity: cell.from - cell.to,
+        }));
+        return {
+          sourceKey: update.sourceKey,
+          quantity: rows.reduce((sum, row) => sum + row.quantity, 0),
+          rows,
+        };
+      })
+      .filter((item) => item.quantity > 0),
+  };
+}
+
+/** Reads a stored deduction record back, dropping anything malformed. */
+export function readSheetDeductionRecord(value: unknown): SheetRestockItem[] {
+  const items = (value as { items?: unknown } | null)?.items;
+  if (!Array.isArray(items)) return [];
+
+  return items.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const { sourceKey, quantity, rows } = item as Record<string, unknown>;
+
+    if (
+      typeof sourceKey !== "string" ||
+      typeof quantity !== "number" ||
+      !Number.isInteger(quantity) ||
+      quantity <= 0
+    ) {
+      return [];
+    }
+
+    const safeRows = Array.isArray(rows)
+      ? rows.flatMap((entry) => {
+          const row = (entry ?? {}) as Record<string, unknown>;
+          return typeof row.row === "number" &&
+            Number.isInteger(row.row) &&
+            typeof row.quantity === "number" &&
+            Number.isInteger(row.quantity) &&
+            row.quantity > 0
+            ? [{ row: row.row, quantity: row.quantity }]
+            : [];
+        })
+      : undefined;
+
+    return [{ sourceKey, quantity, rows: safeRows }];
+  });
+}
+
+/**
+ * Decides which cells receive restored units: first the rows the units were
+ * taken from (while they still belong to the product), then any remainder on
+ * the product's first row. Pure, so it can be tested without Google.
+ */
+export function planSheetRestock(
+  currentRows: { row: number; quantity: number }[],
+  quantity: number,
+  preferredRows: { row: number; quantity: number }[] = []
+) {
+  const additions = new Map<number, number>();
+  const knownRows = new Set(currentRows.map((row) => row.row));
+  let remaining = Math.max(0, Math.floor(quantity));
+
+  for (const preferred of preferredRows) {
+    if (remaining <= 0) break;
+    // The sheet may have been edited since checkout; never write to a row that
+    // no longer belongs to this product.
+    if (!knownRows.has(preferred.row)) continue;
+
+    const amount = Math.min(preferred.quantity, remaining);
+    if (amount <= 0) continue;
+
+    additions.set(preferred.row, (additions.get(preferred.row) ?? 0) + amount);
+    remaining -= amount;
+  }
+
+  if (remaining > 0 && currentRows.length > 0) {
+    const firstRow = currentRows[0].row;
+    additions.set(firstRow, (additions.get(firstRow) ?? 0) + remaining);
+    remaining = 0;
+  }
+
+  const cells = currentRows.flatMap((row) => {
+    const added = additions.get(row.row);
+    return added
+      ? [{ row: row.row, from: row.quantity, to: row.quantity + added }]
+      : [];
+  });
+
+  return { cells, unrestored: remaining };
+}
+
+/**
+ * Adds a cancelled order's units back to the workbook's quantity cells.
+ *
+ * Rows are re-read at call time so the addition applies to the sheet's current
+ * numbers. In the returned updates, `shortfall` is the units that could NOT be
+ * put back (the product is no longer in the sheet).
+ *
+ * Callers treat this as best-effort: the cancellation has already committed.
+ */
+export async function incrementSheetQuantities(items: SheetRestockItem[]) {
+  // One entry per product, so two cells are never planned from the same
+  // stale snapshot.
+  const grouped = new Map<string, SheetRestockItem>();
+  for (const item of items) {
+    if (item.quantity <= 0) continue;
+    const current = grouped.get(item.sourceKey);
+    grouped.set(
+      item.sourceKey,
+      current
+        ? {
+            sourceKey: item.sourceKey,
+            quantity: current.quantity + item.quantity,
+            rows: [...(current.rows ?? []), ...(item.rows ?? [])],
+          }
+        : { ...item }
+    );
+  }
+
+  if (grouped.size === 0) return [];
+
+  const { spreadsheetId } = getGoogleSheetsConfig();
+  const { products, quantityColumns } = await fetchProductsSheet();
+  const bySourceKey = new Map(
+    products.map((product) => [product.sourceKey, product])
+  );
+  const updates: SheetQuantityUpdate[] = [];
+  const data: { range: string; values: number[][] }[] = [];
+
+  for (const item of grouped.values()) {
+    const product = bySourceKey.get(item.sourceKey);
+
+    if (!product) {
+      updates.push({
+        sourceKey: item.sourceKey,
+        sheet: "Laptops",
+        cells: [],
+        shortfall: item.quantity,
+        sheetQuantityAfter: 0,
+      });
+      continue;
+    }
+
+    const column = columnLetter(quantityColumns[product.sourceSheet]);
+    const { cells, unrestored } = planSheetRestock(
+      product.rowQuantities,
+      item.quantity,
+      item.rows
+    );
+
+    for (const cell of cells) {
+      data.push({
+        range: `'${product.sourceSheet}'!${column}${cell.row}`,
+        values: [[cell.to]],
+      });
+    }
+
+    updates.push({
+      sourceKey: item.sourceKey,
+      sheet: product.sourceSheet,
+      cells,
+      shortfall: unrestored,
+      sheetQuantityAfter:
+        (product.stockQuantity ?? 0) + (item.quantity - unrestored),
+    });
+  }
+
+  await writeQuantityCells(
+    spreadsheetId,
+    data,
+    "Unable to add cancelled order quantities back to the production Google Sheet."
+  );
+
+  return updates;
+}
+
+// ---------------------------------------------------------------------------
+// Admin sets a product's stock quantity
+// ---------------------------------------------------------------------------
+
+/**
+ * Changes a product's rows so they add up to `target`. Units added go on the
+ * first row (like a restock); units removed come off rows top-down (like a
+ * sale). Only cells that change are returned. Pure, so it can be tested
+ * without Google.
+ */
+export function planSheetQuantitySet(
+  currentRows: { row: number; quantity: number }[],
+  target: number
+) {
+  const wanted = Math.max(0, Math.floor(target));
+  const total = currentRows.reduce((sum, row) => sum + Math.max(0, row.quantity), 0);
+  const cells: { row: number; from: number; to: number }[] = [];
+
+  if (currentRows.length === 0 || wanted === total) return { cells, total };
+
+  if (wanted > total) {
+    const first = currentRows[0];
+    cells.push({
+      row: first.row,
+      from: first.quantity,
+      to: Math.max(0, first.quantity) + (wanted - total),
+    });
+    return { cells, total };
+  }
+
+  let remaining = total - wanted;
+  for (const row of currentRows) {
+    if (remaining <= 0) break;
+    const removal = Math.min(Math.max(0, row.quantity), remaining);
+    if (removal <= 0) continue;
+    remaining -= removal;
+    cells.push({ row: row.row, from: row.quantity, to: row.quantity - removal });
+  }
+
+  return { cells, total };
+}
+
+export type SheetQuantitySetResult =
+  | { status: "not_in_sheet" }
+  | {
+      status: "updated";
+      sheet: ProductionSheetName;
+      cells: { row: number; from: number; to: number }[];
+      /** The product's sheet total before the write (may include unsynced edits). */
+      sheetQuantityBefore: number;
+      sheetQuantityAfter: number;
+    };
+
+/**
+ * Makes a product's quantity cells in the workbook add up to exactly the
+ * number the admin entered. Rows are re-read at call time. Unlike the order
+ * write-backs this is NOT best-effort: it throws when the write fails, so the
+ * caller can refuse to save a stock number the sheet does not have (the next
+ * sync would undo it).
+ */
+export async function setSheetProductQuantity(
+  sourceKey: string,
+  target: number
+): Promise<SheetQuantitySetResult> {
+  const { spreadsheetId } = getGoogleSheetsConfig();
+  const { products, quantityColumns } = await fetchProductsSheet();
+  const product = products.find((item) => item.sourceKey === sourceKey);
+
+  if (!product) return { status: "not_in_sheet" };
+
+  const column = columnLetter(quantityColumns[product.sourceSheet]);
+  const { cells, total } = planSheetQuantitySet(product.rowQuantities, target);
+
+  await writeQuantityCells(
+    spreadsheetId,
+    cells.map((cell) => ({
+      range: `'${product.sourceSheet}'!${column}${cell.row}`,
+      values: [[cell.to]],
+    })),
+    "Unable to write the new stock quantity to the production Google Sheet."
+  );
+
+  return {
+    status: "updated",
+    sheet: product.sourceSheet,
+    cells,
+    sheetQuantityBefore: total,
+    sheetQuantityAfter: Math.max(0, Math.floor(target)),
+  };
 }
