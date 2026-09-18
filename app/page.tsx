@@ -6,12 +6,15 @@ import Navbar from "./components/Navbar";
 import HeroSlider from "./components/HeroSlider";
 import CategoryGrid from "./components/CategoryGrid";
 import ProductSection from "./components/ProductSection";
+import { groupProductVariants } from "./lib/product-variants";
 import ChatbotButton from "./components/ChatbotButton";
+import SiteContact from "./components/SiteContact";
 import ProductFilters from "./components/ProductFilters";
 import RecentlyViewedSection from "./components/RecentlyViewedSection";
 import { authHeaders, clearStoredAuth } from "./lib/client-auth";
 import { useCurrentUser } from "./lib/useCurrentUser";
 import { useDebouncedValue } from "./lib/useDebouncedValue";
+import { useLanguage } from "./lib/language";
 import {
   belongsToCatalogSection,
   CATALOG_SECTION_DETAILS,
@@ -26,7 +29,8 @@ import {
 export default function HomePage() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
-  const [language, setLanguage] = useState<"en" | "my">("en");
+  // Shared with every other page, and remembered between visits.
+  const { language, setLanguage } = useLanguage();
   const { user: currentUser, refresh: refreshUser } = useCurrentUser();
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
@@ -254,7 +258,7 @@ export default function HomePage() {
         brands={brands}
         categories={categories}
         filters={filters}
-        resultCount={visibleProducts.length}
+        resultCount={groupProductVariants(visibleProducts).length}
         onChange={setFilters}
       />
 
@@ -273,7 +277,7 @@ export default function HomePage() {
           </p>
         ) : (
           <ProductSection
-            title={language === "en" ? "Laptops" : "လက်ပ်တော့များ"}
+            title="Laptops"
             products={laptopProducts}
             userRole={userRole}
             initialVisibleCount={3}
@@ -286,7 +290,7 @@ export default function HomePage() {
 
       <div id="accessories">
         <ProductSection
-          title={language === "en" ? "Accessories" : "Accessories များ"}
+          title="Accessories"
           products={accessoryProducts}
           userRole={userRole}
           initialVisibleCount={3}
@@ -318,7 +322,7 @@ export default function HomePage() {
           </div>
         </section>
         <ProductSection
-          title={language === "en" ? "PC Parts" : "PC Parts များ"}
+          title="PC Parts"
           products={pcPartProducts}
           userRole={userRole}
           initialVisibleCount={3}
@@ -343,10 +347,20 @@ export default function HomePage() {
           </h2>
           <p className="mt-3 text-zinc-500">
             {language === "en"
-              ? "Chat with us and we will help you find the right laptop."
-              : "Chat မှတဆင့် သင့်အတွက်သင့်တော်သော Laptop ကို ရွေးချယ်ပေးပါမည်။"}
+              ? "Answer three quick questions, or chat with us and we will help you find the right laptop."
+              : "မေးခွန်း ၃ ခုဖြေပါ။ သို့မဟုတ် Chat မှတဆင့် သင့်အတွက်သင့်တော်သော Laptop ကို ရွေးချယ်ပေးပါမည်။"}
           </p>
+
+          <a
+            href="/find-my-laptop"
+            className="mt-6 inline-flex items-center gap-2 rounded-full bg-red-600 px-7 py-3.5 font-bold text-white shadow-lg shadow-red-600/25 transition hover:bg-red-500"
+          >
+            <span aria-hidden="true">🔎</span>
+            {language === "en" ? "Find my laptop" : "ကျွန်ုပ်၏ Laptop ရှာရန်"}
+          </a>
         </div>
+
+        <SiteContact />
       </section>
 
       <ChatbotButton

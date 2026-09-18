@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import LocationSharing from "./components/LocationSharing";
+import { LanguageProvider } from "./lib/language";
 
 export const metadata: Metadata = {
   title: "Aphrodite Store",
@@ -13,8 +14,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" data-scroll-behavior="smooth">
-      <body>{children}<LocationSharing /></body>
+    // Browser extensions (e.g. QuillBot, CrossPilot, Grammarly) add attributes to
+    // <html>/<body> before React loads. This only ignores attribute differences on
+    // these two elements; mismatches inside the page are still reported.
+    <html lang="en" data-scroll-behavior="smooth" suppressHydrationWarning>
+      <body suppressHydrationWarning>
+        <LanguageProvider>
+          {children}
+          <LocationSharing />
+        </LanguageProvider>
+      </body>
     </html>
   );
 }

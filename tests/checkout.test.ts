@@ -9,6 +9,7 @@ vi.mock("../app/lib/supabase", async (importOriginal) => {
     selectCart: vi.fn(),
     selectPriceListById: vi.fn(),
     selectTiersForProducts: vi.fn(),
+    selectPercentBandsForList: vi.fn(),
     selectProductsByIdsService: vi.fn(),
     checkoutOrderRpc: vi.fn(),
     selectOrderById: vi.fn(),
@@ -16,7 +17,7 @@ vi.mock("../app/lib/supabase", async (importOriginal) => {
   };
 });
 
-import { createOrder, getCart } from "../app/lib/backend";
+import { createOrder, getCart, productDTO } from "../app/lib/backend";
 import { AppError } from "../app/lib/errors";
 import {
   checkoutOrderRpc,
@@ -26,6 +27,7 @@ import {
   selectPriceListById,
   selectProductsByIdsService,
   selectTiersForProducts,
+  selectPercentBandsForList,
   type CartItemRow,
   type CurrentUser,
   type Profile,
@@ -134,6 +136,8 @@ beforeEach(() => {
     is_active: true,
   });
   vi.mocked(selectTiersForProducts).mockReset().mockResolvedValue(LADDER);
+  // This list prices with fixed per-product tiers, not "% off retail" bands.
+  vi.mocked(selectPercentBandsForList).mockReset().mockResolvedValue([]);
   vi.mocked(selectProductsByIdsService)
     .mockReset()
     .mockResolvedValue([cartRow().products!]);
@@ -370,5 +374,36 @@ describe("cart pricing (existing retail flow)", () => {
       unitPrice: 45_000,
       unitsAway: 90,
     });
+  });
+});
+
+describe("promotional checkout", () => {
+  function setPromotion(endsAt: string | null = null) {
+    const row = cartRow();
+    row.products!.full_specs = { promotion: { price: 40000, startsAt: null, endsAt } };
+    vi.mocked(selectCart).mockResolvedValue([row]);
+    vi.mocked(selectProductsByIdsService).mockResolvedValue([row.products!]);
+  }
+  it("uses the same sale price in cart and saved order lines", async () => {
+    setPromotion();
+    const cart = await getCart(user());
+    expect(cart.items[0].pricing).toMatchObject({ unitPrice: 40000, retailUnitPrice: RETAIL, promotional: true });
+    await createOrder(user(), { ...SHIPPING, expected_total: 400000 });
+    expect(vi.mocked(checkoutOrderRpc).mock.calls[0][0].lines[0]).toMatchObject({ unit_price: 40000, retail_unit_price: RETAIL, tier_id: null });
+  });
+  it("shows wholesale ladder prices no higher than the current offer", () => {
+    const product = { id: 1, name: "Laptop", type: "laptop" as const, category: "Laptop", brand: "HP", price: RETAIL, image: "/test.png", stock: "In Stock" as const, specs: {}, fullSpecs: { promotion: { price: 40000, startsAt: null, endsAt: null } } };
+    expect(productDTO(product, null, LADDER).tiers?.map(t => t.unitPrice)).toEqual([40000, 40000]);
+    expect(productDTO({ ...product, fullSpecs: {} }, null, LADDER).tiers?.map(t => t.unitPrice)).toEqual([48000, 45000]);
+  });
+  it("does not stack the sale and wholesale discounts", async () => {
+    setPromotion();
+    await createOrder(approvedWholesaleUser(), SHIPPING);
+    expect(vi.mocked(checkoutOrderRpc).mock.calls[0][0].lines[0]).toMatchObject({ unit_price: 40000, tier_id: null, price_list_id: null });
+  });
+  it("rejects an outdated checkout total after a promotion expires", async () => {
+    setPromotion("2020-01-01T00:00:00Z");
+    await expect(createOrder(user(), { ...SHIPPING, expected_total: 400000 })).rejects.toThrow("Prices were updated");
+    expect(checkoutOrderRpc).not.toHaveBeenCalled();
   });
 });

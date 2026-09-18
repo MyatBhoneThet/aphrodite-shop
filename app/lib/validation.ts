@@ -56,6 +56,13 @@ export const wishlistInputSchema = z.object({
   productId: z.number().int().positive().optional(),
 });
 
+export const productAlertInputSchema = z.object({
+  product_id: z.number().int().positive(),
+  kind: z.enum(["back_in_stock", "price_drop"]),
+  // Optional ceiling for a price-drop alert ("tell me under 3,000,000").
+  target_price: z.number().int().positive().max(2147483647).optional(),
+});
+
 export const orderInputSchema = z
   .object({
     shipping_name: z
@@ -81,13 +88,15 @@ export const orderInputSchema = z
     shipping_state: z.string().trim().refine((value) => Boolean(normalizeMyanmarRegion(value)), "Select a Myanmar state or region.").transform((value) => normalizeMyanmarRegion(value)!),
     shipping_postal_code: z.string().trim().min(2).max(20).optional(),
     shipping_country: z.string().trim().refine(isMyanmarCountry, "We currently deliver within Myanmar only.").transform(() => "Myanmar"),
-    payment_method: z.literal("cash_on_delivery").default("cash_on_delivery"),
-    cod_confirmation: z.literal(true, {
-      error: "Confirm that the delivery address and recipient are correct.",
-    }),
-    cod_contact_confirmation: z.literal(true, {
-      error: "Confirm that the recipient can answer the verification call.",
-    }),
+    payment_method: z
+      .enum(["cash_on_delivery", "bank_transfer", "mmqr"])
+      .default("cash_on_delivery"),
+    /** Which account the customer says they paid into (bank transfer / MMQR). */
+    payment_account: z.enum(["kbz", "aya", "mmqr"]).optional().nullable(),
+    // The two COD promises below are checked in superRefine: they are required
+    // for cash on delivery and meaningless for a prepaid order.
+    cod_confirmation: z.literal(true).optional(),
+    cod_contact_confirmation: z.literal(true).optional(),
     delivery_location_consent: z.boolean().optional().default(false),
     delivery_location: z
       .object({
@@ -104,6 +113,40 @@ export const orderInputSchema = z
     expected_total: z.number().int().nonnegative().optional(),
   })
   .superRefine((value, context) => {
+    if (value.payment_method === "cash_on_delivery") {
+      if (value.cod_confirmation !== true) {
+        context.addIssue({
+          code: "custom",
+          path: ["cod_confirmation"],
+          message: "Confirm that the delivery address and recipient are correct.",
+        });
+      }
+      if (value.cod_contact_confirmation !== true) {
+        context.addIssue({
+          code: "custom",
+          path: ["cod_contact_confirmation"],
+          message: "Confirm that the recipient can answer the verification call.",
+        });
+      }
+    } else if (!value.payment_account) {
+      context.addIssue({
+        code: "custom",
+        path: ["payment_account"],
+        message: "Choose the account you are paying into.",
+      });
+    } else if (value.payment_method === "mmqr" && value.payment_account !== "mmqr") {
+      context.addIssue({
+        code: "custom",
+        path: ["payment_account"],
+        message: "MMQR payments must use the MMQR account.",
+      });
+    } else if (value.payment_method === "bank_transfer" && value.payment_account === "mmqr") {
+      context.addIssue({
+        code: "custom",
+        path: ["payment_account"],
+        message: "Choose the KBZ or AYA bank account for a bank transfer.",
+      });
+    }
     if (value.delivery_location && !isApproximatelyInMyanmar(value.delivery_location.latitude, value.delivery_location.longitude)) {
       context.addIssue({
         code: "custom",
@@ -240,6 +283,158 @@ export const customerOrderActionSchema = z.union([
   }),
 ]);
 
+// "Get help with this order": one button, five topics. The order, payment
+// history, delivery events and past messages are attached server-side, so the
+// customer only has to say what is wrong once.
+export const helpCaseInputSchema = z.object({
+  topic: z.enum([
+    "payment",
+    "delivery",
+    "faulty_item",
+    "cancel_order",
+    "warranty",
+  ]),
+  summary: z
+    .string()
+    .trim()
+    .min(5, "Please tell us briefly what went wrong.")
+    .max(1000, "Please keep this under 1000 characters."),
+});
+
+export const adminHelpCaseUpdateSchema = z.object({
+  status: z.enum(["open", "waiting_customer", "resolved", "closed"]),
+  admin_note: z.string().trim().max(1000).optional().nullable(),
+});
+
+const returnResolution = z.enum(["replacement", "refund", "repair"]);
+
+// A return names ONE order line, so a faulty mouse never drags the laptop it
+// was bought with into the claim.
+export const returnRequestInputSchema = z
+  .object({
+    order_id: z.string().uuid("A valid order is required."),
+    order_item_id: z.string().uuid("Choose which item you are returning."),
+    quantity: z.number().int().positive().max(999).default(1),
+    reason_code: returnReasonCode,
+    description: z
+      .string()
+      .trim()
+      .min(10, "Please describe the problem in at least 10 characters.")
+      .max(1000),
+    preferred_resolution: returnResolution,
+    collection_method: z.enum(["courier_pickup", "store_dropoff"]),
+    pickup_address: z.string().trim().max(500).optional().nullable(),
+    // The customer states they filmed the parcel before opening it.
+    unboxing_video_confirmed: z.boolean().default(false),
+    evidence_url: z.string().trim().url().max(1000).optional().nullable(),
+  })
+  .superRefine((value, context) => {
+    if (
+      value.collection_method === "courier_pickup" &&
+      (value.pickup_address ?? "").trim().length < 5
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["pickup_address"],
+        message: "Enter the address where the courier should collect the item.",
+      });
+    }
+    // Transit damage is the one claim that depends on the unopened parcel, so
+    // the continuous unboxing video is not optional there.
+    if (
+      value.reason_code === "damaged_in_transit" &&
+      !value.unboxing_video_confirmed
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["unboxing_video_confirmed"],
+        message:
+          "Transit damage needs the unboxing video you recorded before opening the parcel.",
+      });
+    }
+  });
+
+/** A declined customer asking for one more look. */
+export const returnReviewRequestSchema = z.object({
+  action: z.literal("request_review"),
+  note: z
+    .string()
+    .trim()
+    .min(10, "Tell us what you would like us to look at again.")
+    .max(1000),
+});
+
+export const adminReturnDecisionSchema = z
+  .object({
+    action: z.literal("decide"),
+    decision: z.enum(["approve", "more_info", "decline"]),
+    resolution_granted: returnResolution.optional().nullable(),
+    note: z.string().trim().max(1000).optional().nullable(),
+  })
+  .superRefine((value, context) => {
+    // A decline or an information request is only fair if it says why.
+    if (value.decision !== "approve" && (value.note ?? "").trim().length < 10) {
+      context.addIssue({
+        code: "custom",
+        path: ["note"],
+        message:
+          "Explain your decision so the customer knows what to do next.",
+      });
+    }
+  });
+
+/** Moving an approved item-return along the refund ladder. */
+export const adminReturnAdvanceSchema = z.object({
+  action: z.literal("advance"),
+  stage: z.enum(["collected", "inspected", "refund_approved", "completed"]),
+  note: z.string().trim().max(1000).optional().nullable(),
+  refund_amount: z.number().int().nonnegative().optional().nullable(),
+  refund_method: z
+    .enum(["cash", "bank_transfer", "mobile_wallet", "store_credit"])
+    .optional()
+    .nullable(),
+  refund_reference: z.string().trim().max(200).optional().nullable(),
+});
+
+/**
+ * The date shown to the customer, and the explanation when it moves. Kept
+ * apart from `advance` so staff can promise (or correct) a date at any stage
+ * without pushing the refund forward.
+ */
+export const adminRefundPlanSchema = z.object({
+  action: z.literal("refund_plan"),
+  expected_refund_at: z.string().datetime({ offset: true }).optional().nullable(),
+  delay_reason: z.string().trim().max(500).optional().nullable(),
+});
+
+export const adminReturnRequestMutationSchema = z.union([
+  adminReturnDecisionSchema,
+  adminReturnAdvanceSchema,
+  adminRefundPlanSchema,
+]);
+
+const queueSubjectType = z.enum(["order", "help_case", "return_request"]);
+
+/** Giving a case an owner, a next action and a due date. */
+export const adminQueueAssignmentSchema = z.object({
+  subject_type: queueSubjectType,
+  subject_id: z.string().uuid("A valid case is required."),
+  owner_id: z.string().uuid().optional().nullable(),
+  next_action: z.string().trim().max(300).optional().nullable(),
+  due_at: z.string().datetime({ offset: true }).optional().nullable(),
+});
+
+/** Internal only. Never reaches the customer's support thread. */
+export const adminStaffNoteSchema = z.object({
+  subject_type: queueSubjectType,
+  subject_id: z.string().uuid("A valid case is required."),
+  body: z
+    .string()
+    .trim()
+    .min(1, "Write the note before saving it.")
+    .max(2000, "Notes must be 2000 characters or fewer."),
+});
+
 export const adminOrderResolutionSchema = z.object({
   action: z.literal("resolve_request"),
   request_type: z.enum(["cancellation", "return"]),
@@ -260,6 +455,68 @@ export const adminOrderCancellationSchema = z.object({
 });
 
 const optionalAdminText = z.string().trim().max(500).optional().nullable();
+
+/** Admin decision on an uploaded transfer slip. */
+export const adminPaymentVerificationSchema = z
+  .object({
+    action: z.literal("verify_payment"),
+    decision: z.enum(["verified", "rejected", "correction_requested"]),
+    /** Bank reference or transaction id the admin matched against the slip. */
+    payment_reference: z.string().trim().max(200).optional().nullable(),
+    reason: z.string().trim().max(500).optional().nullable(),
+    /** What actually arrived, so the customer sees the exact remainder. */
+    amount_received: z.number().int().nonnegative().optional().nullable(),
+    correction_reason: z
+      .enum(["short_payment", "overpaid", "unclear_slip", "wrong_account", "other"])
+      .optional()
+      .nullable(),
+  })
+  .superRefine((value, context) => {
+    if (value.decision !== "correction_requested") return;
+
+    if (!value.correction_reason) {
+      context.addIssue({
+        code: "custom",
+        path: ["correction_reason"],
+        message: "Choose what the customer needs to correct.",
+      });
+    }
+    // The whole point of a correction is that the customer is told exactly
+    // what to do, so the explanation is required rather than optional.
+    if ((value.reason ?? "").trim().length < 10) {
+      context.addIssue({
+        code: "custom",
+        path: ["reason"],
+        message: "Explain the correction so the customer knows exactly what to send.",
+      });
+    }
+    // Without a counted amount we cannot show a remainder, so "short payment"
+    // would leave the customer guessing.
+    if (
+      (value.correction_reason === "short_payment" || value.correction_reason === "overpaid") &&
+      typeof value.amount_received !== "number"
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["amount_received"],
+        message: "Enter how much actually arrived so the customer sees the exact amount.",
+      });
+    }
+  });
+
+/** Courier could not hand the order over: recorded against a shipped order. */
+export const adminDeliveryAttemptSchema = z.object({
+  action: z.literal("delivery_attempt_failed"),
+  reason: z.enum([
+    "no_answer",
+    "phone_off",
+    "address_problem",
+    "customer_rescheduled",
+    "nobody_home",
+  ]),
+  next_attempt_at: z.string().datetime({ offset: true }).optional().nullable(),
+  admin_note: optionalAdminText,
+});
 
 export const adminReturnWorkflowSchema = z.union([
   z.object({
@@ -339,6 +596,11 @@ export const adminDeliveryUpdateSchema = z
     }
   });
 
+// Admin: email the full receipt of a delivered order to the customer again.
+export const adminReceiptResendSchema = z
+  .object({ action: z.literal("resend_receipt") })
+  .strict();
+
 export const orderMutationSchema = z.union([
   orderStatusSchema,
   customerOrderActionSchema,
@@ -346,7 +608,48 @@ export const orderMutationSchema = z.union([
   adminOrderCancellationSchema,
   adminReturnWorkflowSchema,
   adminDeliveryUpdateSchema,
+  adminReceiptResendSchema,
+  adminDeliveryAttemptSchema,
+  adminPaymentVerificationSchema,
 ]);
+
+// Instant-help assistant. Shorter cap than live support: these go to an
+// external model, so the prompt stays small and cheap.
+export const assistantMessageSchema = z.object({
+  message: z
+    .string()
+    .trim()
+    .min(1, "Please enter a question.")
+    .max(500, "Question must be 500 characters or fewer."),
+  // Earlier turns of this conversation, so follow-up questions make sense.
+  // Capped hard: this is client-supplied text that goes into the AI prompt.
+  history: z
+    .array(
+      z.object({
+        role: z.enum(["user", "model"]),
+        text: z.string().trim().max(1000),
+      })
+    )
+    .max(10)
+    .optional(),
+});
+
+// What the administrator broadcasts to customers in the live-chat panel.
+export const adminPresenceSchema = z.object({
+  status: z.enum(["online", "away", "busy", "offline"]),
+  message: z
+    .string()
+    .trim()
+    .max(200, "Message must be 200 characters or fewer.")
+    .optional(),
+  back_in_minutes: z
+    .number()
+    .int()
+    .min(1, "Return time must be at least 1 minute.")
+    .max(480, "Return time must be 8 hours or fewer.")
+    .nullable()
+    .optional(),
+});
 
 export const supportMessageSchema = z.object({
   message: z
@@ -411,6 +714,54 @@ export const registerInputSchema = z.object({
   email: z.string().trim().email("Enter a valid email address."),
   password: z.string().min(8, "Password must be at least 8 characters."),
   full_name: z.string().trim().max(200).optional(),
+});
+
+// Wholesale signup. The invite code is the ONLY thing that can grant wholesale
+// pricing -- the client still never sends a role (see the register route).
+export const wholesaleRegisterInputSchema = z.object({
+  email: z.string().trim().email("Enter a valid email address."),
+  password: z.string().min(8, "Password must be at least 8 characters."),
+  full_name: z.string().trim().max(200).optional(),
+  invite_code: z
+    .string()
+    .trim()
+    .min(6, "Enter the registration code your supplier gave you.")
+    .max(64),
+  business_name: z
+    .string()
+    .trim()
+    .min(2, "Enter your business or shop name.")
+    .max(160),
+  contact_person: z.string().trim().max(160).optional(),
+  phone: z.string().trim().max(40).optional(),
+});
+
+export const inviteCodeInputSchema = z.object({
+  label: z.string().trim().max(160).optional(),
+  price_list_id: z.string().uuid("Choose a valid price list.").optional(),
+  max_uses: z
+    .number()
+    .int()
+    .min(1, "A code must allow at least one use.")
+    .max(500)
+    .optional(),
+  expires_in_days: z
+    .number()
+    .int()
+    .min(1, "Expiry must be at least one day.")
+    .max(365)
+    .optional(),
+});
+
+export const percentBandInputSchema = z.object({
+  price_list_id: z.string().uuid("Choose a valid price list."),
+  product_id: z.number().int().positive().nullable().optional(),
+  min_quantity: z.number().int().positive("Minimum quantity must be at least 1."),
+  discount_percent: z
+    .number()
+    .min(0, "Discount must be 0% or more.")
+    .max(90, "Discount cannot be more than 90%."),
+  is_active: z.boolean().optional(),
 });
 
 export function firstIssueMessage(error: z.ZodError) {

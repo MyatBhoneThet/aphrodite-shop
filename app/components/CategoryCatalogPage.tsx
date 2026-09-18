@@ -18,6 +18,8 @@ import ChatbotButton from "./ChatbotButton";
 import Navbar from "./Navbar";
 import ProductFilters from "./ProductFilters";
 import ProductSection from "./ProductSection";
+import { groupProductVariants } from "../lib/product-variants";
+import { useLanguage } from "../lib/language";
 
 type Props = {
   section: CatalogSection;
@@ -35,7 +37,8 @@ export default function CategoryCatalogPage({ section }: Props) {
   const details = CATALOG_SECTION_DETAILS[section];
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
-  const [language, setLanguage] = useState<"en" | "my">("en");
+  // Shared with every other page, and remembered between visits.
+  const { language, setLanguage } = useLanguage();
   const [filters, setFilters] = useState<ProductFilterState>({
     ...EMPTY_PRODUCT_FILTERS,
   });
@@ -221,7 +224,7 @@ export default function CategoryCatalogPage({ section }: Props) {
           brands={brands}
           categories={categories}
           filters={filters}
-          resultCount={visibleProducts.length}
+          resultCount={groupProductVariants(visibleProducts).length}
           onChange={setFilters}
         />
 

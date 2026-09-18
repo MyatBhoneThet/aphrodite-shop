@@ -1,3 +1,5 @@
+import { activePromotion } from "./promotions";
+
 // Centralized, server-only pricing logic. Cart calculation, product price
 // previews, admin previews, and order creation all price lines through
 // priceLine() -- do not re-implement tier selection anywhere else (including
@@ -6,11 +8,12 @@
 // Rules:
 //   * Only an APPROVED wholesale account with an assigned ACTIVE price list
 //     gets tier pricing; everyone else (normal, pending, rejected, suspended)
-//     pays retail.
+//     pays the current retail/promotional price.
 //   * The qualifying tier is the active, in-date tier with the highest
 //     min_quantity that is <= the line quantity (so quantity 100 qualifies
 //     for a min_quantity = 100 tier).
-//   * If no tier qualifies, the retail price applies (wholesale discounts
+//   * Promotions compete with qualifying tiers; the lower price wins.
+//   * If no tier qualifies, the retail/promotional price applies (wholesale discounts
 //     are optional per tier -- documented assumption).
 //   * Discounts apply per product line; quantities of unrelated products
 //     never combine.
@@ -26,7 +29,56 @@ export type PriceTierRow = {
   effective_to: string | null;
 };
 
+/** A "% off retail" band from price_list_percent_tiers.
+ *  product_id null = applies to every product in the list; a row with a
+ *  product_id overrides the global band at the same min_quantity. */
+export type PercentBand = {
+  id: string;
+  price_list_id: string;
+  product_id: number | null;
+  min_quantity: number;
+  discount_percent: number;
+  is_active: boolean;
+  effective_from: string | null;
+  effective_to: string | null;
+};
+
+/**
+ * Turns percentage bands into concrete tier rows for ONE product, so the rest
+ * of the pricing path keeps working on a single tier shape. Prices are MMK
+ * whole numbers, so each computed unit price is rounded.
+ */
+export function expandPercentBands(
+  retailPrice: number,
+  bands: PercentBand[],
+  productId: number
+): PriceTierRow[] {
+  const byMinQuantity = new Map<number, PercentBand>();
+
+  for (const band of bands) {
+    if (band.product_id !== null && band.product_id !== productId) continue;
+
+    const current = byMinQuantity.get(band.min_quantity);
+    // A product-specific band always wins over the list-wide one.
+    if (!current || (current.product_id === null && band.product_id !== null)) {
+      byMinQuantity.set(band.min_quantity, band);
+    }
+  }
+
+  return [...byMinQuantity.values()].map((band) => ({
+    id: band.id,
+    price_list_id: band.price_list_id,
+    product_id: productId,
+    min_quantity: band.min_quantity,
+    unit_price: Math.round(retailPrice * (1 - band.discount_percent / 100)),
+    is_active: band.is_active,
+    effective_from: band.effective_from,
+    effective_to: band.effective_to,
+  }));
+}
+
 export type PricingResult = {
+  promotional: boolean;
   quantity: number;
   retailUnitPrice: number;
   unitPrice: number;
@@ -75,26 +127,51 @@ export function selectTier(tiers: PriceTierRow[], quantity: number, now = new Da
 
 export function priceLine({
   retailPrice,
+  promotion,
   quantity,
   tiers,
+  percentBands = [],
+  productId,
   now = new Date(),
 }: {
   retailPrice: number;
+  promotion?: unknown;
   quantity: number;
   /** Tiers for THIS product from the customer's assigned active price list;
    *  pass an empty array for customers without wholesale entitlement. */
   tiers: PriceTierRow[];
+  /** "% off retail" bands from the same price list, if it uses them. */
+  percentBands?: PercentBand[];
+  /** Required to resolve per-product percentage overrides. */
+  productId?: number;
   now?: Date;
 }): PricingResult {
   const safeQuantity = Math.max(1, Math.floor(quantity));
-  const wholesaleEligible = tiers.length > 0;
-  const { applied, next } = selectTier(tiers, safeQuantity, now);
 
-  const unitPrice = applied ? applied.unit_price : retailPrice;
+  // An explicit fixed-price tier always wins over a percentage band at the
+  // same minimum quantity, so a hand-set price is never silently overridden.
+  const fixedMinQuantities = new Set(tiers.map((tier) => tier.min_quantity));
+  const expanded =
+    percentBands.length > 0 && productId !== undefined
+      ? expandPercentBands(retailPrice, percentBands, productId).filter(
+          (band) => !fixedMinQuantities.has(band.min_quantity)
+        )
+      : [];
+
+  const allTiers = expanded.length > 0 ? [...tiers, ...expanded] : tiers;
+  const wholesaleEligible = allTiers.length > 0;
+  const { applied, next } = selectTier(allTiers, safeQuantity, now);
+
+  const promo = activePromotion(retailPrice, promotion, now);
+  const promotional = Boolean(promo && (!applied || promo.price < applied.unit_price));
+  const chargedTier = promotional ? null : applied;
+  const unitPrice = promotional ? promo!.price : applied ? applied.unit_price : retailPrice;
   const lineTotal = unitPrice * safeQuantity;
   const savings = Math.max(0, (retailPrice - unitPrice) * safeQuantity);
 
-  const label = applied
+  const label = promotional
+    ? "Promotional price"
+    : applied
     ? `Wholesale tier: ${applied.min_quantity}+ units`
     : wholesaleEligible
     ? "Retail price — quantity below wholesale tier"
@@ -103,14 +180,15 @@ export function priceLine({
   return {
     quantity: safeQuantity,
     retailUnitPrice: retailPrice,
+    promotional,
     unitPrice,
     lineTotal,
     savings,
-    priceListId: applied ? applied.price_list_id : null,
-    tierId: applied ? applied.id : null,
-    tierMinQuantity: applied ? applied.min_quantity : null,
+    priceListId: chargedTier ? chargedTier.price_list_id : null,
+    tierId: chargedTier ? chargedTier.id : null,
+    tierMinQuantity: chargedTier ? chargedTier.min_quantity : null,
     label,
-    nextTier: next
+    nextTier: next && next.unit_price < unitPrice
       ? {
           minQuantity: next.min_quantity,
           unitPrice: next.unit_price,

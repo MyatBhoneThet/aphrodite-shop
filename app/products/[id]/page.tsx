@@ -4,16 +4,27 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { Product, UserRole } from "../../data/products";
+import ProductPrice from "../../components/ProductPrice";
+import { effectiveProductPrice } from "../../lib/promotions";
 import ProductGallery from "../../components/ProductGallery";
 import BrandLogo from "../../components/BrandLogo";
+import ProductAlertButtons, {
+  type FollowedAlert,
+} from "../../components/ProductAlertButtons";
 import { authHeaders } from "../../lib/client-auth";
 import { formatCurrency, formatProductPrice } from "../../lib/format";
+import {
+  productVariant,
+  type ProductVariantOption,
+} from "../../lib/product-variants";
 import { getProductSpecifications } from "../../lib/product-specifications";
 import { useCurrentUser } from "../../lib/useCurrentUser";
+import { useLanguage } from "../../lib/language";
 
 type PublicTier = { minQuantity: number; unitPrice: number };
 
 type Pricing = {
+  promotional?: boolean;
   quantity: number;
   retailUnitPrice: number;
   unitPrice: number;
@@ -30,9 +41,11 @@ type ProductResponse = {
   pricing: Pricing;
   wholesale: boolean;
   relatedProducts: Product[];
+  variants?: ProductVariantOption[];
 };
 
 export default function ProductDetailsPage() {
+  const { t } = useLanguage();
   const params = useParams();
   const productId = Number(params.id);
 
@@ -42,10 +55,12 @@ export default function ProductDetailsPage() {
   const [isWholesale, setIsWholesale] = useState(false);
   const [quantity, setQuantity] = useState(1);
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
+  const [variants, setVariants] = useState<ProductVariantOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [wishlistItemId, setWishlistItemId] = useState<string | null>(null);
   const [cartMessage, setCartMessage] = useState("");
+  const [alerts, setAlerts] = useState<FollowedAlert[]>([]);
 
   // Pricing is always computed server-side; changing the quantity refetches
   // the quote so tier selection stays out of the UI.
@@ -63,6 +78,7 @@ export default function ProductDetailsPage() {
       if (!response.ok) {
         setProduct(null);
         setRelatedProducts([]);
+        setVariants([]);
         setIsLoading(false);
         return;
       }
@@ -75,13 +91,16 @@ export default function ProductDetailsPage() {
       setPricing(data.pricing);
       setIsWholesale(data.wholesale);
       setRelatedProducts(data.relatedProducts);
+      setVariants(data.variants ?? []);
       setIsLoading(false);
     }
 
-    loadProduct();
-
+    void loadProduct();
+    // Refresh scheduled promotions and wholesale eligibility while this quote is open.
+    const timer = window.setInterval(() => void loadProduct(), 30_000);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, [productId, quantity]);
 
@@ -109,6 +128,29 @@ export default function ProductDetailsPage() {
     }
 
     loadWishlist();
+  }, [currentUser, product]);
+
+  useEffect(() => {
+    async function loadAlerts() {
+      if (!currentUser || !product) {
+        setAlerts([]);
+        return;
+      }
+
+      const response = await fetch("/api/alerts", {
+        headers: authHeaders(),
+        cache: "no-store",
+      });
+
+      // A missing alerts table (migration not run yet) must not break the
+      // product page -- the follow buttons simply stay unset.
+      if (!response.ok) return;
+
+      const data = (await response.json()) as { alerts: FollowedAlert[] };
+      setAlerts(data.alerts);
+    }
+
+    void loadAlerts();
   }, [currentUser, product]);
 
   const recentlyViewedCustomer =
@@ -158,7 +200,7 @@ export default function ProductDetailsPage() {
     return (
       <main className="flex min-h-screen items-center justify-center bg-white px-5 text-center text-zinc-950">
         <div>
-          <h1 className="text-3xl font-bold">Product not found</h1>
+          <h1 className="text-3xl font-bold">{t("detail.notFound")}</h1>
 
           <p className="mt-3 text-zinc-500">
             The product you are looking for does not exist.
@@ -176,15 +218,18 @@ export default function ProductDetailsPage() {
   }
 
   const displayPrice = pricing?.unitPrice ?? product.price;
+  // With version buttons, the title is the model and the selected button says which version.
+  const modelName =
+    variants.length > 1 ? productVariant(product)?.model ?? product.name : product.name;
 
   async function addToCart(productItem: Product) {
     if (!currentUser) {
-      setCartMessage("Please login before adding products to cart.");
+      setCartMessage(t("detail.loginToCart"));
       return;
     }
 
     if (productItem.stock === "Out of Stock") {
-      setCartMessage("This product is currently out of stock.");
+      setCartMessage(t("detail.outOfStockMessage"));
       return;
     }
 
@@ -203,12 +248,12 @@ export default function ProductDetailsPage() {
       return;
     }
 
-    setCartMessage("Added to cart successfully.");
+    setCartMessage(t("detail.addedToCart"));
   }
 
   async function toggleWishlist(productItem: Product) {
     if (!currentUser) {
-      setCartMessage("Please login before saving products.");
+      setCartMessage(t("detail.loginToSave"));
       return;
     }
 
@@ -284,7 +329,7 @@ export default function ProductDetailsPage() {
             </p>
 
             <h1 className="mt-3 text-4xl font-bold md:text-6xl">
-              {product.name}
+              {modelName}
             </h1>
 
             <p className="mt-4 text-lg text-zinc-500">{product.category}</p>
@@ -299,24 +344,50 @@ export default function ProductDetailsPage() {
               {product.stock}
             </p>
 
-            <div className="mt-8">
-              <p className="text-4xl font-bold">
-                {formatProductPrice(product.price > 0 ? displayPrice : 0)}
-                {product.price > 0 && <span className="ml-2 text-base font-semibold text-zinc-400">
-                  / unit
-                </span>}
-              </p>
-
-              {product.price > 0 && pricing && pricing.unitPrice < pricing.retailUnitPrice && (
-                <p className="mt-2 text-sm font-semibold text-red-600">
-                  {pricing.label} — retail{" "}
-                  <span className="line-through">
-                    {formatCurrency(pricing.retailUnitPrice)}
-                  </span>
+            {variants.length > 1 && (
+              <div className="mt-6">
+                <p className="text-sm font-bold uppercase tracking-wide text-zinc-500">
+                  Choose version
                 </p>
-              )}
+                <div className="mt-3 flex flex-wrap gap-3">
+                  {variants.map((option) => {
+                    const selected = option.id === product.id;
+                    const soldOut = option.stock !== "In Stock";
 
-              {product.price > 0 && pricing?.wholesaleEligible && !pricing.tierMinQuantity && (
+                    return (
+                      <Link
+                        key={option.id}
+                        href={`/products/${option.id}`}
+                        replace
+                        scroll={false}
+                        aria-current={selected ? "true" : undefined}
+                        onClick={() => setCartMessage("")}
+                        className={`min-w-36 rounded-2xl border-2 px-5 py-3 text-left transition ${
+                          selected
+                            ? "border-red-600 bg-red-50"
+                            : "border-zinc-200 bg-white hover:border-red-300"
+                        }`}
+                      >
+                        <span className="block font-bold">{option.label}</span>
+                        <span
+                          className={`mt-1 block text-xs font-semibold ${
+                            soldOut ? "text-red-600" : "text-zinc-500"
+                          }`}
+                        >
+                          {soldOut ? "Out of stock" : formatProductPrice(option.price)}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-8">
+              <ProductPrice price={product.price > 0 ? displayPrice : 0} regularPrice={product.price} large />
+              {pricing?.tierMinQuantity && <p className="mt-2 text-sm font-semibold text-zinc-500">{pricing.label}</p>}
+
+              {product.price > 0 && pricing?.wholesaleEligible && !pricing.tierMinQuantity && !pricing.promotional && (
                 <p className="mt-2 text-sm font-semibold text-zinc-500">
                   Retail price — quantity below wholesale tier
                 </p>
@@ -337,13 +408,13 @@ export default function ProductDetailsPage() {
               )}
 
               <div className="mt-5 flex items-center gap-3">
-                <span className="text-sm font-semibold">Quantity</span>
+                <span className="text-sm font-semibold">{t("detail.quantity")}</span>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setQuantity(Math.max(1, quantity - 1))}
                     className="h-9 w-9 rounded-full border font-bold"
-                    aria-label="Decrease quantity"
+                    aria-label={t("detail.decrease")}
                   >
                     −
                   </button>
@@ -366,7 +437,7 @@ export default function ProductDetailsPage() {
                     type="button"
                     onClick={() => setQuantity(Math.min(9999, quantity + 1))}
                     className="h-9 w-9 rounded-full border font-bold"
-                    aria-label="Increase quantity"
+                    aria-label={t("detail.increase")}
                   >
                     +
                   </button>
@@ -395,8 +466,8 @@ export default function ProductDetailsPage() {
                   <table className="w-full text-left text-sm">
                     <thead className="text-xs uppercase text-zinc-500">
                       <tr>
-                        <th className="px-4 py-2">Quantity</th>
-                        <th className="px-4 py-2">Unit price</th>
+                        <th className="px-4 py-2">{t("detail.quantity")}</th>
+                        <th className="px-4 py-2">{t("detail.unitPrice")}</th>
                         <th className="px-4 py-2">vs retail</th>
                       </tr>
                     </thead>
@@ -412,8 +483,8 @@ export default function ProductDetailsPage() {
                           <td className="px-4 py-2">
                             1–{(product.tiers[0]?.minQuantity ?? 2) - 1}
                           </td>
-                          <td className="px-4 py-2">{formatProductPrice(product.price)}</td>
-                          <td className="px-4 py-2 text-zinc-500">Retail</td>
+                          <td className="px-4 py-2">{formatProductPrice(effectiveProductPrice(product))}</td>
+                          <td className="px-4 py-2 text-zinc-500">{effectiveProductPrice(product) < product.price ? t("product.promotionalPrice") : t("detail.retail")}</td>
                         </tr>
                       )}
                       {product.tiers.map((tier, index) => {
@@ -468,7 +539,7 @@ export default function ProductDetailsPage() {
                   <button onClick={() => addToCart(product)}
                     disabled={product.stock === "Out of Stock" || product.price <= 0}
                     className="rounded-full bg-red-600 px-7 py-3 font-semibold text-white disabled:bg-zinc-400">
-                    {product.price <= 0 ? "Price pending — contact support" : "Add to Cart"}
+                    {product.price <= 0 ? t("detail.pricePending") : t("detail.addToCart")}
                   </button>
                   <button onClick={() => toggleWishlist(product)}
                     className="rounded-full border px-7 py-3 font-semibold">
@@ -489,6 +560,14 @@ export default function ProductDetailsPage() {
                 Compare
               </Link>
             </div>
+
+            {currentUser && (
+              <ProductAlertButtons
+                product={product}
+                alerts={alerts}
+                onChange={setAlerts}
+              />
+            )}
 
             {cartMessage && (
               <p className="mt-4 rounded-2xl bg-zinc-100 p-4 text-sm">
@@ -524,7 +603,7 @@ export default function ProductDetailsPage() {
 
         {relatedProducts.length > 0 && (
           <section className="mt-20">
-            <h2 className="mb-6 text-3xl font-bold">Related Products</h2>
+            <h2 className="mb-6 text-3xl font-bold">{t("detail.related")}</h2>
 
             <div className="grid gap-5 md:grid-cols-3">
               {relatedProducts.map((item) => (
@@ -543,9 +622,7 @@ export default function ProductDetailsPage() {
 
                   <h3 className="mt-4 font-bold">{item.name}</h3>
 
-                  <p className="mt-1 text-sm text-zinc-500">
-                    {formatProductPrice(item.price)}
-                  </p>
+                  <div className="mt-2"><ProductPrice price={effectiveProductPrice(item)} regularPrice={item.price} /></div>
                 </Link>
               ))}
             </div>

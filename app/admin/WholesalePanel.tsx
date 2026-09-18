@@ -23,6 +23,19 @@ type Account = {
   business_verified_at?: string | null;
 };
 
+type InviteCode = {
+  id: string;
+  code_hint: string;
+  label: string | null;
+  price_list_id: string | null;
+  max_uses: number;
+  use_count: number;
+  expires_at: string | null;
+  is_active: boolean;
+  created_at: string;
+  last_used_at: string | null;
+};
+
 type AuditEntry = {
   id: string;
   actor_id: string | null;
@@ -57,6 +70,73 @@ export default function WholesalePanel() {
   const [showAudit, setShowAudit] = useState(false);
   const [businessDraft, setBusinessDraft] = useState<{ account: Account; priceListId: string; name: string; note: string; verified: boolean } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([]);
+  const [inviteLabel, setInviteLabel] = useState("");
+  const [inviteUses, setInviteUses] = useState("1");
+  const [inviteDays, setInviteDays] = useState("30");
+  const [freshCode, setFreshCode] = useState("");
+  const [creatingCode, setCreatingCode] = useState(false);
+
+  const loadInviteCodes = useCallback(async () => {
+    const response = await fetch("/api/admin/wholesale/invite-codes", {
+      headers: authHeaders(),
+      cache: "no-store",
+    });
+
+    if (response.ok) {
+      const data = (await response.json()) as { codes: InviteCode[] };
+      setInviteCodes(data.codes ?? []);
+    }
+  }, []);
+
+  async function createInviteCode() {
+    setMessage("");
+    setError("");
+    setFreshCode("");
+    setCreatingCode(true);
+
+    try {
+      const response = await fetch("/api/admin/wholesale/invite-codes", {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          label: inviteLabel.trim() || undefined,
+          max_uses: Number(inviteUses) || 1,
+          expires_in_days: Number(inviteDays) || undefined,
+        }),
+      });
+
+      if (!response.ok) throw new Error(await readError(response));
+
+      const data = (await response.json()) as { code: string };
+      setFreshCode(data.code);
+      setInviteLabel("");
+      await loadInviteCodes();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to create code.");
+    } finally {
+      setCreatingCode(false);
+    }
+  }
+
+  async function deactivateInviteCode(id: string) {
+    setMessage("");
+    setError("");
+
+    try {
+      const response = await fetch(`/api/admin/wholesale/invite-codes/${id}`, {
+        method: "PATCH",
+        headers: authHeaders(),
+      });
+
+      if (!response.ok) throw new Error(await readError(response));
+
+      setMessage("Registration code turned off.");
+      await loadInviteCodes();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update code.");
+    }
+  }
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -101,10 +181,11 @@ export default function WholesalePanel() {
   useEffect(() => {
     async function loadOnMount() {
       await load();
+      await loadInviteCodes();
     }
 
     loadOnMount();
-  }, [load]);
+  }, [load, loadInviteCodes]);
 
   async function loadAudit() {
     const response = await fetch("/api/admin/audit-log?limit=50", {
@@ -185,6 +266,140 @@ export default function WholesalePanel() {
           {error || message}
         </div>
       )}
+
+      <div className="rounded-2xl bg-white shadow-sm ring-1 ring-zinc-100">
+        <div className="border-b px-5 py-4">
+          <h2 className="font-bold">Wholesale registration codes</h2>
+          <p className="text-sm text-zinc-500">
+            Give a code to a business customer. They type it on the
+            &ldquo;Business&rdquo; tab of the signup page to create a wholesale
+            account. The full code is shown once, here, and is never stored — so
+            copy it before you leave this page.
+          </p>
+        </div>
+
+        <div className="space-y-4 px-5 py-4">
+          {freshCode && (
+            <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                New code — copy it now, it cannot be shown again
+              </p>
+              <p className="mt-2 select-all font-mono text-2xl font-bold tracking-[0.2em] text-emerald-900">
+                {freshCode}
+              </p>
+            </div>
+          )}
+
+          <div className="grid gap-3 md:grid-cols-[1fr_120px_140px_auto] md:items-end">
+            <label className="block text-sm font-semibold">
+              Label (who is it for?)
+              <input
+                value={inviteLabel}
+                onChange={(event) => setInviteLabel(event.target.value)}
+                placeholder="Mandalay Computer Shop"
+                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none focus:border-red-500"
+              />
+            </label>
+
+            <label className="block text-sm font-semibold">
+              How many uses
+              <input
+                type="number"
+                min={1}
+                max={500}
+                value={inviteUses}
+                onChange={(event) => setInviteUses(event.target.value)}
+                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none focus:border-red-500"
+              />
+            </label>
+
+            <label className="block text-sm font-semibold">
+              Expires in (days)
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={inviteDays}
+                onChange={(event) => setInviteDays(event.target.value)}
+                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none focus:border-red-500"
+              />
+            </label>
+
+            <button
+              type="button"
+              onClick={createInviteCode}
+              disabled={creatingCode}
+              className="rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white disabled:bg-zinc-400"
+            >
+              {creatingCode ? "Creating..." : "Create code"}
+            </button>
+          </div>
+
+          {inviteCodes.length === 0 ? (
+            <p className="text-sm text-zinc-500">No codes yet.</p>
+          ) : (
+            <ul className="divide-y rounded-xl border">
+              {inviteCodes.map((code) => {
+                const expired =
+                  code.expires_at !== null &&
+                  new Date(code.expires_at) <= new Date();
+                const usedUp = code.use_count >= code.max_uses;
+                const live = code.is_active && !expired && !usedUp;
+
+                return (
+                  <li
+                    key={code.id}
+                    className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-semibold">
+                        <span className="font-mono">••••-{code.code_hint}</span>
+                        {code.label ? (
+                          <span className="ml-2 text-zinc-600">{code.label}</span>
+                        ) : null}
+                      </p>
+                      <p className="text-xs text-zinc-500">
+                        Used {code.use_count} of {code.max_uses}
+                        {code.expires_at
+                          ? ` · expires ${formatDateTime(code.expires_at)}`
+                          : " · no expiry"}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                          live
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-zinc-100 text-zinc-500"
+                        }`}
+                      >
+                        {live
+                          ? "Active"
+                          : usedUp
+                          ? "Used up"
+                          : expired
+                          ? "Expired"
+                          : "Turned off"}
+                      </span>
+
+                      {live && (
+                        <button
+                          type="button"
+                          onClick={() => deactivateInviteCode(code.id)}
+                          className="rounded-full border px-4 py-1.5 text-xs font-semibold hover:bg-zinc-100"
+                        >
+                          Turn off
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
 
       <div className="rounded-2xl bg-white shadow-sm ring-1 ring-zinc-100">
         <div className="flex flex-col gap-4 border-b px-5 py-4 md:flex-row md:items-center md:justify-between">

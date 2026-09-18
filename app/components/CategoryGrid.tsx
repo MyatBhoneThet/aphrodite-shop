@@ -1,8 +1,9 @@
 const categories = [
-  { en: "Laptops", my: "လက်ပ်တော့များ", icon: "💻", href: "/catalog/laptops" },
+  // Product words stay in English in both languages, at the shop's request.
+  { en: "Laptops", my: "Laptops", icon: "💻", href: "/catalog/laptops" },
   { en: "Accessories", my: "Accessories", icon: "⌨️", href: "/catalog/accessories" },
   { en: "PC Parts", my: "PC Parts", icon: "🖥️", href: "/catalog/pc-parts" },
-  { en: "Build a PC", my: "PC တည်ဆောက်ရန်", icon: "🧩", href: "/pc-builder" },
+  { en: "Build a PC", my: "Build a PC", icon: "🧩", href: "/pc-builder" },
 ];
 
 export default function CategoryGrid({ language }: { language: "en" | "my" }) {

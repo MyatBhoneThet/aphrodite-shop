@@ -47,7 +47,7 @@ export default function LocationSharing({ expanded = false }: { expanded?: boole
     const userId = user?.id;
     if (!userId) return;
     if (!window.isSecureContext || !navigator.geolocation) {
-      setMessage("Open this site using HTTPS in your browser to share location. You can still shop without sharing."); return;
+      setMessage("This browser cannot share location here. Open the site in Chrome, Safari or Edge using its https:// address, then try again. You can still shop without sharing."); return;
     }
     const current = ++version.current;
     setBusy(true); setMessage("");

@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
 
     // Role is never accepted from the client: self-registration always
     // creates a "normal" account. Wholesale/admin roles are granted by an
-    // admin afterwards (see ADMIN_SETUP.md), never chosen at signup.
+    // admin afterwards (see "Admin setup" in README.md), never chosen at signup.
     const result = await registerUser({
       email: parsed.data.email,
       password: parsed.data.password,

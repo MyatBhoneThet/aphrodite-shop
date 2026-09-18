@@ -5,6 +5,7 @@ import {
   EMPTY_PRODUCT_FILTERS,
   type ProductFilterState,
 } from "../lib/product-filters";
+import { useLanguage } from "../lib/language";
 
 type Props = {
   brands: string[];
@@ -24,6 +25,7 @@ export default function ProductFilters({
   resultCount,
   onChange,
 }: Props) {
+  const { t } = useLanguage();
   const activeCount = countActiveProductFilters(filters);
 
   function update<K extends keyof ProductFilterState>(
@@ -41,7 +43,7 @@ export default function ProductFilters({
       <details className="group rounded-[2rem] border border-zinc-200 bg-zinc-50 shadow-sm">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5">
           <span>
-            <span className="font-bold">Filter products</span>
+            <span className="font-bold">{t("filter.title")}</span>
             <span className="ml-2 text-sm text-zinc-500">
               {resultCount} result{resultCount === 1 ? "" : "s"}
             </span>
@@ -97,10 +99,10 @@ export default function ProductFilters({
                   )
                 }
               >
-                <option value="all">All types</option>
+                <option value="all">{t("filter.allTypes")}</option>
                 <option value="laptop">Laptops</option>
                 <option value="accessory">Accessories</option>
-                <option value="pc_part">PC parts</option>
+                <option value="pc_part">PC Parts</option>
               </select>
             </label>
 
@@ -111,7 +113,7 @@ export default function ProductFilters({
                 value={filters.category}
                 onChange={(event) => update("category", event.target.value)}
               >
-                <option value="all">All categories</option>
+                <option value="all">{t("filter.allCategories")}</option>
                 {categories.map((category) => (
                   <option key={category} value={category}>
                     {category}
@@ -132,9 +134,9 @@ export default function ProductFilters({
                   )
                 }
               >
-                <option value="all">All stock</option>
-                <option value="In Stock">In stock</option>
-                <option value="Out of Stock">Out of stock</option>
+                <option value="all">{t("filter.allStock")}</option>
+                <option value="In Stock">{t("product.inStock")}</option>
+                <option value="Out of Stock">{t("product.outOfStock")}</option>
               </select>
             </label>
 
@@ -145,7 +147,7 @@ export default function ProductFilters({
                 value={filters.brand}
                 onChange={(event) => update("brand", event.target.value)}
               >
-                <option value="all">All brands</option>
+                <option value="all">{t("filter.allBrands")}</option>
                 {brands.map((brand) => (
                   <option key={brand} value={brand}>
                     {brand}
@@ -166,10 +168,10 @@ export default function ProductFilters({
                   )
                 }
               >
-                <option value="recommended">Recommended</option>
-                <option value="price-asc">Price: low to high</option>
-                <option value="price-desc">Price: high to low</option>
-                <option value="name">Name A–Z</option>
+                <option value="recommended">{t("filter.recommended")}</option>
+                <option value="price-asc">{t("filter.priceLowHigh")}</option>
+                <option value="price-desc">{t("filter.priceHighLow")}</option>
+                <option value="name">{t("filter.nameAZ")}</option>
               </select>
             </label>
           </div>

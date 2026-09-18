@@ -1,17 +1,36 @@
+"use client";
+
 import Link from "next/link";
+import ProductPrice from "./ProductPrice";
+import { effectiveProductPrice } from "../lib/promotions";
 import type { Product, UserRole } from "../data/products";
+import { useLanguage } from "../lib/language";
 import { getProductSpecifications } from "../lib/product-specifications";
-import { formatCurrency, formatProductPrice } from "../lib/format";
+import { formatCurrency } from "../lib/format";
+import type { ProductVariantOption } from "../lib/product-variants";
 
 type Props = {
   // The API only attaches `tiers` for approved wholesale viewers; prices
   // themselves are always calculated server-side.
   product: Product & { tiers?: { minQuantity: number; unitPrice: number }[] };
   userRole: UserRole;
+  /** Model name shown instead of the version's own name. */
+  model?: string | null;
+  /** Other versions of the same model (e.g. 256 GB / 512 GB), one card for all. */
+  options?: ProductVariantOption[];
 };
 
-export default function ProductCard({ product }: Props) {
-  const displayPrice = product.price;
+export default function ProductCard({ product, model, options = [] }: Props) {
+  const { t } = useLanguage();
+  const hasVersions = options.length > 1;
+  const pricedOptions = options.filter((option) => option.price > 0);
+  const cheapest = [...pricedOptions].sort((a, b) => a.price - b.price)[0];
+  const pricesDiffer = new Set(pricedOptions.map((option) => option.price)).size > 1;
+  const displayPrice = hasVersions && cheapest ? cheapest.price : effectiveProductPrice(product);
+  const regularPrice = hasVersions && cheapest ? cheapest.regularPrice ?? cheapest.price : product.price;
+  const inStock = hasVersions
+    ? options.some((option) => option.stock === "In Stock")
+    : product.stock === "In Stock";
   const bestTier = product.tiers?.[0];
   const specification = getProductSpecifications(product);
   const summaryRows = specification.rows
@@ -19,7 +38,9 @@ export default function ProductCard({ product }: Props) {
       (row) =>
         !["Brand", "Category", "Availability", "Product details"].includes(
           row.label
-        )
+        ) &&
+        // The version buttons already show what differs.
+        !options.some((option) => option.label.includes(row.value))
     )
     .slice(0, 3);
 
@@ -35,14 +56,14 @@ export default function ProductCard({ product }: Props) {
           />
 
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-white px-4 py-2 text-xs font-semibold shadow">
-            View Details
+            {t("product.viewDetails")}
           </div>
         </div>
       </Link>
 
       <Link href={`/products/${product.id}`} className="mt-5">
         <h3 className="min-h-14 line-clamp-2 text-xl font-bold hover:text-red-600">
-          {product.name}
+          {hasVersions && model ? model : product.name}
         </h3>
       </Link>
 
@@ -50,21 +71,42 @@ export default function ProductCard({ product }: Props) {
         {product.brand} • {product.category}
       </p>
 
+      {hasVersions && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {options.map((option) => (
+            <Link
+              key={option.id}
+              href={`/products/${option.id}`}
+              className={`rounded-full border px-3 py-1 text-xs font-bold transition hover:border-red-500 hover:text-red-600 ${
+                option.stock === "In Stock"
+                  ? "border-zinc-300 text-zinc-800"
+                  : "border-zinc-200 text-zinc-400 line-through"
+              }`}
+            >
+              {option.label}
+            </Link>
+          ))}
+        </div>
+      )}
+
       <p
         className={`mt-3 text-sm font-bold ${
-          product.stock === "In Stock" ? "text-green-600" : "text-red-600"
+          inStock ? "text-green-600" : "text-red-600"
         }`}
       >
-        {product.stock}
+        {inStock ? t("product.inStock") : t("product.outOfStock")}
       </p>
 
-      <p className="mt-4 text-2xl font-black">
-        {formatProductPrice(displayPrice)}
-      </p>
+      <div className="mt-4">
+        <ProductPrice price={displayPrice} regularPrice={regularPrice} from={hasVersions && pricesDiffer} />
+      </div>
 
-      {displayPrice > 0 && bestTier && (
+      {displayPrice > 0 && bestTier && bestTier.unitPrice < displayPrice && (
         <p className="mt-1 text-xs font-semibold text-red-600">
-          Wholesale from {formatCurrency(bestTier.unitPrice)} ({bestTier.minQuantity}+ units)
+          {t("product.wholesaleFrom", {
+            price: formatCurrency(bestTier.unitPrice),
+            min: bestTier.minQuantity,
+          })}
         </p>
       )}
 
@@ -81,7 +123,7 @@ export default function ProductCard({ product }: Props) {
         </dl>
       ) : (
         <p className="mt-4 max-h-24 overflow-hidden rounded-xl bg-white p-3 text-sm">
-          {String(product.specs.detail ?? "Product details are being prepared.")}
+          {String(product.specs.detail ?? t("product.detailsPending"))}
         </p>
       )}
     </article>

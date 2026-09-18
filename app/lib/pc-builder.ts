@@ -1,3 +1,4 @@
+import { effectiveProductPrice } from "./promotions";
 import type { Product } from "../data/products";
 import {
   classifyPcPart,
@@ -78,7 +79,7 @@ function needsDedicatedGpu(purpose: PcBuildPurpose) {
 function candidateGroups(products: Product[]) {
   const groups = new Map<Exclude<PcPartKind, "other">, Product[]>();
   for (const product of products) {
-    if (product.stock !== "In Stock" || !Number.isFinite(product.price) || product.price <= 0) continue;
+    if (product.stock !== "In Stock" || !Number.isFinite(effectiveProductPrice(product)) || effectiveProductPrice(product) <= 0) continue;
     if (getProductFamily(product) !== "pc_part") continue;
     const kind = classifyPcPart(product);
     if (kind === "other") continue;
@@ -92,7 +93,7 @@ function candidateGroups(products: Product[]) {
     list.push(product);
     groups.set(kind, list);
   }
-  for (const list of groups.values()) list.sort((left, right) => left.price - right.price);
+  for (const list of groups.values()) list.sort((left, right) => effectiveProductPrice(left) - effectiveProductPrice(right));
   return groups;
 }
 
@@ -147,24 +148,24 @@ function makePlan(
 
     const remainingKinds = kinds.slice(index + 1);
     const reserve = remainingKinds.reduce((sum, nextKind) => {
-      const cheapest = groups.get(nextKind)?.[0]?.price;
-      return sum + (cheapest ?? 0);
+      const cheapest = groups.get(nextKind)?.[0];
+      return sum + (cheapest ? effectiveProductPrice(cheapest) : 0);
     }, 0);
     const maximumForPart = Math.max(0, remaining - reserve);
     const desired = targetBudget * (weights[kind] ?? 0.05);
-    const affordable = available.filter((product) => product.price <= maximumForPart);
+    const affordable = available.filter((product) => effectiveProductPrice(product) <= maximumForPart);
     const pool = affordable.length ? affordable : available.slice(0, 1);
     const product = [...pool].sort(
-      (left, right) => Math.abs(left.price - desired) - Math.abs(right.price - desired)
+      (left, right) => Math.abs(effectiveProductPrice(left) - desired) - Math.abs(effectiveProductPrice(right) - desired)
     )[0];
 
     if (product) {
       parts.push({ kind, label: partLabels[kind], product });
-      remaining -= product.price;
+      remaining -= effectiveProductPrice(product);
     }
   }
 
-  const total = parts.reduce((sum, part) => sum + part.product.price, 0);
+  const total = parts.reduce((sum, part) => sum + effectiveProductPrice(part.product), 0);
   const cpu = parts.find((part) => part.kind === "cpu")?.product;
   const board = parts.find((part) => part.kind === "motherboard")?.product;
   const memory = parts.find((part) => part.kind === "memory")?.product;

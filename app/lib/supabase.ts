@@ -3,6 +3,7 @@ import type { PriceTierRow } from "./pricing";
 import { ADMIN_SESSION_COOKIE, parseCookieHeader } from "./admin-session";
 import { USER_SESSION_COOKIE } from "./user-session";
 import * as galleryHelpers from "./product-gallery";
+import { specVariantBaseKey } from "./google-sheets";
 import { forbidden, notFound, unauthorized } from "./errors";
 import { conflict, serviceUnavailable } from "./errors";
 
@@ -149,7 +150,86 @@ export type ReturnEvidenceKind =
   | "shipping_damage_photo"
   | "unboxing_video"
   | "serial_photo"
+  /** The sealed parcel before it was opened. */
+  | "parcel_photo"
   | "other";
+
+/** What the customer picked on the "Get help with this order" button. */
+export type HelpCaseTopic =
+  | "payment"
+  | "delivery"
+  | "faulty_item"
+  | "cancel_order"
+  | "warranty";
+
+export type HelpCaseStatus = "open" | "waiting_customer" | "resolved" | "closed";
+
+export type ReturnResolution = "replacement" | "refund" | "repair";
+
+export type ReturnRequestStatus =
+  | "requested"
+  | "more_info_needed"
+  | "approved"
+  | "declined"
+  | "collected"
+  | "inspected"
+  /** Authorised, but the money has not left yet — the step customers ask about. */
+  | "refund_approved"
+  | "completed"
+  | "cancelled";
+
+export type OrderHelpCaseRow = {
+  id: string;
+  order_id: string;
+  customer_id: string;
+  topic: HelpCaseTopic;
+  status: HelpCaseStatus;
+  summary: string;
+  conversation_id: string | null;
+  assigned_admin_id: string | null;
+  admin_note: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  orders?: OrderRow | null;
+  profiles?: Pick<Profile, "email" | "full_name" | "role"> | null;
+  return_evidence?: ReturnEvidenceRow[];
+};
+
+export type ReturnRequestRow = {
+  id: string;
+  order_id: string;
+  order_item_id: string;
+  customer_id: string;
+  quantity: number;
+  reason_code: ReturnReasonCode;
+  description: string;
+  preferred_resolution: ReturnResolution;
+  resolution_granted: ReturnResolution | null;
+  collection_method: ReturnPickupMethod;
+  pickup_address: string | null;
+  status: ReturnRequestStatus;
+  unboxing_video_confirmed: boolean;
+  admin_decision_note: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  review_requested_at: string | null;
+  review_request_note: string | null;
+  refund_amount?: number | null;
+  refund_method?: RefundMethod | null;
+  refund_reference?: string | null;
+  refund_approved_at?: string | null;
+  refund_sent_at?: string | null;
+  /** Promised to the customer, so a date that moves needs `delay_reason`. */
+  expected_refund_at?: string | null;
+  delay_reason?: string | null;
+  created_at: string;
+  updated_at: string;
+  order_items?: OrderItemRow | null;
+  orders?: OrderRow | null;
+  profiles?: Pick<Profile, "email" | "full_name" | "role"> | null;
+  return_evidence?: ReturnEvidenceRow[];
+};
 
 export type DeliveryEventRow = {
   id: string;
@@ -177,6 +257,25 @@ export type ReturnEvidenceRow = {
   created_at: string;
 };
 
+/**
+ * 'correction_requested' is deliberately distinct from 'rejected': a rejection
+ * tells the customer to start over, which is the wrong message when part of
+ * the money did arrive. See 2026-09-17-payment-corrections.sql.
+ */
+export type PaymentVerificationStatus =
+  | "not_required"
+  | "pending"
+  | "verified"
+  | "rejected"
+  | "correction_requested";
+
+export type PaymentCorrectionReason =
+  | "short_payment"
+  | "overpaid"
+  | "unclear_slip"
+  | "wrong_account"
+  | "other";
+
 export type OrderRow = {
   id: string;
   user_id: string;
@@ -191,8 +290,19 @@ export type OrderRow = {
   shipping_state: string | null;
   shipping_postal_code: string | null;
   shipping_country: string | null;
-  payment_method: "cash_on_delivery";
+  payment_method: "cash_on_delivery" | "bank_transfer" | "mmqr";
   payment_status: "unpaid" | "collected" | "refunded";
+  payment_account?: "kbz" | "aya" | "mmqr" | null;
+  payment_reference?: string | null;
+  payment_verification_status?: PaymentVerificationStatus;
+  payment_verified_at?: string | null;
+  payment_verified_by?: string | null;
+  payment_rejected_reason?: string | null;
+  /** What actually arrived. Null means "not counted", which is not 0. */
+  payment_amount_received?: number | null;
+  payment_correction_reason?: PaymentCorrectionReason | null;
+  payment_correction_requested_at?: string | null;
+  payment_slips?: PaymentSlipRow[];
   cancellation_request_status: OrderRequestStatus;
   cancellation_reason: string | null;
   cancellation_requested_at: string | null;
@@ -279,6 +389,11 @@ export type SupportMessageRow = {
   sender_role: SupportSenderRole;
   body: string;
   created_at: string;
+  /** Object path inside the private `support-uploads` bucket, never a URL. */
+  attachment_path?: string | null;
+  attachment_type?: string | null;
+  /** Set when the customer is asking about one specific product. */
+  product_id?: number | null;
 };
 
 export type CustomerSettingsFields = {
@@ -373,6 +488,23 @@ export async function saveLocationShare(userId: string, coordinates: Pick<import
   return { latitude: row.latitude, longitude: row.longitude, accuracy_m: row.accuracy_m, captured_at: row.captured_at, expires_at: row.expires_at };
 }
 
+/** Admin-only list of every current share. Callers must check the admin role first. */
+export async function listLocationShares() {
+  const shares = await supabaseRest<(import("./location-share").LocationShare & { user_id: string })[]>(
+    `customer_location_shares?select=user_id,latitude,longitude,accuracy_m,captured_at,expires_at&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&order=captured_at.desc&limit=500`
+  );
+  if (shares.length === 0) return [];
+  const ids = shares.map((share) => share.user_id).join(",");
+  const profiles = await supabaseRest<{ id: string; email: string; full_name: string | null; phone: string | null }[]>(
+    `profiles?select=id,email,full_name,phone&id=in.(${ids})`
+  );
+  const byId = new Map(profiles.map((profile) => [profile.id, profile]));
+  return shares.map((share) => {
+    const profile = byId.get(share.user_id);
+    return { ...share, email: profile?.email ?? null, full_name: profile?.full_name ?? null, phone: profile?.phone ?? null };
+  });
+}
+
 export async function removeLocationShare(userId: string) {
   await supabaseRest(`customer_location_shares?user_id=eq.${encodeURIComponent(userId)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
 }
@@ -448,13 +580,39 @@ async function supabaseRest<T>(
     return null as T;
   }
 
-  return (await response.json()) as T;
+  // An insert sent with "Prefer: return=minimal" answers 201 with an EMPTY
+  // body (only updates and deletes use 204). Parsing that as JSON threw
+  // "Unexpected end of JSON input" after the row was already written, which
+  // turned successful admin actions (e.g. every audit-logged status change)
+  // into 500 errors.
+  const text = await response.text();
+  return (text ? JSON.parse(text) : null) as T;
 }
 
 const RETURN_EVIDENCE_BUCKET = "return-evidence";
 
 function encodeStoragePath(path: string) {
   return path.split("/").map(encodeURIComponent).join("/");
+}
+
+/**
+ * Turns the value Supabase returns from a "sign" call into a URL a browser can
+ * actually fetch.
+ *
+ * The API answers with `/object/sign/<bucket>/<path>?token=...` -- relative to
+ * the STORAGE API, not to the project root. Joining it straight onto the
+ * project URL produces `https://<project>.supabase.co/object/sign/...`, which
+ * is a 404: the `/storage/v1` prefix is missing. That silently broke every
+ * signed image (the admin saw a broken-image icon, not an error).
+ */
+function absoluteStorageUrl(projectUrl: string, signedPath: string) {
+  if (signedPath.startsWith("http")) return signedPath;
+
+  const path = signedPath.startsWith("/") ? signedPath : `/${signedPath}`;
+
+  return path.startsWith("/storage/v1")
+    ? `${projectUrl}${path}`
+    : `${projectUrl}/storage/v1${path}`;
 }
 
 export async function uploadReturnEvidenceObject(
@@ -484,6 +642,198 @@ export async function uploadReturnEvidenceObject(
   }
 }
 
+const PAYMENT_SLIP_BUCKET = "payment-slips";
+
+/**
+ * Transfer slips are customer payment records, so the bucket is private and
+ * every read goes through a short-lived signed URL (same shape as return
+ * evidence above).
+ */
+export async function uploadPaymentSlipObject(
+  path: string,
+  bytes: ArrayBuffer,
+  contentType: string
+) {
+  const { url, serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
+  const response = await fetch(
+    `${url}/storage/v1/object/${PAYMENT_SLIP_BUCKET}/${encodeStoragePath(path)}`,
+    {
+      method: "POST",
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": contentType,
+        "x-upsert": "false",
+      },
+      body: bytes,
+      cache: "no-store",
+      signal: upstreamSignal(),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+}
+
+export async function createPaymentSlipSignedUrl(path: string) {
+  const { url, serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
+  const response = await fetch(
+    `${url}/storage/v1/object/sign/${PAYMENT_SLIP_BUCKET}/${encodeStoragePath(path)}`,
+    {
+      method: "POST",
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ expiresIn: 300 }),
+      cache: "no-store",
+      signal: upstreamSignal(),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+
+  const result = (await response.json()) as { signedURL?: string; signedUrl?: string };
+  const signedPath = result.signedURL ?? result.signedUrl;
+  if (!signedPath) throw new Error("Supabase did not return a payment slip URL.");
+  return absoluteStorageUrl(url, signedPath);
+}
+
+const PRODUCT_PHOTO_BUCKET = "product-photos";
+
+// Mirrors uploadReturnEvidenceObject, but this bucket is public, so the caller
+// gets a permanent URL back instead of having to mint a short-lived signed one.
+export async function uploadProductPhotoObject(
+  path: string,
+  bytes: ArrayBuffer,
+  contentType: string
+) {
+  const { url, serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
+  const encoded = encodeStoragePath(path);
+  const response = await fetch(
+    `${url}/storage/v1/object/${PRODUCT_PHOTO_BUCKET}/${encoded}`,
+    {
+      method: "POST",
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": contentType,
+        "Cache-Control": "max-age=31536000",
+        "x-upsert": "false",
+      },
+      body: bytes,
+      cache: "no-store",
+      signal: upstreamSignal(),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+
+  return `${url}/storage/v1/object/public/${PRODUCT_PHOTO_BUCKET}/${encoded}`;
+}
+
+// ---------------------------------------------------------------------------
+// Live-chat attachments (private bucket, signed reads)
+// ---------------------------------------------------------------------------
+
+const SUPPORT_BUCKET = "support-uploads";
+
+export async function uploadSupportAttachment(
+  path: string,
+  bytes: ArrayBuffer,
+  contentType: string
+) {
+  const { url, serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
+  const response = await fetch(
+    `${url}/storage/v1/object/${SUPPORT_BUCKET}/${encodeStoragePath(path)}`,
+    {
+      method: "POST",
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": contentType,
+        "x-upsert": "false",
+      },
+      body: bytes,
+      cache: "no-store",
+      signal: upstreamSignal(),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+}
+
+/** Chat photos are customer data, so the bucket is private and every read goes
+ *  through a short-lived signed URL rather than a guessable public link. */
+export async function createSupportAttachmentSignedUrl(path: string) {
+  const { url, serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
+  const response = await fetch(
+    `${url}/storage/v1/object/sign/${SUPPORT_BUCKET}/${encodeStoragePath(path)}`,
+    {
+      method: "POST",
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ expiresIn: 600 }),
+      cache: "no-store",
+      signal: upstreamSignal(),
+    }
+  );
+
+  if (!response.ok) return null;
+
+  const result = (await response.json()) as { signedURL?: string; signedUrl?: string };
+  const signedPath = result.signedURL ?? result.signedUrl;
+  if (!signedPath) return null;
+
+  return absoluteStorageUrl(url, signedPath);
+}
+
+// ---------------------------------------------------------------------------
+// Administrator presence (single shared row, id = true)
+// ---------------------------------------------------------------------------
+
+export type AdminPresenceRow = {
+  id: boolean;
+  status: "online" | "away" | "busy" | "offline";
+  message: string | null;
+  back_at: string | null;
+  updated_by: string | null;
+  updated_at: string;
+};
+
+export async function selectAdminPresenceService() {
+  const rows = await supabaseRest<AdminPresenceRow[]>(
+    "admin_presence?select=*&id=is.true&limit=1"
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function updateAdminPresenceService(fields: {
+  status: AdminPresenceRow["status"];
+  message: string | null;
+  back_at: string | null;
+  updated_by: string;
+}) {
+  const rows = await supabaseRest<AdminPresenceRow[]>("admin_presence?id=is.true", {
+    method: "PATCH",
+    body: JSON.stringify({ ...fields, updated_at: new Date().toISOString() }),
+  });
+
+  return rows[0] ?? null;
+}
+
 export async function createReturnEvidenceSignedUrl(path: string) {
   const { url, serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
   const response = await fetch(
@@ -508,7 +858,7 @@ export async function createReturnEvidenceSignedUrl(path: string) {
   const result = (await response.json()) as { signedURL?: string; signedUrl?: string };
   const signedPath = result.signedURL ?? result.signedUrl;
   if (!signedPath) throw new Error("Supabase did not return an evidence URL.");
-  return signedPath.startsWith("http") ? signedPath : `${url}${signedPath}`;
+  return absoluteStorageUrl(url, signedPath);
 }
 
 // Returns an exact row count via PostgREST's Content-Range header instead of
@@ -847,6 +1197,18 @@ export function sanitizePagination(
   return { limit: safeLimit, offset: safeOffset };
 }
 
+/** Every version of one model (see product-variants.ts), public columns only. */
+export async function selectProductVariants(group: string) {
+  const params = new URLSearchParams({
+    select: PUBLIC_PRODUCT_COLUMNS,
+    "full_specs->variant->>group": `eq.${group}`,
+    order: "id.asc",
+    limit: "50",
+  });
+  const { anonKey } = requireSupabaseConfig();
+  return supabaseRest<ProductRow[]>(`products?${params.toString()}`, {}, anonKey);
+}
+
 export async function selectProducts(filters: {
   search?: string | null;
   type?: string | null;
@@ -990,7 +1352,7 @@ export async function insertProduct(product: Partial<Product>) {
 // Bulk sync from the Google Sheet is a service-level job, not a single
 // admin's own write, and merge-duplicates across many rows is not something
 // the per-row RLS policies are designed to authorize efficiently -- this one
-// intentionally keeps using the service_role key (see ADMIN_SETUP.md / the
+// intentionally keeps using the service_role key (see "Admin setup" in README.md / the
 // admin `requireAdmin()` gate in the route handler for the actual auth check).
 type ProductionStockRow = {
   source_key: string;
@@ -1020,7 +1382,8 @@ function chunksOf<T>(values: T[], size: number) {
  * A row with no recorded baseline predates delta tracking, so the workbook is
  * treated as unchanged and the stored quantity is kept.
  */
-export function reconcileStockQuantity(
+/** The delta rule on its own: storefront stock moved by the sheet's change. */
+function stockAfterSheetChange(
   sheetQuantity: number,
   current: Pick<ProductionStockRow, "stock_quantity" | "sheet_stock_quantity"> | undefined
 ) {
@@ -1030,6 +1393,185 @@ export function reconcileStockQuantity(
   const storefrontQuantity = current.stock_quantity ?? 0;
 
   return Math.max(0, storefrontQuantity + (sheetQuantity - lastSheetQuantity));
+}
+
+/**
+ * Stock to show on the website after a sync.
+ *
+ * Applies the sheet's change since the last sync, so a sale the sheet has not
+ * recorded yet is kept -- but the result is never MORE than the sheet.
+ *
+ * The website can legitimately be below the sheet (a checkout whose sheet
+ * write-back failed), never above it. Being above means units were restocked
+ * on the website that the sheet never received, e.g. an order cancelled before
+ * cancellations updated the sheet. The delta rule alone cannot repair that --
+ * the sheet's change is zero -- which is how a quantity of 0 in the sheet kept
+ * showing as In Stock.
+ */
+export function reconcileStockQuantity(
+  sheetQuantity: number,
+  current: Pick<ProductionStockRow, "stock_quantity" | "sheet_stock_quantity"> | undefined
+) {
+  return Math.min(
+    Math.max(0, sheetQuantity),
+    stockAfterSheetChange(sheetQuantity, current)
+  );
+}
+
+export type StockCorrection = {
+  id: number | null;
+  sourceKey: string;
+  sourceSheet: string;
+  name: string;
+  websiteQuantity: number;
+  sheetQuantity: number;
+};
+
+export type StockCorrectionPlan = {
+  /** Website showed more units than the sheet; the sync lowers them. */
+  aboveSheet: StockCorrection[];
+  /** No longer in the sheet but still in stock; marked out of stock. */
+  removedFromSheet: StockCorrection[];
+  /** Missing from the sheet, but too many at once to trust; left unchanged. */
+  heldBack: StockCorrection[];
+};
+
+export type SyncedStockRow = {
+  id: number;
+  name: string;
+  source_sheet: string | null;
+  source_key: string;
+  stock_quantity: number | null;
+  sheet_stock_quantity: number | null;
+};
+
+/**
+ * Which synced products a sync will bring back in line with the sheet.
+ * Pure, so the dry run can show it and tests can pin it down.
+ */
+export function planStockCorrections(
+  sheetProducts: {
+    sourceKey: string;
+    sourceSheet: string;
+    name?: string;
+    stockQuantity?: number;
+  }[],
+  dbRows: SyncedStockRow[]
+): StockCorrectionPlan {
+  const rowsByKey = new Map(dbRows.map((row) => [row.source_key, row]));
+  const sheetKeys = new Set(sheetProducts.map((product) => product.sourceKey));
+
+  const aboveSheet = sheetProducts.flatMap((product) => {
+    const row = rowsByKey.get(product.sourceKey);
+    if (!row) return [];
+
+    const sheetQuantity = Math.max(0, product.stockQuantity ?? 0);
+    const uncapped = stockAfterSheetChange(sheetQuantity, row);
+    if (uncapped <= sheetQuantity) return [];
+
+    return [
+      {
+        id: row.id,
+        sourceKey: product.sourceKey,
+        sourceSheet: product.sourceSheet,
+        name: product.name ?? row.name,
+        websiteQuantity: uncapped,
+        sheetQuantity,
+      },
+    ];
+  });
+
+  const removedFromSheet: StockCorrection[] = [];
+  const heldBack: StockCorrection[] = [];
+  const missingBySheet = new Map<string, StockCorrection[]>();
+
+  for (const row of dbRows) {
+    if (sheetKeys.has(row.source_key) || (row.stock_quantity ?? 0) <= 0) continue;
+
+    const sheet = row.source_sheet ?? "Unknown";
+    const list = missingBySheet.get(sheet) ?? [];
+    list.push({
+      id: row.id,
+      sourceKey: row.source_key,
+      sourceSheet: sheet,
+      name: row.name,
+      websiteQuantity: row.stock_quantity ?? 0,
+      sheetQuantity: 0,
+    });
+    missingBySheet.set(sheet, list);
+  }
+
+  for (const [sheet, missing] of missingBySheet) {
+    const loadedFromSheet = sheetProducts.filter(
+      (product) => product.sourceSheet === sheet
+    ).length;
+    const onWebsite = dbRows.filter((row) => row.source_sheet === sheet).length;
+    // A handful of deleted rows is normal. Many at once more likely means the
+    // tab did not load fully, and marking them out of stock would empty the
+    // shop -- so hold those back and warn instead.
+    const limit = Math.max(3, Math.ceil(onWebsite * 0.05));
+
+    if (loadedFromSheet > 0 && missing.length <= limit) {
+      removedFromSheet.push(...missing);
+    } else {
+      heldBack.push(...missing);
+    }
+  }
+
+  return { aboveSheet, removedFromSheet, heldBack };
+}
+
+/** Reads the website's synced stock and plans the corrections. Read-only. */
+export async function previewStockCorrections(
+  sheetProducts: Parameters<typeof planStockCorrections>[0]
+) {
+  let rows: SyncedStockRow[];
+
+  try {
+    rows = await supabaseRest<SyncedStockRow[]>(
+      "products?select=id,name,source_sheet,source_key,stock_quantity,sheet_stock_quantity&source_key=not.is.null&limit=10000"
+    );
+  } catch (error) {
+    if (!isMissingSheetBaselineColumn(error)) throw error;
+    rows = (
+      await supabaseRest<Omit<SyncedStockRow, "sheet_stock_quantity">[]>(
+        "products?select=id,name,source_sheet,source_key,stock_quantity&source_key=not.is.null&limit=10000"
+      )
+    ).map((row) => ({ ...row, sheet_stock_quantity: null }));
+  }
+
+  return planStockCorrections(sheetProducts, rows);
+}
+
+/**
+ * Marks products that were deleted from the sheet as out of stock (they are
+ * not deleted from the shop). The baseline is reset to 0 as well, so putting
+ * the row back in the sheet with N units shows N again on the next sync.
+ */
+export async function markRemovedProductsOutOfStock(corrections: StockCorrection[]) {
+  const ids = corrections
+    .map((correction) => correction.id)
+    .filter((id): id is number => Number.isInteger(id));
+  if (ids.length === 0) return 0;
+
+  const path = `products?id=in.(${ids.join(",")})`;
+
+  try {
+    await supabaseRest(path, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ stock_quantity: 0, sheet_stock_quantity: 0 }),
+    });
+  } catch (error) {
+    if (!isMissingSheetBaselineColumn(error)) throw error;
+    await supabaseRest(path, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ stock_quantity: 0 }),
+    });
+  }
+
+  return ids.length;
 }
 
 function isMissingSheetBaselineColumn(error: unknown) {
@@ -1100,26 +1642,82 @@ export async function setSheetStockBaselines(
 }
 
 /**
+ * Moves each product's sync baseline BY an amount, rather than setting it to
+ * an absolute sheet total.
+ *
+ * Used when the storefront itself writes units into the workbook (restocking a
+ * cancelled order). Setting the baseline to the sheet's current total would
+ * also absorb any manual sheet edit that has not been synced yet, and that
+ * edit would then never reach the store. Shifting it by exactly the units we
+ * wrote keeps those edits visible to the next sync.
+ */
+export async function adjustSheetStockBaselines(
+  entries: { sourceKey: string; delta: number }[]
+) {
+  const wanted = entries.filter((entry) => entry.delta !== 0);
+  if (wanted.length === 0) return;
+
+  const current = await selectProductionStock(
+    wanted.map((entry) => entry.sourceKey)
+  );
+  if (!current) return;
+
+  for (const entry of wanted) {
+    const baseline = current.get(entry.sourceKey)?.sheet_stock_quantity;
+
+    // No baseline yet: the next sync treats the row as unchanged and records
+    // one, which is already correct.
+    if (baseline === null || baseline === undefined) continue;
+
+    try {
+      await supabaseRest(
+        `products?source_key=eq.${encodeURIComponent(entry.sourceKey)}`,
+        {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({
+            sheet_stock_quantity: Math.max(0, baseline + entry.delta),
+          }),
+        }
+      );
+    } catch (error) {
+      if (!isMissingSheetBaselineColumn(error)) throw error;
+      return;
+    }
+  }
+}
+
+/**
  * Reconciles workbook inventory with storefront inventory.
  *
  * The workbook is authoritative for restocks, but it is not the only writer:
  * checkout deducts stock_quantity immediately and only tells the workbook on a
  * best-effort basis. Overwriting stock_quantity with the workbook's absolute
  * number therefore resurrects sold units whenever write-back has not landed.
- * Instead, apply the workbook's change since the previous sync.
+ * Instead, apply the workbook's change since the previous sync -- capped so the
+ * website never shows more units than the sheet (see reconcileStockQuantity).
  */
 export async function upsertProductionProducts(
   products: (ProductWrite & { sourceKey: string; sourceSheet: string })[]
 ) {
   if (products.length === 0) return [];
 
-  const existing = await selectProductionStock(
-    products.map((product) => product.sourceKey)
-  );
+  const baseKeys = products.flatMap((product) => {
+    const baseKey = specVariantBaseKey(product.sourceKey);
+    return baseKey ? [baseKey] : [];
+  });
+  const existing = await selectProductionStock([
+    ...new Set([...products.map((product) => product.sourceKey), ...baseKeys]),
+  ]);
 
   const rows = products.map((product) => {
     const row = mapProductionProductToRow(product);
-    const previous = existing?.get(product.sourceKey);
+    const baseKey = specVariantBaseKey(product.sourceKey);
+    // Photos only: a spec version that is new to the website (e.g. the 512 GB
+    // of a laptop already on sale) starts with the photos of its model.
+    const previous =
+      existing?.get(product.sourceKey) ??
+      (baseKey ? existing?.get(baseKey) : undefined);
     const { normalizeGallery } = galleryHelpers;
     const suppliedGallery = normalizeGallery(product.fullSpecs?.gallery);
     const oldGallery = normalizeGallery(previous?.full_specs?.gallery);
@@ -1318,8 +1916,110 @@ export async function deleteWishlistItem(userId: string, id: string, accessToken
   );
 }
 
+// ---------------------------------------------------------------------------
+// Back-in-stock and price-drop alerts
+// ---------------------------------------------------------------------------
+
+export type ProductAlertRow = {
+  id: string;
+  user_id: string;
+  product_id: number;
+  kind: "back_in_stock" | "price_drop";
+  baseline_price: number;
+  baseline_stock: string;
+  target_price: number | null;
+  created_at: string;
+  products?: ProductRow | null;
+};
+
+// These three use the SERVICE ROLE, like recently_viewed_products: the table
+// is closed to browser roles (see the migration), and the calling route has
+// already authenticated the customer. Every query is scoped by user_id, which
+// is what keeps one customer out of another's alerts -- passing the customer's
+// own token here instead would fail with "permission denied for table".
+export async function selectProductAlerts(userId: string) {
+  return supabaseRest<ProductAlertRow[]>(
+    `product_alerts?select=id,user_id,product_id,kind,baseline_price,baseline_stock,target_price,created_at,products(${PUBLIC_PRODUCT_COLUMNS})&user_id=eq.${encodeURIComponent(
+      userId
+    )}&order=created_at.desc`
+  );
+}
+
+export async function insertProductAlert(alert: {
+  userId: string;
+  productId: number;
+  kind: "back_in_stock" | "price_drop";
+  baselinePrice: number;
+  baselineStock: string;
+  targetPrice: number | null;
+}) {
+  const rows = await supabaseRest<ProductAlertRow[]>(
+    // Re-following a product refreshes the baseline instead of failing on the
+    // (user_id, product_id, kind) unique constraint.
+    "product_alerts?on_conflict=user_id,product_id,kind",
+    {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify({
+        user_id: alert.userId,
+        product_id: alert.productId,
+        kind: alert.kind,
+        baseline_price: alert.baselinePrice,
+        baseline_stock: alert.baselineStock,
+        target_price: alert.targetPrice,
+      }),
+    }
+  );
+
+  return rows[0];
+}
+
+export async function deleteProductAlert(userId: string, id: string) {
+  await supabaseRest(
+    `product_alerts?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}`,
+    { method: "DELETE" }
+  );
+}
+
+// The payment_slips table arrives with
+// supabase/migrations/2026-09-16-prepaid-payments-and-slips.sql. Until that is
+// run, PostgREST rejects the embed with "Could not find a relationship", which
+// would take the whole order list and the admin dashboard down. So ask for the
+// slips, and stop asking for the rest of this process the first time the
+// database says they are not there.
+let paymentSlipsEmbed = true;
+
 export function orderSelect() {
-  return `*,profiles(email,full_name,role),order_items(*,products(${PUBLIC_PRODUCT_COLUMNS})),delivery_events(*),return_evidence(*)`;
+  // `profiles!orders_user_id_fkey` names WHICH link to follow: orders now
+  // point at profiles twice (the customer, and payment_verified_by), and a
+  // plain `profiles(...)` embed fails with "more than one relationship".
+  return `*,profiles!orders_user_id_fkey(email,full_name,role),order_items(*,products(${PUBLIC_PRODUCT_COLUMNS})),delivery_events(*),return_evidence(*)${
+    paymentSlipsEmbed ? ",payment_slips(*)" : ""
+  }`;
+}
+
+function isMissingPaymentSlips(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("payment_slips");
+}
+
+/**
+ * Runs an order query, retrying once without the slips embed when the table is
+ * not there yet. The query is rebuilt inside, so the retry uses the shorter
+ * select.
+ */
+async function withOptionalPaymentSlips<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (!paymentSlipsEmbed || !isMissingPaymentSlips(error)) throw error;
+
+    console.warn(
+      "[orders] payment_slips is missing; run supabase/migrations/2026-09-16-prepaid-payments-and-slips.sql. Loading orders without transfer slips."
+    );
+    paymentSlipsEmbed = false;
+    return run();
+  }
 }
 
 // Orders run under the caller's own access token, not the service role key.
@@ -1338,11 +2038,13 @@ export async function selectOrders(
     pagination.offset
   );
 
-  return supabaseRest<OrderRow[]>(
-    `orders?select=${orderSelect()}${ownerFilter}&order=created_at.desc&limit=${limit}&offset=${offset}`,
-    {},
-    user.accessToken,
-    anonKey
+  return withOptionalPaymentSlips(() =>
+    supabaseRest<OrderRow[]>(
+      `orders?select=${orderSelect()}${ownerFilter}&order=created_at.desc&limit=${limit}&offset=${offset}`,
+      {},
+      user.accessToken,
+      anonKey
+    )
   );
 }
 
@@ -1350,11 +2052,13 @@ export async function selectOrderById(user: CurrentUser, id: string) {
   const { anonKey } = requireSupabaseConfig();
   const ownerFilter =
     user.role === "admin" ? "" : `&user_id=eq.${encodeURIComponent(user.id)}`;
-  const rows = await supabaseRest<OrderRow[]>(
-    `orders?select=${orderSelect()}&id=eq.${encodeURIComponent(id)}${ownerFilter}&limit=1`,
-    {},
-    user.accessToken,
-    anonKey
+  const rows = await withOptionalPaymentSlips(() =>
+    supabaseRest<OrderRow[]>(
+      `orders?select=${orderSelect()}&id=eq.${encodeURIComponent(id)}${ownerFilter}&limit=1`,
+      {},
+      user.accessToken,
+      anonKey
+    )
   );
 
   return rows[0] ?? null;
@@ -1507,6 +2211,8 @@ export async function insertReturnEvidence(fields: {
   file_name?: string | null;
   content_type?: string | null;
   size_bytes?: number | null;
+  case_id?: string | null;
+  return_request_id?: string | null;
 }) {
   const rows = await supabaseRest<ReturnEvidenceRow[]>("return_evidence", {
     method: "POST",
@@ -1517,6 +2223,8 @@ export async function insertReturnEvidence(fields: {
       file_name: fields.file_name ?? null,
       content_type: fields.content_type ?? null,
       size_bytes: fields.size_bytes ?? null,
+      case_id: fields.case_id ?? null,
+      return_request_id: fields.return_request_id ?? null,
     }),
   });
   return rows[0];
@@ -1525,6 +2233,313 @@ export async function insertReturnEvidence(fields: {
 export async function selectReturnEvidenceById(id: string) {
   const rows = await supabaseRest<ReturnEvidenceRow[]>(
     `return_evidence?select=*&id=eq.${encodeURIComponent(id)}&limit=1`
+  );
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Help cases and per-item return requests
+//
+// Service-role only, like every other order-lifecycle helper here: the route
+// authenticates the account and checks ownership before calling in.
+// ---------------------------------------------------------------------------
+
+/** `profiles!order_help_cases_customer_id_fkey` names WHICH link to follow:
+ *  a case points at profiles twice (the customer, and assigned_admin_id). */
+const helpCaseSelect =
+  "*,profiles!order_help_cases_customer_id_fkey(email,full_name,role),return_evidence(*)";
+
+export async function insertOrderHelpCase(fields: {
+  order_id: string;
+  customer_id: string;
+  topic: HelpCaseTopic;
+  summary: string;
+  conversation_id?: string | null;
+}) {
+  const rows = await supabaseRest<OrderHelpCaseRow[]>("order_help_cases", {
+    method: "POST",
+    body: JSON.stringify({
+      ...fields,
+      conversation_id: fields.conversation_id ?? null,
+    }),
+  });
+  return rows[0];
+}
+
+export async function selectHelpCasesForCustomer(customerId: string) {
+  return supabaseRest<OrderHelpCaseRow[]>(
+    `order_help_cases?select=${encodeURIComponent(
+      helpCaseSelect
+    )}&customer_id=eq.${encodeURIComponent(customerId)}&order=created_at.desc`
+  );
+}
+
+export async function selectHelpCases() {
+  return supabaseRest<OrderHelpCaseRow[]>(
+    `order_help_cases?select=${encodeURIComponent(
+      helpCaseSelect
+    )}&order=created_at.desc&limit=200`
+  );
+}
+
+export async function selectHelpCaseById(id: string) {
+  const rows = await supabaseRest<OrderHelpCaseRow[]>(
+    `order_help_cases?select=${encodeURIComponent(
+      helpCaseSelect
+    )}&id=eq.${encodeURIComponent(id)}&limit=1`
+  );
+  return rows[0] ?? null;
+}
+
+export async function updateHelpCaseService(
+  id: string,
+  fields: Partial<
+    Pick<
+      OrderHelpCaseRow,
+      "status" | "admin_note" | "assigned_admin_id" | "resolved_at" | "conversation_id"
+    >
+  >
+) {
+  const rows = await supabaseRest<OrderHelpCaseRow[]>(
+    `order_help_cases?id=eq.${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(fields) }
+  );
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Admin work queue: ownership + internal notes
+//
+// The LANE is derived in work-queue.ts and never stored. Only the things that
+// cannot be derived live in the database.
+// ---------------------------------------------------------------------------
+
+export type QueueSubjectType = "order" | "help_case" | "return_request";
+
+export type WorkQueueItemRow = {
+  id: string;
+  subject_type: QueueSubjectType;
+  subject_id: string;
+  owner_id: string | null;
+  next_action: string | null;
+  due_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type StaffNoteRow = {
+  id: string;
+  subject_type: QueueSubjectType;
+  subject_id: string;
+  author_id: string;
+  body: string;
+  created_at: string;
+  profiles?: Pick<Profile, "email" | "full_name" | "role"> | null;
+};
+
+export async function selectWorkQueueItems() {
+  return supabaseRest<WorkQueueItemRow[]>(
+    "work_queue_items?select=*&limit=500"
+  );
+}
+
+/** One assignment per case, so this is an upsert on (subject_type, subject_id). */
+export async function upsertWorkQueueItem(fields: {
+  subject_type: QueueSubjectType;
+  subject_id: string;
+  owner_id?: string | null;
+  next_action?: string | null;
+  due_at?: string | null;
+}) {
+  const rows = await supabaseRest<WorkQueueItemRow[]>(
+    "work_queue_items?on_conflict=subject_type,subject_id",
+    {
+      method: "POST",
+      headers: {
+        Prefer: "resolution=merge-duplicates,return=representation",
+      },
+      body: JSON.stringify({
+        ...fields,
+        owner_id: fields.owner_id ?? null,
+        next_action: fields.next_action ?? null,
+        due_at: fields.due_at ?? null,
+        updated_at: new Date().toISOString(),
+      }),
+    }
+  );
+
+  return rows[0] ?? null;
+}
+
+const staffNoteSelect =
+  "*,profiles!staff_notes_author_id_fkey(email,full_name,role)";
+
+export async function selectStaffNotes(
+  subjectType: QueueSubjectType,
+  subjectId: string
+) {
+  return supabaseRest<StaffNoteRow[]>(
+    `staff_notes?select=${encodeURIComponent(
+      staffNoteSelect
+    )}&subject_type=eq.${encodeURIComponent(
+      subjectType
+    )}&subject_id=eq.${encodeURIComponent(subjectId)}&order=created_at.desc&limit=100`
+  );
+}
+
+export async function insertStaffNote(fields: {
+  subject_type: QueueSubjectType;
+  subject_id: string;
+  author_id: string;
+  body: string;
+}) {
+  const rows = await supabaseRest<StaffNoteRow[]>("staff_notes", {
+    method: "POST",
+    body: JSON.stringify(fields),
+  });
+
+  return rows[0] ?? null;
+}
+
+const returnRequestSelect =
+  "*,profiles!return_requests_customer_id_fkey(email,full_name,role),order_items(*,products(id,name,brand,image)),return_evidence(*)";
+
+export async function insertReturnRequest(fields: {
+  order_id: string;
+  order_item_id: string;
+  customer_id: string;
+  quantity: number;
+  reason_code: ReturnReasonCode;
+  description: string;
+  preferred_resolution: ReturnResolution;
+  collection_method: ReturnPickupMethod;
+  pickup_address?: string | null;
+  unboxing_video_confirmed: boolean;
+}) {
+  const rows = await supabaseRest<ReturnRequestRow[]>("return_requests", {
+    method: "POST",
+    body: JSON.stringify({
+      ...fields,
+      pickup_address: fields.pickup_address ?? null,
+    }),
+  });
+  return rows[0];
+}
+
+export async function selectReturnRequestsForCustomer(customerId: string) {
+  return supabaseRest<ReturnRequestRow[]>(
+    `return_requests?select=${encodeURIComponent(
+      returnRequestSelect
+    )}&customer_id=eq.${encodeURIComponent(customerId)}&order=created_at.desc`
+  );
+}
+
+export async function selectReturnRequests() {
+  return supabaseRest<ReturnRequestRow[]>(
+    `return_requests?select=${encodeURIComponent(
+      returnRequestSelect
+    )}&order=created_at.desc&limit=200`
+  );
+}
+
+export async function selectReturnRequestById(id: string) {
+  const rows = await supabaseRest<ReturnRequestRow[]>(
+    `return_requests?select=${encodeURIComponent(
+      returnRequestSelect
+    )}&id=eq.${encodeURIComponent(id)}&limit=1`
+  );
+  return rows[0] ?? null;
+}
+
+export async function updateReturnRequestService(
+  id: string,
+  fields: Partial<
+    Pick<
+      ReturnRequestRow,
+      | "status"
+      | "resolution_granted"
+      | "admin_decision_note"
+      | "decided_by"
+      | "decided_at"
+      | "review_requested_at"
+      | "review_request_note"
+      | "refund_amount"
+      | "refund_method"
+      | "refund_reference"
+      | "refund_approved_at"
+      | "refund_sent_at"
+      | "expected_refund_at"
+      | "delay_reason"
+    >
+  >
+) {
+  const rows = await supabaseRest<ReturnRequestRow[]>(
+    `return_requests?id=eq.${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(fields) }
+  );
+  return rows[0] ?? null;
+}
+
+export type PaymentSlipRow = {
+  id: string;
+  order_id: string;
+  uploaded_by: string;
+  storage_path: string;
+  file_name: string | null;
+  content_type: string | null;
+  size_bytes: number | null;
+  note: string | null;
+  created_at: string;
+};
+
+export async function insertPaymentSlip(fields: {
+  order_id: string;
+  uploaded_by: string;
+  storage_path: string;
+  file_name?: string | null;
+  content_type?: string | null;
+  size_bytes?: number | null;
+  note?: string | null;
+}) {
+  const rows = await supabaseRest<PaymentSlipRow[]>("payment_slips", {
+    method: "POST",
+    body: JSON.stringify({
+      ...fields,
+      file_name: fields.file_name ?? null,
+      content_type: fields.content_type ?? null,
+      size_bytes: fields.size_bytes ?? null,
+      note: fields.note ?? null,
+    }),
+  });
+  return rows[0];
+}
+
+export async function selectPaymentSlipById(id: string) {
+  const rows = await supabaseRest<PaymentSlipRow[]>(
+    `payment_slips?select=*&id=eq.${encodeURIComponent(id)}&limit=1`
+  );
+  return rows[0] ?? null;
+}
+
+/** Payment fields only: kept apart from the delivery updater above. */
+export async function updateOrderPaymentService(
+  id: string,
+  fields: {
+    payment_account?: string | null;
+    payment_reference?: string | null;
+    payment_verification_status?: PaymentVerificationStatus;
+    payment_verified_at?: string | null;
+    payment_verified_by?: string | null;
+    payment_rejected_reason?: string | null;
+    payment_amount_received?: number | null;
+    payment_correction_reason?: PaymentCorrectionReason | null;
+    payment_correction_requested_at?: string | null;
+    payment_status?: OrderRow["payment_status"];
+  }
+) {
+  const rows = await supabaseRest<OrderRow[]>(
+    `orders?id=eq.${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(fields) }
   );
   return rows[0] ?? null;
 }
@@ -1683,6 +2698,204 @@ export async function deleteTier(id: string, adminToken: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Percentage ("% off retail") bands
+// ---------------------------------------------------------------------------
+
+// Structurally identical to PercentBand in lib/pricing.ts, declared here so the
+// data layer stays free of pricing imports.
+export type PercentBandRow = {
+  id: string;
+  price_list_id: string;
+  product_id: number | null;
+  min_quantity: number;
+  discount_percent: number;
+  is_active: boolean;
+  effective_from: string | null;
+  effective_to: string | null;
+};
+
+let warnedMissingPercentTable = false;
+
+/** True only for "the percentage table isn't there yet", i.e. the state before
+ *  the 2026-09-13 migration has been run. Any other failure still throws. */
+function isMissingPercentTable(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+
+  return (
+    message.includes("price_list_percent_tiers") &&
+    /does not exist|could not find the table|PGRST205/i.test(message)
+  );
+}
+
+/** List-wide bands (product_id is null) plus any per-product override rows for
+ *  the products actually being priced. */
+export async function selectPercentBandsForList(
+  priceListId: string,
+  productIds: number[],
+  accessToken: string
+) {
+  const { anonKey } = requireSupabaseConfig();
+  const idList = productIds
+    .filter((id) => Number.isInteger(id) && id > 0)
+    .join(",");
+
+  const filter = idList
+    ? `&or=(product_id.is.null,product_id.in.(${idList}))`
+    : "&product_id=is.null";
+
+  try {
+    return await supabaseRest<PercentBandRow[]>(
+      `price_list_percent_tiers?select=*&price_list_id=eq.${encodeURIComponent(
+        priceListId
+      )}${filter}&order=min_quantity.asc`,
+      {},
+      accessToken,
+      anonKey
+    );
+  } catch (error) {
+    // Deploy-order safety net: if the migration has not been run yet, fall back
+    // to the previous behaviour (fixed tiers / retail) instead of failing the
+    // whole cart. A missing discount is recoverable; a 500 at checkout is not.
+    // Loud on the server so this can never be mistaken for correct pricing.
+    if (isMissingPercentTable(error)) {
+      if (!warnedMissingPercentTable) {
+        warnedMissingPercentTable = true;
+        console.warn(
+          "[pricing] price_list_percent_tiers is missing - run supabase/migrations/2026-09-13-b2b-percent-tiers-and-invite-codes.sql. Wholesale accounts keep their old prices until then."
+        );
+      }
+
+      return [];
+    }
+
+    throw error;
+  }
+}
+
+export async function selectPercentBandsAdmin(priceListId: string | null, adminToken: string) {
+  const { anonKey } = requireSupabaseConfig();
+  const scope = priceListId
+    ? `&price_list_id=eq.${encodeURIComponent(priceListId)}`
+    : "";
+
+  return supabaseRest<PercentBandRow[]>(
+    `price_list_percent_tiers?select=*${scope}&order=min_quantity.asc`,
+    {},
+    adminToken,
+    anonKey
+  );
+}
+
+export async function upsertPercentBandService(fields: {
+  price_list_id: string;
+  product_id: number | null;
+  min_quantity: number;
+  discount_percent: number;
+  is_active?: boolean;
+}) {
+  const rows = await supabaseRest<PercentBandRow[]>("price_list_percent_tiers", {
+    method: "POST",
+    body: JSON.stringify(fields),
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+  });
+
+  return rows[0] ?? null;
+}
+
+export async function deletePercentBandService(id: string) {
+  await supabaseRest(`price_list_percent_tiers?id=eq.${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// One-time wholesale registration codes
+// ---------------------------------------------------------------------------
+
+export type WholesaleInviteRow = {
+  id: string;
+  code_hash: string;
+  code_hint: string;
+  label: string | null;
+  price_list_id: string | null;
+  max_uses: number;
+  use_count: number;
+  expires_at: string | null;
+  is_active: boolean;
+  created_by: string | null;
+  created_at: string;
+  last_used_at: string | null;
+};
+
+export async function insertInviteCodeService(fields: {
+  code_hash: string;
+  code_hint: string;
+  label: string | null;
+  price_list_id: string | null;
+  max_uses: number;
+  expires_at: string | null;
+  created_by: string;
+}) {
+  const rows = await supabaseRest<WholesaleInviteRow[]>("wholesale_invite_codes", {
+    method: "POST",
+    body: JSON.stringify(fields),
+  });
+
+  return rows[0];
+}
+
+/** Never selects code_hash: the plain code is unrecoverable by design and the
+ *  hash has no business being sent to a browser. */
+export async function selectInviteCodesService() {
+  return supabaseRest<Omit<WholesaleInviteRow, "code_hash">[]>(
+    "wholesale_invite_codes?select=id,code_hint,label,price_list_id,max_uses,use_count,expires_at,is_active,created_by,created_at,last_used_at&order=created_at.desc&limit=100"
+  );
+}
+
+/** Cheap pre-check so an invalid code is rejected BEFORE an auth account is
+ *  created. The authoritative consume still happens in redeemInviteCodeService. */
+export async function selectInviteByHashService(codeHash: string) {
+  const rows = await supabaseRest<WholesaleInviteRow[]>(
+    `wholesale_invite_codes?select=*&code_hash=eq.${encodeURIComponent(codeHash)}&limit=1`
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function deactivateInviteCodeService(id: string) {
+  const rows = await supabaseRest<WholesaleInviteRow[]>(
+    `wholesale_invite_codes?id=eq.${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify({ is_active: false }) }
+  );
+
+  return rows[0] ?? null;
+}
+
+/** Atomically consumes one use of a code. Returns null when the code is
+ *  unknown, inactive, expired or already fully used -- the check and the
+ *  increment happen in one statement so concurrent signups cannot both win. */
+export async function redeemInviteCodeService(codeHash: string) {
+  const result = await supabaseRest<WholesaleInviteRow | WholesaleInviteRow[] | null>(
+    "rpc/redeem_wholesale_invite",
+    { method: "POST", body: JSON.stringify({ p_code_hash: codeHash }) }
+  );
+
+  const row = Array.isArray(result) ? result[0] ?? null : result;
+  return row && row.id ? row : null;
+}
+
+export async function insertRegistrationRequestService(fields: {
+  user_id: string;
+  invite_id: string;
+}) {
+  await supabaseRest("wholesale_registration_requests", {
+    method: "POST",
+    body: JSON.stringify(fields),
+    headers: { Prefer: "resolution=merge-duplicates" },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Wholesale account administration (customer listing)
 // ---------------------------------------------------------------------------
 
@@ -1724,6 +2937,14 @@ export async function selectCustomerProfiles(
 // Callers MUST run requireAdmin() first; every route that reaches these is
 // audited via insertAuditLog.)
 // ---------------------------------------------------------------------------
+
+/** The owner dropdown in the work queue. `selectCustomerProfiles` filters
+ *  administrators OUT, so it cannot answer this. */
+export async function selectAdminProfiles() {
+  return supabaseRest<Profile[]>(
+    "profiles?select=id,email,full_name,role&role=eq.admin&order=email.asc&limit=50"
+  );
+}
 
 export async function selectProfileByIdService(userId: string) {
   const rows = await supabaseRest<Profile[]>(
@@ -1782,6 +3003,17 @@ export async function insertAuditLog(entry: {
   });
 }
 
+/** An order's audit events of the given kinds, oldest first. Service role. */
+export async function selectOrderAuditEvents(orderId: string, actions: string[]) {
+  if (actions.length === 0) return [];
+
+  return supabaseRest<Pick<AuditLogRow, "action" | "new_data" | "created_at">[]>(
+    `audit_log?select=action,new_data,created_at&target_type=eq.order&target_id=eq.${encodeURIComponent(
+      orderId
+    )}&action=in.(${actions.map(encodeURIComponent).join(",")})&order=created_at.asc`
+  );
+}
+
 export async function selectAuditLog(limit: number, adminToken: string) {
   const { anonKey } = requireSupabaseConfig();
   const safeLimit = Math.min(Math.max(1, limit), 200);
@@ -1823,7 +3055,7 @@ export async function checkoutOrderRpc(payload: {
   shipping_state: string;
   shipping_postal_code: string;
   shipping_country: string;
-  payment_method: "cash_on_delivery";
+  payment_method: "cash_on_delivery" | "bank_transfer" | "mmqr";
   notes: string | null;
   lines: CheckoutLine[];
 }) {
@@ -2032,6 +3264,9 @@ export async function insertSupportMessage(fields: {
   sender_id: string;
   sender_role: SupportSenderRole;
   body: string;
+  attachment_path?: string | null;
+  attachment_type?: string | null;
+  product_id?: number | null;
 }) {
   const rows = await supabaseRest<SupportMessageRow[]>("support_messages", {
     method: "POST",

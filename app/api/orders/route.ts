@@ -1,8 +1,9 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, after, type NextRequest } from "next/server";
 import {
   authenticate,
   createOrder,
   getOrders,
+  notifyOrderPlaced,
 } from "@/app/lib/backend";
 import { handleRouteError } from "@/app/lib/errors";
 import { readJsonBody } from "@/app/lib/request";
@@ -34,10 +35,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: firstIssueMessage(parsed.error) }, { status: 400 });
     }
 
-    return NextResponse.json(
-      { order: await createOrder(user, parsed.data) },
-      { status: 201 }
-    );
+    const order = await createOrder(user, parsed.data);
+
+    // Runs after the response is sent: the customer is never kept waiting on
+    // the mail server, and a mail failure cannot fail the checkout.
+    after(() => notifyOrderPlaced(user, order.id));
+
+    return NextResponse.json({ order }, { status: 201 });
   } catch (error) {
     return handleRouteError("orders.create", error);
   }

@@ -32,6 +32,38 @@ type SupportMessage = {
   sender_role: "customer" | "admin";
   body: string;
   created_at: string;
+  /** Short-lived signed URL; the bucket itself is private. */
+  attachment_url?: string | null;
+  attachment_type?: string | null;
+  /** Set when the customer is asking about one specific product. */
+  product?: {
+    id: number;
+    name: string;
+    brand: string;
+    price: number;
+    image: string;
+  } | null;
+};
+
+type AdminPresence = {
+  status: "online" | "away" | "busy" | "offline";
+  message: string | null;
+  back_at: string | null;
+  updated_at: string | null;
+};
+
+const PRESENCE_LABELS: Record<AdminPresence["status"], string> = {
+  online: "Online",
+  away: "Away",
+  busy: "Busy",
+  offline: "Offline",
+};
+
+const PRESENCE_STYLES: Record<AdminPresence["status"], string> = {
+  online: "bg-emerald-100 text-emerald-700",
+  away: "bg-amber-100 text-amber-700",
+  busy: "bg-orange-100 text-orange-700",
+  offline: "bg-zinc-200 text-zinc-600",
 };
 
 type ConversationResponse = {
@@ -80,6 +112,57 @@ export default function SupportPanel() {
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const messageListRef = useRef<HTMLDivElement>(null);
+  const [presence, setPresence] = useState<AdminPresence>({
+    status: "offline",
+    message: null,
+    back_at: null,
+    updated_at: null,
+  });
+  const [presenceNote, setPresenceNote] = useState("");
+  const [presenceMinutes, setPresenceMinutes] = useState("");
+  const [savingPresence, setSavingPresence] = useState(false);
+
+  const loadPresence = useCallback(async () => {
+    const response = await fetch("/api/admin/presence", {
+      headers: authHeaders(),
+      cache: "no-store",
+    });
+
+    if (response.ok) {
+      const data = (await response.json()) as { presence: AdminPresence };
+      setPresence(data.presence);
+      setPresenceNote(data.presence.message ?? "");
+    }
+  }, []);
+
+  async function savePresence(status: AdminPresence["status"]) {
+    setSavingPresence(true);
+    setError("");
+
+    try {
+      const minutes = Number(presenceMinutes);
+      const response = await fetch("/api/admin/presence", {
+        method: "PATCH",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status,
+          message: presenceNote.trim() || undefined,
+          back_in_minutes:
+            Number.isInteger(minutes) && minutes > 0 ? minutes : null,
+        }),
+      });
+
+      if (!response.ok) throw new Error(await responseError(response));
+
+      const data = (await response.json()) as { presence: AdminPresence };
+      // The badge above re-renders straight away, which is the confirmation.
+      setPresence(data.presence);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update status.");
+    } finally {
+      setSavingPresence(false);
+    }
+  }
 
   const loadInbox = useCallback(async (quiet = false) => {
     if (!quiet) setIsLoadingInbox(true);
@@ -165,6 +248,7 @@ export default function SupportPanel() {
   useEffect(() => {
     const initialLoad = window.setTimeout(() => {
       void loadInbox();
+      void loadPresence();
     }, 0);
     const interval = window.setInterval(() => {
       void loadInbox(true);
@@ -174,7 +258,7 @@ export default function SupportPanel() {
       window.clearTimeout(initialLoad);
       window.clearInterval(interval);
     };
-  }, [loadInbox]);
+  }, [loadInbox, loadPresence]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -297,6 +381,67 @@ export default function SupportPanel() {
           >
             Refresh
           </button>
+        </div>
+      </div>
+
+      {/* What customers see about your availability, before they start typing. */}
+      <div className="border-b bg-zinc-50 px-5 py-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-semibold">Customers see you as</span>
+          <span
+            className={`rounded-full px-3 py-1 text-xs font-bold ${
+              PRESENCE_STYLES[presence.status]
+            }`}
+          >
+            {PRESENCE_LABELS[presence.status]}
+          </span>
+          {presence.message && (
+            <span className="text-xs text-zinc-500">“{presence.message}”</span>
+          )}
+          {presence.back_at && (
+            <span className="text-xs text-zinc-500">
+              back {new Date(presence.back_at).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+          )}
+        </div>
+
+        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_130px_auto]">
+          <input
+            value={presenceNote}
+            onChange={(event) => setPresenceNote(event.target.value)}
+            maxLength={200}
+            placeholder="Message for customers, e.g. Back in 20 minutes (lunch)"
+            className="rounded-xl border px-3 py-2 text-sm outline-none focus:border-red-500"
+          />
+          <input
+            type="number"
+            min={1}
+            max={480}
+            value={presenceMinutes}
+            onChange={(event) => setPresenceMinutes(event.target.value)}
+            placeholder="Back in (min)"
+            className="rounded-xl border px-3 py-2 text-sm outline-none focus:border-red-500"
+          />
+          <div className="flex flex-wrap gap-2">
+            {(["online", "away", "busy", "offline"] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                disabled={savingPresence}
+                onClick={() => savePresence(value)}
+                className={`rounded-full px-4 py-2 text-xs font-semibold disabled:opacity-50 ${
+                  presence.status === value
+                    ? "bg-zinc-900 text-white"
+                    : "border hover:bg-white"
+                }`}
+              >
+                {PRESENCE_LABELS[value]}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -427,9 +572,55 @@ export default function SupportPanel() {
                             : "rounded-bl-md bg-white text-zinc-900 shadow-sm"
                         }`}
                       >
-                        <p className="whitespace-pre-wrap break-words">
-                          {message.body}
-                        </p>
+                        {message.product && (
+                          <a
+                            href={`/products/${message.product.id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={`mb-2 flex items-center gap-2 rounded-xl border p-2 ${
+                              isAdmin
+                                ? "border-zinc-700 bg-zinc-800"
+                                : "border-zinc-200 bg-zinc-50"
+                            }`}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={message.product.image}
+                              alt=""
+                              className="h-10 w-10 rounded object-contain"
+                            />
+                            <span className="min-w-0">
+                              <span className="block truncate text-xs font-bold">
+                                Asking about: {message.product.name}
+                              </span>
+                              <span className="block text-[10px] opacity-70">
+                                {message.product.brand} · #{message.product.id}
+                              </span>
+                            </span>
+                          </a>
+                        )}
+
+                        {message.attachment_url && (
+                          <a
+                            href={message.attachment_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mb-2 block"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={message.attachment_url}
+                              alt="Photo from the customer"
+                              className="max-h-56 w-auto rounded-xl border"
+                            />
+                          </a>
+                        )}
+
+                        {message.body && (
+                          <p className="whitespace-pre-wrap break-words">
+                            {message.body}
+                          </p>
+                        )}
                         <p
                           className={`mt-1 text-[10px] ${
                             isAdmin ? "text-zinc-400" : "text-zinc-400"

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  expandPercentBands,
   isTierEffective,
   isWholesaleApproved,
   priceLine,
   selectTier,
+  type PercentBand,
   type PriceTierRow,
 } from "../app/lib/pricing";
 
@@ -202,5 +204,136 @@ describe("tier selection", () => {
   it("isTierEffective handles boundaries", () => {
     expect(isTierEffective(tier({ effective_to: NOW.toISOString() }), NOW)).toBe(false);
     expect(isTierEffective(tier({ effective_from: NOW.toISOString() }), NOW)).toBe(true);
+  });
+});
+
+// The shop's B2B ladder: 5-10 units 5% off, 11-30 units 10% off,
+// 31+ units 15% off (raisable to 20% for an individual product).
+describe("percentage bands (B2B ladder)", () => {
+  const B2B_RETAIL = 100_000;
+
+  function band(overrides: Partial<PercentBand> = {}): PercentBand {
+    return {
+      id: "band-1",
+      price_list_id: "b2b",
+      product_id: null,
+      min_quantity: 5,
+      discount_percent: 5,
+      is_active: true,
+      effective_from: null,
+      effective_to: null,
+      ...overrides,
+    };
+  }
+
+  const LADDER_BANDS: PercentBand[] = [
+    band({ id: "b5", min_quantity: 5, discount_percent: 5 }),
+    band({ id: "b11", min_quantity: 11, discount_percent: 10 }),
+    band({ id: "b31", min_quantity: 31, discount_percent: 15 }),
+  ];
+
+  function priceAt(quantity: number, bands = LADDER_BANDS) {
+    return priceLine({
+      retailPrice: B2B_RETAIL,
+      quantity,
+      tiers: [],
+      percentBands: bands,
+      productId: 1,
+      now: NOW,
+    });
+  }
+
+  it("below the first band the customer pays retail", () => {
+    const result = priceAt(4);
+
+    expect(result.unitPrice).toBe(B2B_RETAIL);
+    expect(result.savings).toBe(0);
+    expect(result.wholesaleEligible).toBe(true);
+    expect(result.nextTier?.minQuantity).toBe(5);
+  });
+
+  it.each([
+    [5, 95_000],
+    [10, 95_000],
+    [11, 90_000],
+    [30, 90_000],
+    [31, 85_000],
+    [500, 85_000],
+  ])("quantity %i costs %i per unit", (quantity, expected) => {
+    expect(priceAt(quantity).unitPrice).toBe(expected);
+  });
+
+  it("a per-product band overrides the list-wide one at the same quantity", () => {
+    const withOverride = [
+      ...LADDER_BANDS,
+      band({ id: "vip", min_quantity: 31, discount_percent: 20, product_id: 1 }),
+    ];
+
+    expect(priceAt(31, withOverride).unitPrice).toBe(80_000);
+    // A different product keeps the standard 15%.
+    expect(
+      priceLine({
+        retailPrice: B2B_RETAIL,
+        quantity: 31,
+        tiers: [],
+        percentBands: withOverride,
+        productId: 2,
+        now: NOW,
+      }).unitPrice
+    ).toBe(85_000);
+  });
+
+  it("an explicit fixed-price tier wins over a band at the same quantity", () => {
+    const fixed = [tier({ id: "fixed", min_quantity: 11, unit_price: 70_000 })];
+    const result = priceLine({
+      retailPrice: B2B_RETAIL,
+      quantity: 11,
+      tiers: fixed,
+      percentBands: LADDER_BANDS,
+      productId: 1,
+      now: NOW,
+    });
+
+    expect(result.unitPrice).toBe(70_000);
+    expect(result.tierId).toBe("fixed");
+  });
+
+  it("inactive and expired bands are ignored", () => {
+    const stale = [
+      band({ id: "off", min_quantity: 5, discount_percent: 50, is_active: false }),
+      band({
+        id: "gone",
+        min_quantity: 11,
+        discount_percent: 50,
+        effective_to: "2026-01-01T00:00:00Z",
+      }),
+    ];
+
+    expect(priceAt(20, stale).unitPrice).toBe(B2B_RETAIL);
+  });
+
+  it("no bands and no tiers means the account is not wholesale-eligible", () => {
+    const result = priceLine({
+      retailPrice: B2B_RETAIL,
+      quantity: 50,
+      tiers: [],
+      percentBands: [],
+      productId: 1,
+      now: NOW,
+    });
+
+    expect(result.wholesaleEligible).toBe(false);
+    expect(result.unitPrice).toBe(B2B_RETAIL);
+  });
+
+  it("rounds to whole MMK", () => {
+    const [expanded] = expandPercentBands(
+      9_999,
+      [band({ min_quantity: 5, discount_percent: 15 })],
+      1
+    );
+
+    expect(expanded.unit_price).toBe(Math.round(9_999 * 0.85));
+    expect(Number.isInteger(expanded.unit_price)).toBe(true);
   });
 });

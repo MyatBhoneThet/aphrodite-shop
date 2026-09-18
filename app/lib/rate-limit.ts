@@ -12,6 +12,9 @@ const LIMITS: Record<string, number> = {
   register: 5,
   "admin-login": 8,
   chat: 30,
+  // Lower than live chat: each call can reach an external AI provider and
+  // spends the shop's free Gemini quota.
+  assistant: 20,
 };
 
 // Prevent attacker-controlled IP/header values from growing this process map

@@ -1,15 +1,24 @@
 "use client";
 
 import Link from "next/link";
+import ProductPrice from "../components/ProductPrice";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { Product } from "../data/products";
 import { authHeaders } from "../lib/client-auth";
-import { formatCurrency, formatProductPrice } from "../lib/format";
+import { formatCurrency } from "../lib/format";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { MYANMAR_REGIONS, normalizeMyanmarRegion } from "../lib/delivery-country";
 import DeliveryPinPicker, { type DeliveryPin } from "../components/DeliveryPinPicker";
+import { PaymentLogo, PaymentQr } from "../components/PaymentLogo";
+import { useLanguage } from "../lib/language";
+import {
+  paymentAccountsFor,
+  type PaymentAccountId,
+  type PaymentMethod,
+} from "../lib/payment-accounts";
 
 type LinePricing = {
+  promotional?: boolean;
   quantity: number;
   retailUnitPrice: number;
   unitPrice: number;
@@ -42,6 +51,7 @@ type CartSummary = {
 
 export default function CartPage() {
   const { user, status: userStatus } = useCurrentUser();
+  const { t } = useLanguage();
   const [cart, setCart] = useState<CartSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -59,6 +69,8 @@ export default function CartPage() {
   const [notes, setNotes] = useState("");
   const [codConfirmed, setCodConfirmed] = useState(false);
   const [codContactConfirmed, setCodContactConfirmed] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash_on_delivery");
+  const [paymentAccount, setPaymentAccount] = useState<PaymentAccountId | null>(null);
   const [deliveryLocation, setDeliveryLocation] = useState<DeliveryPin | null>(null);
   const [addressByPhone, setAddressByPhone] = useState(false);
   const hasPendingPrices = cart?.items.some((item) => !Number.isFinite(item.product.price) || item.product.price <= 0) ?? false;
@@ -170,9 +182,11 @@ export default function CartPage() {
           shipping_state: shippingState.trim(),
           shipping_postal_code: postalCode.trim(),
           shipping_country: shippingCountry.trim(),
-          payment_method: "cash_on_delivery",
-          cod_confirmation: codConfirmed,
-          cod_contact_confirmation: codContactConfirmed,
+          payment_method: paymentMethod,
+          payment_account: paymentMethod === "cash_on_delivery" ? null : paymentAccount,
+          cod_confirmation: paymentMethod === "cash_on_delivery" ? codConfirmed : undefined,
+          cod_contact_confirmation:
+            paymentMethod === "cash_on_delivery" ? codContactConfirmed : undefined,
           delivery_location_consent: Boolean(deliveryLocation),
           delivery_location: deliveryLocation,
           notes: notes.trim() || null,
@@ -219,7 +233,7 @@ export default function CartPage() {
     return (
       <main className="flex min-h-screen items-center justify-center bg-white px-5 text-center text-zinc-950">
         <div>
-          <h1 className="text-3xl font-bold">Login to view your cart</h1>
+          <h1 className="text-3xl font-bold">{t("cart.loginTitle")}</h1>
           <p className="mt-3 text-zinc-500">
             You need an account to add items to a cart and check out.
           </p>
@@ -244,7 +258,7 @@ export default function CartPage() {
       <main className="flex min-h-screen items-center justify-center bg-white px-5 text-center text-zinc-950">
         <div>
           <p className="text-5xl">🎉</p>
-          <h1 className="mt-4 text-3xl font-bold">Order placed</h1>
+          <h1 className="mt-4 text-3xl font-bold">{t("cart.orderPlaced")}</h1>
           <p className="mt-3 text-zinc-500">
             Order #{placedOrderId.slice(0, 8)} has been received and is now
             pending COD verification. Keep your phone available; the store may
@@ -280,8 +294,8 @@ export default function CartPage() {
       </header>
 
       <section className="mx-auto max-w-5xl px-5 py-10">
-        <h1 className="text-4xl font-bold">Your Cart</h1>
-        {hasPendingPrices && <p className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">Some items are waiting for confirmed MMK prices. They are not free. Remove these items or contact support before placing an order.</p>}
+        <h1 className="text-4xl font-bold">{t("cart.title")}</h1>
+        {hasPendingPrices && <p className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">{t("cart.pendingPrices")}</p>}
 
         {error && (
           <p className="mt-4 rounded-2xl bg-red-50 p-4 text-sm font-semibold text-red-700">
@@ -291,7 +305,7 @@ export default function CartPage() {
 
         {!cart || cart.items.length === 0 ? (
           <div className="mt-8 rounded-[2rem] bg-zinc-100 p-10 text-center">
-            <p className="text-lg font-semibold">Your cart is empty.</p>
+            <p className="text-lg font-semibold">{t("cart.empty")}</p>
             <Link
               href="/"
               className="mt-5 inline-block rounded-full bg-red-600 px-6 py-3 font-semibold text-white"
@@ -315,20 +329,9 @@ export default function CartPage() {
 
                   <div className="flex-1">
                     <p className="font-bold">{item.product.name}</p>
-                    <p className="text-sm text-zinc-500">
-                      {formatProductPrice(item.product.price > 0 ? item.pricing.unitPrice : 0)}
-                      {item.product.price > 0 && " each"}
-                      {item.product.price > 0 && item.pricing.unitPrice < item.pricing.retailUnitPrice && (
-                        <>
-                          {" "}
-                          <span className="line-through">
-                            {formatCurrency(item.pricing.retailUnitPrice)}
-                          </span>
-                        </>
-                      )}
-                    </p>
+                    <ProductPrice price={item.product.price > 0 ? item.pricing.unitPrice : 0} regularPrice={item.pricing.retailUnitPrice} />
 
-                    {item.product.price <= 0 ? null : item.pricing.tierMinQuantity ? (
+                    {item.product.price <= 0 ? null : (item.pricing.tierMinQuantity || item.pricing.promotional) ? (
                       <p className="mt-1 text-xs font-semibold text-green-700">
                         {item.pricing.label} · save{" "}
                         {formatCurrency(item.pricing.savings)}
@@ -355,7 +358,7 @@ export default function CartPage() {
                             : removeItem(item.id)
                         }
                         className="h-8 w-8 rounded-full border font-bold"
-                        aria-label="Decrease quantity"
+                        aria-label={t("detail.decrease")}
                       >
                         −
                       </button>
@@ -364,7 +367,7 @@ export default function CartPage() {
                         type="button"
                         onClick={() => updateQuantity(item.id, item.quantity + 1)}
                         className="h-8 w-8 rounded-full border font-bold"
-                        aria-label="Increase quantity"
+                        aria-label={t("detail.increase")}
                       >
                         +
                       </button>
@@ -386,19 +389,19 @@ export default function CartPage() {
             </div>
 
             <div className="rounded-[2rem] bg-zinc-100 p-6">
-              <h2 className="text-xl font-bold">Checkout</h2>
+              <h2 className="text-xl font-bold">{t("cart.checkout")}</h2>
 
               <div className="mt-4 space-y-2 text-sm">
                 {!hasPendingPrices && cart.totalSavings > 0 && (
                   <>
                     <div className="flex items-center justify-between text-zinc-500">
-                      <span>Retail subtotal</span>
+                      <span>{t("cart.retailSubtotal")}</span>
                       <span className="line-through">
                         {formatCurrency(cart.retailSubtotal)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between font-semibold text-green-700">
-                      <span>Wholesale savings</span>
+                      <span>{t("cart.totalSavings")}</span>
                       <span>−{formatCurrency(cart.totalSavings)}</span>
                     </div>
                   </>
@@ -453,7 +456,7 @@ export default function CartPage() {
                   <input
                     id="address-line-1"
                     required
-                    placeholder="House number and street"
+                    placeholder={t("cart.addressLine1")}
                     value={addressLine1}
                     onChange={(event) => setAddressLine1(event.target.value)}
                     className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500"
@@ -466,7 +469,7 @@ export default function CartPage() {
                   </label>
                   <input
                     id="address-line-2"
-                    placeholder="Apartment, suite, or landmark"
+                    placeholder={t("cart.addressLine2")}
                     value={addressLine2}
                     onChange={(event) => setAddressLine2(event.target.value)}
                     className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500"
@@ -507,7 +510,7 @@ export default function CartPage() {
                     </label>
                     <input id="shipping-country" readOnly value={shippingCountry}
                       className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500" />
-                    <p className="mt-1 text-xs text-zinc-500">Myanmar delivery addresses only. No international shipping.</p>
+                    <p className="mt-1 text-xs text-zinc-500">{t("cart.myanmarOnly")}</p>
                   </div>
                 </div>
 
@@ -517,29 +520,84 @@ export default function CartPage() {
                 }} />
                 {!deliveryLocation && <label className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">
                   <input type="checkbox" required checked={addressByPhone} onChange={(event) => setAddressByPhone(event.target.checked)} className="mt-1" />
-                  <span>I cannot confirm a map pin. Please call to confirm my written Myanmar address. My COD order must be reviewed before dispatch.</span>
+                  <span>{t("cart.noPin")}</span>
                 </label>}
 
                 <fieldset className="rounded-2xl border border-green-200 bg-green-50 p-4">
-                  <legend className="px-1 text-sm font-bold">Payment method</legend>
+                  <legend className="px-1 text-sm font-bold">{t("cart.paymentMethod")}</legend>
+
                   <label className="flex items-start gap-3">
-                    <input type="radio" name="payment-method"
-                      value="cash_on_delivery" checked readOnly className="mt-1" />
+                    <input type="radio" name="payment-method" value="cash_on_delivery"
+                      checked={paymentMethod === "cash_on_delivery"}
+                      onChange={() => { setPaymentMethod("cash_on_delivery"); setPaymentAccount(null); }}
+                      className="mt-1" />
                     <span>
-                      <span className="block font-semibold">Cash on delivery (COD)</span>
-                      <span className="block text-xs text-zinc-600">
-                        Pay the delivery driver after checking your package.
-                      </span>
+                      <span className="block font-semibold">{t("payment.method.cash_on_delivery")}</span>
+                      <span className="block text-xs text-zinc-600">{t("payment.method.cash_on_delivery.help")}</span>
                     </span>
                   </label>
-                  <label className="mt-4 flex items-start gap-3 text-sm">
-                    <input type="checkbox" required checked={codConfirmed} onChange={(event) => setCodConfirmed(event.target.checked)} className="mt-1" />
-                    <span>I confirm the recipient name and delivery address are correct.</span>
+
+                  <label className="mt-4 flex items-start gap-3">
+                    <input type="radio" name="payment-method" value="bank_transfer"
+                      checked={paymentMethod === "bank_transfer"}
+                      onChange={() => { setPaymentMethod("bank_transfer"); setPaymentAccount("kbz"); }}
+                      className="mt-1" />
+                    <span>
+                      <span className="block font-semibold">{t("payment.method.bank_transfer")}</span>
+                      <span className="block text-xs text-zinc-600">{t("payment.method.bank_transfer.help")}</span>
+                    </span>
                   </label>
-                  <label className="mt-3 flex items-start gap-3 text-sm">
-                    <input type="checkbox" required checked={codContactConfirmed} onChange={(event) => setCodContactConfirmed(event.target.checked)} className="mt-1" />
-                    <span>I confirm this phone is reachable for COD verification. Unverified orders may be held or cancelled.</span>
-                  </label>
+
+                  {/* The MMQR code is for retail customers only. */}
+                  {!cart?.wholesale && <label className="mt-4 flex items-start gap-3">
+                    <input type="radio" name="payment-method" value="mmqr"
+                      checked={paymentMethod === "mmqr"}
+                      onChange={() => { setPaymentMethod("mmqr"); setPaymentAccount("mmqr"); }}
+                      className="mt-1" />
+                    <span>
+                      <span className="block font-semibold">{t("payment.method.mmqr")}</span>
+                      <span className="block text-xs text-zinc-600">{t("payment.method.mmqr.help")}</span>
+                    </span>
+                  </label>}
+
+                  {paymentMethod === "cash_on_delivery" ? <>
+                    <label className="mt-4 flex items-start gap-3 text-sm">
+                      <input type="checkbox" required checked={codConfirmed} onChange={(event) => setCodConfirmed(event.target.checked)} className="mt-1" />
+                      <span>{t("cart.codConfirmAddress")}</span>
+                    </label>
+                    <label className="mt-3 flex items-start gap-3 text-sm">
+                      <input type="checkbox" required checked={codContactConfirmed} onChange={(event) => setCodContactConfirmed(event.target.checked)} className="mt-1" />
+                      <span>{t("cart.codConfirmPhone")}</span>
+                    </label>
+                  </> : <div className="mt-4 space-y-3">
+                    <p className="text-sm font-semibold">
+                      {t("payment.amountToTransfer")}: {formatCurrency(cart?.total ?? 0)}
+                    </p>
+                    {paymentAccountsFor({ wholesale: Boolean(cart?.wholesale) })
+                      .filter((account) => account.method === paymentMethod)
+                      .map((account) => (
+                        <label key={account.id} className={`flex gap-3 rounded-xl border bg-white p-4 ${paymentAccount === account.id ? "border-red-500" : "border-zinc-200"}`}>
+                          <input type="radio" name="payment-account" value={account.id}
+                            checked={paymentAccount === account.id}
+                            onChange={() => setPaymentAccount(account.id)} className="mt-1" />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-2">
+                              {/* Images live in public/payments/. A missing file falls back to a
+                                  lettered badge rather than a broken-image icon. */}
+                              <PaymentLogo src={account.logo} alt={account.label} initials={account.id.toUpperCase()} />
+                              <span className="font-bold">{account.label}</span>
+                            </span>
+                            <span className="mt-2 block text-sm">{t("payment.accountHolder")}: {account.holder}</span>
+                            {account.accountNumber && <span className="mt-1 block font-mono text-lg font-bold tracking-wide">{account.accountNumber}</span>}
+                            {account.qr && <span className="mt-3 block">
+                              <span className="block text-sm font-semibold">{t("payment.scanQr")}</span>
+                              <PaymentQr src={account.qr} alt="MMQR code for Aphrodite Myanmar" />
+                            </span>}
+                          </span>
+                        </label>
+                      ))}
+                    <p className="rounded-xl bg-white p-3 text-xs text-zinc-600">{t("payment.slip.help")}</p>
+                  </div>}
                 </fieldset>
 
                 <div>
@@ -561,8 +619,8 @@ export default function CartPage() {
                   className="w-full rounded-full bg-red-600 px-5 py-4 font-semibold text-white disabled:bg-zinc-400"
                 >
                   {isPlacingOrder
-                    ? "Placing order..."
-                    : "Place cash-on-delivery order"}
+                    ? t("cart.placingOrder")
+                    : t(`cart.place.${paymentMethod}`)}
                 </button>
               </form>
             </div>

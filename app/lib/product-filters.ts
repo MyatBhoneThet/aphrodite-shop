@@ -1,3 +1,4 @@
+import { effectiveProductPrice } from "./promotions";
 import type { Product } from "../data/products";
 import { getProductFamily, type ProductFamily } from "./product-specifications";
 
@@ -47,7 +48,7 @@ export function filterAndSortProducts(
       if (
         Number.isFinite(minimum) &&
         minimum !== null &&
-        product.price < minimum
+        effectiveProductPrice(product) < minimum
       ) {
         return false;
       }
@@ -55,7 +56,7 @@ export function filterAndSortProducts(
       if (
         Number.isFinite(maximum) &&
         maximum !== null &&
-        product.price > maximum
+        effectiveProductPrice(product) > maximum
       ) {
         return false;
       }
@@ -79,8 +80,8 @@ export function filterAndSortProducts(
       return true;
     })
     .sort((left, right) => {
-      if (filters.sort === "price-asc") return left.price - right.price;
-      if (filters.sort === "price-desc") return right.price - left.price;
+      if (filters.sort === "price-asc") return effectiveProductPrice(left) - effectiveProductPrice(right);
+      if (filters.sort === "price-desc") return effectiveProductPrice(right) - effectiveProductPrice(left);
       if (filters.sort === "name") return left.name.localeCompare(right.name);
       return 0;
     });

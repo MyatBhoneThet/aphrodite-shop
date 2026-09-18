@@ -2,8 +2,17 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
+import BrandLogo from "../components/BrandLogo";
+import {
+  LiquidBackdrop,
+  authButtonClass,
+  authFieldClass,
+  authLabelClass,
+  glassCardClass,
+} from "../components/AuthShell";
 import { authHeaders } from "../lib/client-auth";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import { useLanguage } from "../lib/language";
 
 type SettingsData = {
   email: string;
@@ -19,12 +28,6 @@ type SettingsData = {
   order_updates_enabled: boolean;
   support_updates_enabled: boolean;
   marketing_emails_enabled: boolean;
-  account: {
-    role: "normal" | "wholesale" | "admin";
-    wholesale_status: string;
-    price_list_id: string | null;
-    price_list_name: string | null;
-  };
 };
 
 const emptySettings: SettingsData = {
@@ -41,13 +44,17 @@ const emptySettings: SettingsData = {
   order_updates_enabled: true,
   support_updates_enabled: true,
   marketing_emails_enabled: false,
-  account: {
-    role: "normal",
-    wholesale_status: "not_applied",
-    price_list_id: null,
-    price_list_name: null,
-  },
 };
+
+/** Frosted panel, shared with the login and signup cards. */
+const glassCard = `${glassCardClass} sm:p-8`;
+
+/** Field styling is shared with the auth pages; only the disabled state
+ *  (the read-only email) is added here. */
+const settingsFieldClass = `${authFieldClass} disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-500`;
+
+const glassTileClass =
+  "flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/70 p-4 font-semibold backdrop-blur transition hover:border-red-500 hover:bg-red-50";
 
 async function errorMessage(response: Response) {
   const data = (await response.json().catch(() => null)) as {
@@ -57,7 +64,39 @@ async function errorMessage(response: Response) {
   return data?.error ?? "Request failed.";
 }
 
+/** Centred message page, so every state keeps the same liquid look. */
+function SettingsNotice({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description: string;
+  action?: { href: string; label: string };
+}) {
+  return (
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-white px-5 text-center text-zinc-950">
+      <LiquidBackdrop />
+      <div className={`relative w-full max-w-md ${glassCard}`}>
+        <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
+        <p className="mt-3 text-sm leading-relaxed text-zinc-600">
+          {description}
+        </p>
+        {action && (
+          <Link
+            href={action.href}
+            className={`mt-7 inline-block ${authButtonClass}`}
+          >
+            {action.label}
+          </Link>
+        )}
+      </div>
+    </main>
+  );
+}
+
 export default function SettingsPage() {
+  const { t } = useLanguage();
   const { user, status, refresh } = useCurrentUser();
   const [settings, setSettings] = useState<SettingsData>(emptySettings);
   const [isLoading, setIsLoading] = useState(true);
@@ -224,123 +263,84 @@ export default function SettingsPage() {
 
   if (status === "checking" || isLoading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-zinc-50">
-        Loading account settings...
-      </main>
+      <SettingsNotice
+        title="Loading your settings"
+        description="One moment while we open your account."
+      />
     );
   }
 
   if (!user) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-zinc-50 px-5 text-center">
-        <div>
-          <h1 className="text-3xl font-bold">Login to manage your account</h1>
-          <p className="mt-3 text-zinc-500">
-            Settings are private and connected to your customer account.
-          </p>
-          <Link
-            href="/login"
-            className="mt-6 inline-block rounded-full bg-red-600 px-6 py-3 font-semibold text-white"
-          >
-            Login
-          </Link>
-        </div>
-      </main>
+      <SettingsNotice
+        title="Login to manage your account"
+        description="Settings are private and connected to your customer account."
+        action={{ href: "/login", label: "Login" }}
+      />
     );
   }
 
   if (user.role === "admin") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-zinc-50 px-5 text-center">
-        <div>
-          <h1 className="text-3xl font-bold">Customer settings</h1>
-          <p className="mt-3 text-zinc-500">
-            Administrators manage their work from the admin dashboard.
-          </p>
-          <Link
-            href="/admin"
-            className="mt-6 inline-block rounded-full bg-zinc-900 px-6 py-3 font-semibold text-white"
-          >
-            Open admin dashboard
-          </Link>
-        </div>
-      </main>
+      <SettingsNotice
+        title="Customer settings"
+        description="Administrators manage their work from the admin dashboard."
+        action={{ href: "/admin", label: "Open admin dashboard" }}
+      />
     );
   }
 
-  const isWholesale =
-    settings.account.role === "wholesale" &&
-    settings.account.wholesale_status === "approved";
-  const isWholesaleAccount = settings.account.role === "wholesale";
-  const accountTypeLabel = isWholesale
-    ? "Wholesale customer"
-    : isWholesaleAccount
-      ? `Wholesale customer (${settings.account.wholesale_status})`
-      : "Retail customer";
-
   return (
-    <main className="min-h-screen bg-zinc-50 text-zinc-950">
-      <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-5">
-          <Link href="/" className="text-2xl font-bold text-red-600">
-            Aphrodite
-          </Link>
-          <Link href="/" className="rounded-full border px-5 py-2 text-sm">
-            Back to Store
-          </Link>
-        </div>
-      </header>
+    <main className="relative min-h-screen overflow-hidden bg-white text-zinc-950">
+      <LiquidBackdrop />
 
-      <div className="mx-auto max-w-6xl px-5 py-10">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-wider text-red-600">
-              My account
-            </p>
-            <h1 className="mt-1 text-4xl font-bold">Settings</h1>
-            <p className="mt-2 text-zinc-500">
-              Manage your profile, delivery details, preferences and security.
-            </p>
-          </div>
+      <div className="relative mx-auto max-w-3xl px-5 py-10 sm:py-14">
+        <header className="flex items-center justify-between gap-4">
+          <Link href="/" aria-label="Aphrodite Myanmar home">
+            <BrandLogo />
+          </Link>
 
-          <div
-            className={`rounded-2xl px-5 py-3 ${
-              isWholesale
-                ? "bg-green-100 text-green-800"
-                : "bg-white text-zinc-700 shadow-sm"
-            }`}
+          <Link
+            href="/"
+            className="rounded-full border border-zinc-300 bg-white/70 px-5 py-2 text-sm font-semibold backdrop-blur transition hover:border-zinc-950"
           >
-            <p className="text-xs font-semibold uppercase">Account type</p>
-            <p className="font-bold">{accountTypeLabel}</p>
-            {isWholesale && settings.account.price_list_name && (
-              <p className="text-xs">{settings.account.price_list_name}</p>
-            )}
-          </div>
+            ← Back to store
+          </Link>
+        </header>
+
+        <div className="mt-10">
+          <p className="text-sm font-semibold uppercase tracking-[0.25em] text-red-600">
+            My account
+          </p>
+          <h1 className="mt-2 text-4xl font-bold tracking-tight sm:text-5xl">
+            Settings
+          </h1>
+          <p className="mt-3 text-zinc-600">
+            Manage your profile, delivery details, preferences and security.
+          </p>
         </div>
 
         {(message || error) && (
           <p
-            className={`mt-6 rounded-2xl p-4 text-sm font-semibold ${
+            role={error ? "alert" : "status"}
+            className={`mt-7 rounded-2xl border p-4 text-sm font-semibold ${
               error
-                ? "bg-red-50 text-red-700"
-                : "bg-green-50 text-green-700"
+                ? "border-red-200 bg-red-50 text-red-700"
+                : "border-emerald-200 bg-emerald-50 text-emerald-700"
             }`}
           >
             {error || message}
           </p>
         )}
 
-        <form
-          onSubmit={saveSettings}
-          className="mt-8 grid gap-6 lg:grid-cols-2"
-        >
-          <section className="rounded-[2rem] bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-bold">Profile and contact</h2>
+        <form onSubmit={saveSettings} className="mt-7 space-y-5">
+          <section className={glassCard}>
+            <h2 className="text-xl font-bold">{t("settings.profile")}</h2>
             <p className="mt-1 text-sm text-zinc-500">
               Used for orders and customer support.
             </p>
 
-            <div className="mt-5 space-y-4">
+            <div className="mt-6 space-y-4">
               <SettingsInput
                 label="Email"
                 value={settings.email}
@@ -348,13 +348,13 @@ export default function SettingsPage() {
                 onChange={() => undefined}
               />
               <SettingsInput
-                label="Full name"
+                label={t("settings.fullName")}
                 value={settings.full_name}
                 required
                 onChange={(value) => updateField("full_name", value)}
               />
               <SettingsInput
-                label="Phone"
+                label={t("settings.phone")}
                 value={settings.phone}
                 inputMode="tel"
                 placeholder="+66 81 234 5678"
@@ -363,15 +363,15 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-[2rem] bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-bold">Default delivery address</h2>
+          <section className={glassCard}>
+            <h2 className="text-xl font-bold">{t("settings.deliveryAddress")}</h2>
             <p className="mt-1 text-sm text-zinc-500">
               Automatically fills the cash-on-delivery checkout form.
             </p>
 
-            <div className="mt-5 space-y-4">
+            <div className="mt-6 space-y-4">
               <SettingsInput
-                label="Address line 1"
+                label={t("settings.addressLine1")}
                 value={settings.shipping_address_line1}
                 placeholder="House number and street"
                 onChange={(value) =>
@@ -379,7 +379,7 @@ export default function SettingsPage() {
                 }
               />
               <SettingsInput
-                label="Address line 2"
+                label={t("settings.addressLine2")}
                 value={settings.shipping_address_line2}
                 placeholder="Apartment, unit or building"
                 onChange={(value) =>
@@ -388,24 +388,24 @@ export default function SettingsPage() {
               />
               <div className="grid gap-4 sm:grid-cols-2">
                 <SettingsInput
-                  label="City / District"
+                  label={t("settings.city")}
                   value={settings.shipping_city}
                   onChange={(value) => updateField("shipping_city", value)}
                 />
                 <SettingsInput
-                  label="Province / State"
+                  label={t("settings.state")}
                   value={settings.shipping_state}
                   onChange={(value) => updateField("shipping_state", value)}
                 />
                 <SettingsInput
-                  label="Postal code"
+                  label={t("settings.postalCode")}
                   value={settings.shipping_postal_code}
                   onChange={(value) =>
                     updateField("shipping_postal_code", value)
                   }
                 />
                 <SettingsInput
-                  label="Country"
+                  label={t("settings.country")}
                   value={settings.shipping_country}
                   required
                   onChange={(value) => updateField("shipping_country", value)}
@@ -414,14 +414,14 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-[2rem] bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-bold">Shopping preferences</h2>
+          <section className={glassCard}>
+            <h2 className="text-xl font-bold">{t("settings.preferences")}</h2>
             <p className="mt-1 text-sm text-zinc-500">
-              Choose your language and communication preferences.
+              Choose your language and which updates you receive.
             </p>
 
-            <label className="mt-5 block text-sm font-semibold">
-              Preferred language
+            <label className="mt-6 block">
+              <span className={authLabelClass}>{t("settings.preferredLanguage")}</span>
               <select
                 value={settings.preferred_language}
                 onChange={(event) =>
@@ -430,7 +430,7 @@ export default function SettingsPage() {
                     event.target.value as "en" | "my"
                   )
                 }
-                className="mt-2 w-full rounded-xl border px-4 py-3 outline-none focus:border-red-500"
+                className={settingsFieldClass}
               >
                 <option value="en">English</option>
                 <option value="my">Myanmar</option>
@@ -439,7 +439,7 @@ export default function SettingsPage() {
 
             <div className="mt-5 space-y-3">
               <SettingsCheckbox
-                label="Order status updates"
+                label={t("settings.orderUpdates")}
                 description="Receive important purchase and delivery updates."
                 checked={settings.order_updates_enabled}
                 onChange={(checked) =>
@@ -447,7 +447,7 @@ export default function SettingsPage() {
                 }
               />
               <SettingsCheckbox
-                label="Support reply updates"
+                label={t("settings.supportUpdates")}
                 description="Receive updates when an admin replies to live chat."
                 checked={settings.support_updates_enabled}
                 onChange={(checked) =>
@@ -455,7 +455,7 @@ export default function SettingsPage() {
                 }
               />
               <SettingsCheckbox
-                label="Offers and promotions"
+                label={t("settings.marketing")}
                 description="Allow optional marketing and new-product messages."
                 checked={settings.marketing_emails_enabled}
                 onChange={(checked) =>
@@ -465,75 +465,62 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-[2rem] bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-bold">Shopping and privacy</h2>
+          <section className={glassCard}>
+            <h2 className="text-xl font-bold">{t("settings.shoppingPrivacy")}</h2>
             <p className="mt-1 text-sm text-zinc-500">
-              Access your shopping information or remove browsing history.
+              Open your shopping information or remove browsing history.
             </p>
 
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <Link
-                href="/orders"
-                className="rounded-2xl border p-4 font-semibold hover:border-red-500"
-              >
-                📦 My orders
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <Link href="/orders" className={glassTileClass}>
+                <span aria-hidden="true">📦</span> My orders
               </Link>
-              <Link
-                href="/wishlist"
-                className="rounded-2xl border p-4 font-semibold hover:border-red-500"
-              >
-                ♡ Wishlist
+              <Link href="/wishlist" className={glassTileClass}>
+                <span aria-hidden="true">♡</span> Wishlist
               </Link>
               <button
                 type="button"
                 onClick={clearRecentlyViewed}
-                className="rounded-2xl border p-4 text-left font-semibold hover:border-red-500 sm:col-span-2"
+                className={`${glassTileClass} text-left sm:col-span-2`}
               >
-                🕘 Clear recently viewed history
+                <span aria-hidden="true">🕘</span> Clear recently viewed history
               </button>
             </div>
           </section>
 
-          <div className="lg:col-span-2">
-            <button
-              type="submit"
-              disabled={isSaving}
-              className="w-full rounded-full bg-red-600 px-6 py-3.5 font-semibold text-white disabled:bg-zinc-400"
-            >
-              {isSaving ? "Saving settings..." : "Save account settings"}
-            </button>
-          </div>
+          <button type="submit" disabled={isSaving} className={authButtonClass}>
+            {isSaving ? "Saving settings..." : "Save account settings"}
+          </button>
         </form>
 
-        <section className="mt-6 rounded-[2rem] bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-bold">Password and security</h2>
+        <section className={`mt-5 ${glassCard}`}>
+          <h2 className="text-xl font-bold">{t("settings.passwordSecurity")}</h2>
           <p className="mt-1 text-sm text-zinc-500">
             Confirm your current password before choosing a new one.
           </p>
 
-          <form
-            onSubmit={changePassword}
-            className="mt-5 grid gap-4 md:grid-cols-3"
-          >
+          <form onSubmit={changePassword} className="mt-6 space-y-4">
             <PasswordInput
               label="Current password"
               value={currentPassword}
               onChange={setCurrentPassword}
             />
-            <PasswordInput
-              label="New password"
-              value={newPassword}
-              onChange={setNewPassword}
-            />
-            <PasswordInput
-              label="Confirm new password"
-              value={confirmPassword}
-              onChange={setConfirmPassword}
-            />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <PasswordInput
+                label="New password"
+                value={newPassword}
+                onChange={setNewPassword}
+              />
+              <PasswordInput
+                label="Confirm new password"
+                value={confirmPassword}
+                onChange={setConfirmPassword}
+              />
+            </div>
             <button
               type="submit"
               disabled={isChangingPassword}
-              className="rounded-full bg-zinc-900 px-6 py-3 font-semibold text-white disabled:bg-zinc-400 md:col-span-3"
+              className="w-full rounded-full border border-zinc-300 bg-white/70 px-5 py-3.5 font-bold backdrop-blur transition hover:border-zinc-950 disabled:cursor-not-allowed disabled:text-zinc-400"
             >
               {isChangingPassword ? "Changing password..." : "Change password"}
             </button>
@@ -562,8 +549,8 @@ function SettingsInput({
   inputMode?: "text" | "tel" | "numeric";
 }) {
   return (
-    <label className="block text-sm font-semibold">
-      {label}
+    <label className="block">
+      <span className={authLabelClass}>{label}</span>
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -571,7 +558,7 @@ function SettingsInput({
         disabled={disabled}
         placeholder={placeholder}
         inputMode={inputMode}
-        className="mt-2 w-full rounded-xl border px-4 py-3 font-normal outline-none focus:border-red-500 disabled:bg-zinc-100 disabled:text-zinc-500"
+        className={settingsFieldClass}
       />
     </label>
   );
@@ -587,8 +574,8 @@ function PasswordInput({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="block text-sm font-semibold">
-      {label}
+    <label className="block">
+      <span className={authLabelClass}>{label}</span>
       <input
         type="password"
         required
@@ -598,7 +585,7 @@ function PasswordInput({
         autoComplete={
           label === "Current password" ? "current-password" : "new-password"
         }
-        className="mt-2 w-full rounded-xl border px-4 py-3 font-normal outline-none focus:border-red-500"
+        className={settingsFieldClass}
       />
     </label>
   );
@@ -616,12 +603,12 @@ function SettingsCheckbox({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer gap-3 rounded-2xl border p-4">
+    <label className="flex cursor-pointer gap-3 rounded-2xl border border-zinc-200 bg-white/70 p-4 backdrop-blur transition hover:border-red-500 hover:bg-red-50">
       <input
         type="checkbox"
         checked={checked}
         onChange={(event) => onChange(event.target.checked)}
-        className="mt-1 h-4 w-4 accent-red-600"
+        className="mt-0.5 h-4 w-4 shrink-0 accent-red-600"
       />
       <span>
         <span className="block text-sm font-semibold">{label}</span>
