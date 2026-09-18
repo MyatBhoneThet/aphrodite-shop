@@ -215,7 +215,7 @@ export default function ChatbotButton({ currentUser, products }: { language?: "e
     : [];
 
   return <div className="fixed bottom-5 left-5 z-50">
-    {isOpen && <section aria-label="Shopping and customer support chat" className="mb-3 flex h-[min(38rem,calc(100vh-7rem))] w-[min(25rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-3xl border bg-white shadow-2xl">
+    {isOpen && <section aria-label="Shopping and customer support chat" className="mb-3 flex h-[min(38rem,calc(100dvh-7rem))] w-[min(25rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-3xl border bg-white shadow-2xl">
       <div className="bg-zinc-950 p-4 text-white"><div className="flex items-center justify-between"><div><p className="font-black">{t("chat.title")}</p><p className="mt-0.5 text-xs text-zinc-300">{t("chat.subtitle")}</p></div><button type="button" onClick={() => setIsOpen(false)} className="rounded-full border border-zinc-600 px-3 py-1 text-xs">Close</button></div>
         <div className="mt-4 grid grid-cols-2 rounded-xl bg-zinc-800 p-1 text-xs font-bold"><button type="button" onClick={() => { setMode("assistant"); setError(""); }} className={`rounded-lg px-3 py-2 ${mode === "assistant" ? "bg-white text-zinc-950" : "text-zinc-300"}`}>✨ Instant help</button><button type="button" onClick={() => { setMode("live"); setError(""); }} className={`rounded-lg px-3 py-2 ${mode === "live" ? "bg-white text-zinc-950" : "text-zinc-300"}`}>● Live support</button></div>
       </div>
@@ -262,8 +262,8 @@ export default function ChatbotButton({ currentUser, products }: { language?: "e
           {error && <p className="mb-2 rounded-lg bg-red-50 p-2 text-xs text-red-700">{error}</p>}
 
           {(attachment || productPick) && <div className="mb-2 flex flex-wrap gap-2">
-            {attachment && <span className="flex items-center gap-2 rounded-full bg-zinc-100 px-3 py-1 text-xs">📎 {attachment.name.slice(0, 28)}<button type="button" onClick={() => chooseFile(null)} aria-label="Remove photo" className="font-bold text-zinc-500">×</button></span>}
-            {productPick && <span className="flex items-center gap-2 rounded-full bg-zinc-100 px-3 py-1 text-xs">🛒 {productPick.name.slice(0, 28)}<button type="button" onClick={() => setProductPick(null)} aria-label="Remove product" className="font-bold text-zinc-500">×</button></span>}
+            {attachment && <span className="flex items-center gap-2 rounded-full bg-zinc-100 px-3 py-1 text-xs">📎 {attachment.name.slice(0, 28)}<button type="button" onClick={() => chooseFile(null)} aria-label="Remove photo" className="shrink-0 font-bold text-zinc-500">×</button></span>}
+            {productPick && <span className="flex items-center gap-2 rounded-full bg-zinc-100 px-3 py-1 text-xs">🛒 {productPick.name.slice(0, 28)}<button type="button" onClick={() => setProductPick(null)} aria-label="Remove product" className="shrink-0 font-bold text-zinc-500">×</button></span>}
           </div>}
 
           {!productPick && <div className="mb-2">

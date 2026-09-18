@@ -227,6 +227,16 @@ export default function WishlistPage() {
                   {item.product.stock}
                 </p>
 
+                <p
+                  className={`mt-1 text-xs font-bold ${
+                    item.product.stock === "In Stock"
+                      ? "text-green-600"
+                      : "text-red-600"
+                  }`}
+                >
+                  {item.product.stock}
+                </p>
+
                 <div className="mt-4 flex justify-center gap-2">
                   <button
                     onClick={() => addToCart(item.product.id)}

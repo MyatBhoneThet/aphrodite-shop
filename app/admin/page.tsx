@@ -1072,7 +1072,7 @@ export default function AdminPage() {
 
   return (
     <main className="min-h-screen bg-[#f4f6f9] text-zinc-900">
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 bg-[#343a40] text-white shadow-xl lg:block">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 overflow-y-auto bg-[#343a40] text-white shadow-xl lg:block">
         <div className="flex h-20 items-center border-b border-white/10 bg-white px-5">
           <BrandLogo />
         </div>
@@ -1175,7 +1175,7 @@ export default function AdminPage() {
 
       <section className="lg:pl-72">
         <header className="sticky top-0 z-30 border-b bg-white shadow-sm">
-          <div className="flex min-h-16 items-center justify-between gap-4 px-5 py-3">
+          <div className="flex min-h-16 flex-wrap items-center justify-between gap-4 px-5 py-3">
             <div>
               <h1 className="text-xl font-bold">{t("admin.manage")}</h1>
               <p className="text-xs text-zinc-500">
@@ -1183,7 +1183,7 @@ export default function AdminPage() {
               </p>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <LanguageSwitcher />
 
               <button
@@ -1204,7 +1204,24 @@ export default function AdminPage() {
           </div>
         </header>
 
-        <div className="p-5 lg:p-8">
+        <nav aria-label="Admin panels" className="space-y-3 border-b bg-white p-4 lg:hidden">
+          <label className="block text-sm font-semibold">
+            {t("admin.manage")}
+            <select value={activePanel} onChange={(event) => setActivePanel(event.target.value as typeof activePanel)} className="mt-2 w-full rounded-xl border bg-white px-3 py-3">
+              {([
+                ["dashboard", "admin.overview"], ["products", "admin.products"],
+                ["orders", "admin.purchases"], ["queue", "admin.queue"],
+                ["locations", "admin.locations"], ["support", "admin.liveChat"],
+                ["wholesale", "admin.wholesale"], ["pricing", "admin.priceLists"],
+                ["sync", "admin.sheetSync"],
+              ] as const).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
+            </select>
+          </label>
+          <input aria-label="Search admin products and orders" placeholder="Search" value={search} onChange={(event) => setSearch(event.target.value)} className="w-full rounded-xl border px-3 py-3" />
+          <Link href="/" className="inline-flex min-h-11 items-center text-sm font-semibold text-red-700">{t("admin.backToStore")}</Link>
+        </nav>
+
+        <div className="p-4 sm:p-5 lg:p-8">
           {(message || error) && (
             <div
               className={`mb-5 rounded-xl p-4 text-sm font-semibold ${
@@ -1222,7 +1239,7 @@ export default function AdminPage() {
           {activePanel === "products" && (
             <section
               className={`mt-6 grid gap-6 ${
-                isProductFormOpen ? "xl:grid-cols-[520px_1fr]" : ""
+                isProductFormOpen ? "2xl:grid-cols-[minmax(0,520px)_minmax(0,1fr)]" : ""
               }`}
             >
               {isProductFormOpen && (
@@ -1267,7 +1284,7 @@ export default function AdminPage() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="mb-1 block text-sm font-semibold">
                         Type
@@ -1311,7 +1328,7 @@ export default function AdminPage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="mb-1 block text-sm font-semibold">
                         Brand
@@ -1347,7 +1364,7 @@ export default function AdminPage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="mb-1 block text-sm font-semibold">
                         Retail Price
@@ -1746,7 +1763,7 @@ function ProductsTable({
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Products table">
       <table className="w-full min-w-[820px] text-left text-sm">
         <thead className="bg-zinc-50 text-xs uppercase text-zinc-500">
           <tr>
@@ -1762,7 +1779,7 @@ function ProductsTable({
           {products.map((product) => (
             <tr key={product.id} className="align-top">
               <td className="p-4">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <img
                     src={product.image}
                     alt={product.name}
@@ -1863,7 +1880,7 @@ function OrdersTable({
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Orders table">
       <table className="w-full min-w-[1180px] text-left text-sm">
         <thead className="bg-zinc-50 text-xs uppercase text-zinc-500">
           <tr>
@@ -2185,14 +2202,14 @@ function OrderResolutionDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/55 p-4"
       role="presentation"
     >
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="order-resolution-title"
-        className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"
+        className="my-auto w-full max-w-lg rounded-2xl bg-white p-4 shadow-2xl sm:p-6"
       >
         <h2 id="order-resolution-title" className="text-xl font-bold">
           {isApproval ? "Approve" : "Reject"} {requestLabel} request
@@ -2277,7 +2294,7 @@ function OrderWorkflowDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4">
-      <section role="dialog" aria-modal="true" aria-labelledby="workflow-title" className="my-auto w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
+      <section role="dialog" aria-modal="true" aria-labelledby="workflow-title" className="my-auto w-full max-w-xl rounded-3xl bg-white p-4 sm:p-6 shadow-2xl">
         <h2 id="workflow-title" className="text-2xl font-black">{titles[draft.action]}</h2>
         <p className="mt-1 text-sm text-zinc-500">Order #{draft.orderId.slice(0, 8)} · {formatCurrency(draft.totalAmount)}</p>
         <form onSubmit={onSubmit} className="mt-6 space-y-4">

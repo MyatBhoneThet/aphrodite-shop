@@ -1,5 +1,37 @@
 @import "tailwindcss";
 
+/* Let nested panels shrink to the viewport. Explicit utility minimums (for
+   scrollable tables, for example) still take precedence over these defaults. */
+@layer base {
+  .grid > *,
+  .flex > * {
+    min-width: 0;
+  }
+
+  /* `break-word`, not `anywhere`: long tokens (URLs, SKUs) still break instead
+     of overflowing, but ordinary words keep their min-content width, so phones
+     no longer split labels like "Quantity" or "MMK" down the middle. */
+  body {
+    overflow-wrap: break-word;
+  }
+
+  input,
+  select,
+  textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+/* A 16px field font prevents iOS from zooming the page when a form is focused. */
+@media (max-width: 639px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 1rem;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

@@ -38,5 +38,5 @@ export default function AdminOverviewPanel({ onNavigate }: { onNavigate: (panel:
 }
 
 function Stat({ title, value, detail, icon }: { title: string; value: string; detail: string; icon: string }) {
-  return <article className="rounded-3xl bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><p className="text-xs font-bold uppercase tracking-wider text-zinc-400">{title}</p><span className="text-xl">{icon}</span></div><p className="mt-3 text-3xl font-black">{value}</p><p className="mt-1 text-xs text-zinc-500">{detail}</p></article>;
+  return <article className="rounded-3xl bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><p className="text-xs font-bold uppercase tracking-wider text-zinc-400">{title}</p><span className="shrink-0 text-xl">{icon}</span></div><p className="mt-3 text-3xl font-black">{value}</p><p className="mt-1 text-xs text-zinc-500">{detail}</p></article>;
 }

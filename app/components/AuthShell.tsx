@@ -91,7 +91,7 @@ export default function AuthShell({
 
 /** Shared frosted panel, so every liquid card looks identical. */
 export const glassCardClass =
-  "rounded-3xl border border-zinc-200/80 bg-white/70 p-7 shadow-[0_8px_40px_rgba(24,24,27,0.08)] backdrop-blur-2xl";
+  "rounded-3xl border border-zinc-200/80 bg-white/70 p-5 sm:p-7 shadow-[0_8px_40px_rgba(24,24,27,0.08)] backdrop-blur-2xl";
 
 /** Shared input styling so every auth field looks identical. Focus ring
  *  matches the store's search box. */

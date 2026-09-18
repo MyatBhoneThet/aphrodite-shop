@@ -150,6 +150,7 @@ export const translations = {
   "product.outOfStock": { en: "Out of Stock", my: "ပစ္စည်း ကုန်သွားပါပြီ" },
   "product.promotionalPrice": { en: "Promotional price", my: "အထူးလျှော့ဈေး" },
   "product.regularPrice": { en: "Regular price", my: "ပုံမှန်ဈေးနှုန်း" },
+  "product.originalPrice": { en: "Original", my: "မူလဈေး" },
   "cart.totalSavings": { en: "Total savings", my: "စုစုပေါင်း သက်သာမှု" },
   "product.from": { en: "From", my: "မှစ၍" },
   "product.wholesaleFrom": {

@@ -38,7 +38,7 @@ export default function ProductSection({
 
   return (
     <section className="mx-auto max-w-7xl px-5 pb-16">
-      <div className="mb-8 flex items-end justify-between gap-5 border-b border-zinc-200 pb-5">
+      <div className="mb-8 flex flex-wrap items-end justify-between gap-5 border-b border-zinc-200 pb-5">
         <div>
           <h2 className="text-3xl font-black sm:text-4xl">{title}</h2>
           <p className="mt-2 text-sm text-zinc-500">

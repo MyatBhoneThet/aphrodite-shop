@@ -152,7 +152,7 @@ export default function PcBuilderPage() {
   ];
 
   return <main className="min-h-screen bg-zinc-50 text-zinc-950">
-    <header className="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/85 backdrop-blur"><div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-3"><Link href="/"><Image src="/brand/aphrodite-myanmar.png" alt="Aphrodite Myanmar" width={218} height={77} className="h-11 w-auto" priority /></Link><div className="flex gap-2"><Link href="/#pc-parts" className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-bold transition hover:border-zinc-950">Browse PC parts</Link><Link href="/" className="rounded-full bg-zinc-950 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-600">Store</Link></div></div></header>
+    <header className="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/85 backdrop-blur"><div className="mx-auto flex max-w-7xl items-center justify-between gap-2 px-4 py-3 sm:px-5"><Link href="/" className="shrink-0"><Image src="/brand/aphrodite-myanmar.png" alt="Aphrodite Myanmar" width={218} height={77} className="h-9 w-auto sm:h-11" priority /></Link><div className="flex shrink-0 gap-2"><Link href="/#pc-parts" className="whitespace-nowrap rounded-full border border-zinc-300 px-3 py-1.5 text-xs font-bold transition hover:border-zinc-950 sm:px-4 sm:py-2 sm:text-sm">Browse PC parts</Link><Link href="/" className="whitespace-nowrap rounded-full bg-zinc-950 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-red-600 sm:px-4 sm:py-2 sm:text-sm">Store</Link></div></div></header>
 
     <section className="mx-auto max-w-7xl px-5 py-8 sm:py-10">
       {/* Hero */}
@@ -161,7 +161,7 @@ export default function PcBuilderPage() {
         <div aria-hidden="true" className="pointer-events-none absolute -right-24 -top-32 h-[28rem] w-[28rem] rounded-full bg-red-600/40 blur-[110px]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-40 left-10 h-80 w-80 rounded-full bg-fuchsia-600/20 blur-[100px]" />
 
-        <div className="relative grid gap-10 p-8 sm:p-12 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
+        <div className="relative grid gap-10 p-5 sm:p-12 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
           <div className="hero-rise">
             <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-black uppercase tracking-[0.25em] text-red-300"><span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />PC Build Planner</p>
             <h1 className="mt-5 max-w-3xl text-4xl font-black leading-[1.05] tracking-tight sm:text-6xl">Turn your budget into a <span className="bg-gradient-to-r from-red-400 via-rose-400 to-orange-300 bg-clip-text text-transparent">complete</span> demo PC setup.</h1>
@@ -170,7 +170,7 @@ export default function PcBuilderPage() {
               <a href="#requirements" className="rounded-full bg-red-600 px-6 py-3 font-black text-white shadow-lg shadow-red-600/30 transition hover:bg-red-500">Start planning →</a>
               <Link href="/#pc-parts" className="rounded-full border border-white/20 bg-white/5 px-6 py-3 font-bold text-white transition hover:bg-white/10">See all parts</Link>
             </div>
-            <dl className="mt-9 grid max-w-xl grid-cols-3 gap-3">
+            <dl className="mt-9 grid max-w-xl grid-cols-1 sm:grid-cols-3 gap-3">
               {stats.map((stat) => <div key={stat.label} className="flex flex-col rounded-2xl border border-white/10 bg-white/[0.06] p-4 backdrop-blur"><dt className="order-2 mt-1 text-xs leading-4 text-zinc-400">{stat.label}</dt><dd className="text-2xl font-black sm:text-3xl">{stat.value}</dd></div>)}
             </dl>
           </div>
@@ -195,24 +195,24 @@ export default function PcBuilderPage() {
       <div className="mt-8 grid gap-8 xl:grid-cols-[380px_1fr]">
         {/* Requirements form */}
         <aside id="requirements" className="scroll-mt-24"><form onSubmit={generate} className="sticky top-24 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-50 text-xl">🛠️</span><div><h2 className="text-2xl font-black">Your requirements</h2><p className="text-sm text-zinc-500">Example: MMK 6,700,000 – 8,040,000.</p></div></div>
+          <div className="flex items-center gap-3"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-50 text-xl">🛠️</span><div><h2 className="text-2xl font-black">Your requirements</h2><p className="text-sm text-zinc-500">Example: MMK 6,700,000 – 8,040,000.</p></div></div>
 
           <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
             <label className="block text-sm font-bold">Minimum budget
-              <span className="mt-2 flex items-center rounded-2xl border border-zinc-300 bg-zinc-50 transition focus-within:border-red-500 focus-within:bg-white focus-within:ring-4 focus-within:ring-red-100"><span className="pl-4 text-xs font-black text-zinc-400">MMK</span><input type="number" min={1340000} max={134000000} step={100000} value={minimumBudget} onChange={(event) => setMinimumBudget(event.target.value)} className="w-full bg-transparent px-3 py-3 text-lg font-black outline-none" /></span>
+              <span className="mt-2 flex items-center rounded-2xl border border-zinc-300 bg-zinc-50 transition focus-within:border-red-500 focus-within:bg-white focus-within:ring-4 focus-within:ring-red-100"><span className="shrink-0 pl-4 text-xs font-black text-zinc-400">MMK</span><input type="number" min={1340000} max={134000000} step={100000} value={minimumBudget} onChange={(event) => setMinimumBudget(event.target.value)} className="w-full bg-transparent px-3 py-3 text-lg font-black outline-none" /></span>
               <span className="mt-1 block text-xs font-normal text-zinc-400">{Number(minimumBudget) ? formatCurrency(Number(minimumBudget)) : "—"}</span>
             </label>
             <label className="block text-sm font-bold">Maximum budget
-              <span className="mt-2 flex items-center rounded-2xl border border-zinc-300 bg-zinc-50 transition focus-within:border-red-500 focus-within:bg-white focus-within:ring-4 focus-within:ring-red-100"><span className="pl-4 text-xs font-black text-zinc-400">MMK</span><input type="number" min={1340000} max={134000000} step={100000} value={maximumBudget} onChange={(event) => setMaximumBudget(event.target.value)} className="w-full bg-transparent px-3 py-3 text-lg font-black outline-none" /></span>
+              <span className="mt-2 flex items-center rounded-2xl border border-zinc-300 bg-zinc-50 transition focus-within:border-red-500 focus-within:bg-white focus-within:ring-4 focus-within:ring-red-100"><span className="shrink-0 pl-4 text-xs font-black text-zinc-400">MMK</span><input type="number" min={1340000} max={134000000} step={100000} value={maximumBudget} onChange={(event) => setMaximumBudget(event.target.value)} className="w-full bg-transparent px-3 py-3 text-lg font-black outline-none" /></span>
               <span className="mt-1 block text-xs font-normal text-zinc-400">{Number(maximumBudget) ? formatCurrency(Number(maximumBudget)) : "—"}</span>
             </label>
           </div>
 
           <fieldset className="mt-5"><legend className="text-sm font-bold">What will you use the PC for?</legend>
-            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-2">
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3 xl:grid-cols-2">
               {(Object.keys(purposeLabels) as PcBuildPurpose[]).map((value) => {
                 const selected = purpose === value;
-                return <button key={value} type="button" aria-pressed={selected} onClick={() => setPurpose(value)} className={`flex items-center gap-2 rounded-2xl border px-3 py-3 text-left text-sm font-bold leading-tight transition ${selected ? "border-red-500 bg-red-50 text-red-700 ring-4 ring-red-100" : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400"}`}><span className="text-xl" aria-hidden="true">{purposeIcons[value]}</span>{purposeLabels[value]}</button>;
+                return <button key={value} type="button" aria-pressed={selected} onClick={() => setPurpose(value)} className={`flex items-center gap-2 rounded-2xl border px-3 py-3 text-left text-sm font-bold leading-tight transition ${selected ? "border-red-500 bg-red-50 text-red-700 ring-4 ring-red-100" : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400"}`}><span className="shrink-0 text-xl leading-none" aria-hidden="true">{purposeIcons[value]}</span><span className="min-w-0">{purposeLabels[value]}</span></button>;
               })}
             </div>
           </fieldset>

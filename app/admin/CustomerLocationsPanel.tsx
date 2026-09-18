@@ -43,7 +43,7 @@ export default function CustomerLocationsPanel() {
         <h2 className="text-xl font-bold">Customer device locations</h2>
         <p className="mt-1 max-w-2xl text-sm text-zinc-600">Customers who chose <strong>Allow and share location</strong>, from any country. Each share is one device position kept for up to 30 days. Customers can remove it at any time. It is not proof of identity or of the delivery address.</p>
       </div>
-      <div className="flex gap-2">
+      <div className="flex w-full flex-wrap gap-2 sm:w-auto">
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, email, phone" className="rounded-lg border px-3 py-2 text-sm" />
         <button type="button" onClick={() => void load()} disabled={status === "loading"} className="rounded-lg border px-4 py-2 text-sm font-semibold disabled:opacity-50">{status === "loading" ? "Loading…" : "Refresh"}</button>
       </div>
@@ -55,7 +55,7 @@ export default function CustomerLocationsPanel() {
 
     {status === "ready" && visible.length === 0 && <p className="mt-5 rounded-xl bg-zinc-50 p-4 text-sm text-zinc-600">{locations.length === 0 ? "No customer has shared a location yet. Signed-in customers see an \"Allow and share location\" box and can also use the /location page." : "No customers match your search."}</p>}
 
-    {visible.length > 0 && <div className="mt-5 overflow-x-auto">
+    {visible.length > 0 && <div className="mt-5 overflow-x-auto" tabIndex={0} role="region" aria-label="Shared customer locations">
       <table className="w-full min-w-[720px] text-left text-sm">
         <thead className="border-b text-xs uppercase text-zinc-500"><tr><th className="py-2 pr-3">Customer</th><th className="py-2 pr-3">Coordinates</th><th className="py-2 pr-3">Accuracy</th><th className="py-2 pr-3">Shared</th><th className="py-2">Actions</th></tr></thead>
         <tbody>{visible.map((l) => <tr key={l.user_id} className={`border-b last:border-0 ${focus === l.user_id ? "bg-red-50" : ""}`}>

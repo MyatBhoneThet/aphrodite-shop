@@ -336,7 +336,7 @@ export default function PricingPanel() {
             </div>
           ))}
 
-          <form onSubmit={createPriceList} className="flex items-center gap-2">
+          <form onSubmit={createPriceList} className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             <input
               value={newListName}
               onChange={(event) => setNewListName(event.target.value)}
@@ -426,7 +426,7 @@ export default function PricingPanel() {
             No tiers in this price list yet.
           </p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Quantity pricing tiers">
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead className="bg-zinc-50 text-xs uppercase text-zinc-500">
                 <tr>

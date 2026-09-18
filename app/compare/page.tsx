@@ -222,7 +222,7 @@ function ComparePageContent() {
   return (
     <main className="min-h-screen bg-white text-zinc-950">
       <header className="sticky top-0 z-50 border-b bg-white/95 shadow-sm backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-3">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-5 py-3">
           <Link href="/" aria-label="Aphrodite Myanmar home" className="w-36 shrink-0 sm:w-44">
             <BrandLogo />
           </Link>
@@ -249,7 +249,7 @@ function ComparePageContent() {
             programming.
           </p>
 
-          <div className="mt-7 inline-flex flex-wrap gap-2 rounded-full bg-white/10 p-1.5">
+          <div className="mt-7 inline-flex flex-wrap gap-2 rounded-3xl bg-white/10 p-1.5 sm:rounded-full">
             {FAMILY_TABS.map((tab) => (
               <button
                 key={tab.id}
@@ -431,13 +431,13 @@ function ComparePageContent() {
                     </p>
                   </div>
                 ) : (
-                  <div className="mt-4 overflow-x-auto rounded-[2rem] border border-zinc-200 bg-white">
+                  <div className="mt-4 overflow-x-auto rounded-[2rem] border border-zinc-200 bg-white" tabIndex={0} role="region" aria-label="Product comparison table">
                     <table className="w-full border-separate border-spacing-0 text-sm">
                       <thead>
                         <tr>
                           <th
                             scope="col"
-                            className="sticky left-0 top-0 z-30 w-44 min-w-44 border-b border-r border-zinc-200 bg-zinc-50 p-4 text-left align-bottom text-xs font-bold uppercase tracking-wider text-zinc-500"
+                            className="sticky left-0 top-0 z-30 w-28 min-w-28 sm:w-44 sm:min-w-44 border-b border-r border-zinc-200 bg-zinc-50 p-4 text-left align-bottom text-xs font-bold uppercase tracking-wider text-zinc-500"
                           >
                             Specification
                           </th>

@@ -590,7 +590,7 @@ export default function WholesalePanel() {
       </div>
 
       <div className="rounded-2xl bg-white shadow-sm ring-1 ring-zinc-100">
-        <div className="flex items-center justify-between border-b px-5 py-4">
+        <div className="flex items-center justify-between gap-3 border-b px-5 py-4">
           <div>
             <h2 className="font-bold">Audit Trail</h2>
             <p className="text-sm text-zinc-500">
@@ -604,7 +604,7 @@ export default function WholesalePanel() {
               setShowAudit(next);
               if (next) loadAudit();
             }}
-            className="rounded-full border px-4 py-2 text-xs font-semibold hover:bg-zinc-100"
+            className="shrink-0 rounded-full border px-4 py-2 text-xs font-semibold hover:bg-zinc-100"
           >
             {showAudit ? "Hide" : "Show"}
           </button>

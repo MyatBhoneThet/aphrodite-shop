@@ -451,8 +451,8 @@ export default function SupportPanel() {
         </p>
       )}
 
-      <div className="grid min-h-[600px] lg:grid-cols-[340px_1fr]">
-        <aside className="border-b bg-zinc-50 lg:border-b-0 lg:border-r">
+      <div className="grid min-h-[600px] xl:grid-cols-[340px_minmax(0,1fr)]">
+        <aside className="border-b bg-zinc-50 xl:border-b-0 xl:border-r">
           {isLoadingInbox ? (
             <p className="p-5 text-sm text-zinc-500">Loading conversations...</p>
           ) : conversations.length === 0 ? (
@@ -464,7 +464,7 @@ export default function SupportPanel() {
               </p>
             </div>
           ) : (
-            <div className="max-h-[600px] overflow-y-auto">
+            <div className="max-h-72 overflow-y-auto xl:max-h-[600px]">
               {conversations.map((conversation) => (
                 <button
                   key={conversation.id}
@@ -507,7 +507,7 @@ export default function SupportPanel() {
           )}
         </aside>
 
-        <div className="flex min-h-[600px] flex-col">
+        <div className="flex h-[min(44rem,85dvh)] min-h-96 flex-col">
           {!selectedId ? (
             <div className="flex flex-1 items-center justify-center p-8 text-center text-zinc-500">
               Select a customer conversation to begin.
@@ -644,7 +644,7 @@ export default function SupportPanel() {
                 >
                   Reply to {displayName(selectedConversation)}
                 </label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <input
                     id="admin-support-reply"
                     value={reply}

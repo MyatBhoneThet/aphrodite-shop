@@ -407,9 +407,9 @@ export default function ProductDetailsPage() {
                 </p>
               )}
 
-              <div className="mt-5 flex items-center gap-3">
-                <span className="text-sm font-semibold">{t("detail.quantity")}</span>
-                <div className="flex items-center gap-2">
+              <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-3">
+                <span className="shrink-0 text-sm font-semibold">{t("detail.quantity")}</span>
+                <div className="flex shrink-0 items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setQuantity(Math.max(1, quantity - 1))}
@@ -444,7 +444,8 @@ export default function ProductDetailsPage() {
                 </div>
 
                 {product.price > 0 && pricing && (
-                  <span className="text-sm text-zinc-500">
+                  // On a phone the total drops to its own line instead of squeezing the stepper.
+                  <span className="w-full text-sm text-zinc-500 sm:w-auto">
                     Total:{" "}
                     <span className="font-bold text-zinc-900">
                       {formatCurrency(pricing.lineTotal)}
@@ -518,7 +519,7 @@ export default function ProductDetailsPage() {
             </div>
 
             {specification && specification.rows.length > 3 ? (
-              <div className="mt-8 grid grid-cols-2 gap-3">
+              <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {specification.rows.slice(3, 7).map((row) => (
                   <div key={row.label} className="rounded-2xl bg-zinc-100 p-4">
                     <p className="text-xs text-zinc-500">{row.label}</p>
@@ -586,7 +587,7 @@ export default function ProductDetailsPage() {
                 {specification.rows.map((row) => (
                   <div
                     key={row.label}
-                    className="grid grid-cols-[150px_1fr] border-b last:border-b-0 md:grid-cols-[220px_1fr]"
+                    className="grid grid-cols-1 border-b last:border-b-0 sm:grid-cols-[150px_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)]"
                   >
                     <div className="bg-zinc-100 p-4 font-semibold">
                       {row.label}

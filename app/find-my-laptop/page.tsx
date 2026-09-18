@@ -317,10 +317,10 @@ export default function FindMyLaptopPage() {
                               : "border-zinc-200 hover:border-zinc-400"
                           }`}
                         >
-                          <span className="text-2xl" aria-hidden="true">
+                          <span className="shrink-0 text-2xl" aria-hidden="true">
                             {USE_ICONS[entry.id]}
                           </span>
-                          <span>
+                          <span className="min-w-0">
                             <span className="block font-black">
                               {entry.title}
                             </span>
@@ -359,10 +359,10 @@ export default function FindMyLaptopPage() {
                               : "border-zinc-200 hover:border-zinc-400"
                           }`}
                         >
-                          <span className="text-2xl" aria-hidden="true">
+                          <span className="shrink-0 text-2xl" aria-hidden="true">
                             {choice.icon}
                           </span>
-                          <span>
+                          <span className="min-w-0">
                             <span className="block font-black">
                               {choice.label}
                             </span>

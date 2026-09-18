@@ -770,7 +770,7 @@ export default function QueuePanel() {
                   : t("queue.markDone")}
             </button>
           ) : (
-            <span className="max-w-[16rem] shrink-0 text-right text-xs text-zinc-500">
+            <span className="max-w-full sm:max-w-[16rem] sm:text-right text-xs text-zinc-500">
               {item.subject_type === "order"
                 ? t("queue.clears.order")
                 : t("queue.clears.return")}
@@ -1034,9 +1034,9 @@ export default function QueuePanel() {
       ) : items.length === 0 ? (
         <p className="p-10 text-center text-sm text-zinc-500">{t("queue.none")}</p>
       ) : (
-        <div className="grid min-h-[600px] lg:grid-cols-[340px_1fr]">
-          <aside className="border-b bg-zinc-50 lg:border-b-0 lg:border-r">
-            <div className="max-h-[720px] overflow-y-auto p-3">
+        <div className="grid min-h-[600px] xl:grid-cols-[340px_minmax(0,1fr)]">
+          <aside className="border-b bg-zinc-50 xl:border-b-0 xl:border-r">
+            <div className="max-h-80 overflow-y-auto xl:max-h-[720px] p-3">
               {queueLanes.map((lane) => {
                 const laneItems = items.filter((item) => item.lane === lane);
                 if (laneItems.length === 0) return null;

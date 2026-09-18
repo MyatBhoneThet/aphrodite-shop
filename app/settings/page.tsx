@@ -295,7 +295,7 @@ export default function SettingsPage() {
       <LiquidBackdrop />
 
       <div className="relative mx-auto max-w-3xl px-5 py-10 sm:py-14">
-        <header className="flex items-center justify-between gap-4">
+        <header className="flex flex-wrap items-center justify-between gap-4">
           <Link href="/" aria-label="Aphrodite Myanmar home">
             <BrandLogo />
           </Link>

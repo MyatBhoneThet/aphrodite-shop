@@ -319,12 +319,12 @@ export default function CartPage() {
               {cart.items.map((item) => (
                 <div
                   key={item.id}
-                  className="flex items-center gap-4 rounded-2xl border p-4"
+                  className="grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-4 rounded-2xl border p-4 sm:grid-cols-[5rem_minmax(0,1fr)_auto]"
                 >
                   <img
                     src={item.product.image}
                     alt={item.product.name}
-                    className="h-20 w-20 rounded-xl object-contain bg-zinc-50"
+                    className="h-16 w-16 rounded-xl sm:h-20 sm:w-20 object-contain bg-zinc-50"
                   />
 
                   <div className="flex-1">
@@ -357,7 +357,7 @@ export default function CartPage() {
                             ? updateQuantity(item.id, item.quantity - 1)
                             : removeItem(item.id)
                         }
-                        className="h-8 w-8 rounded-full border font-bold"
+                        className="h-11 w-11 rounded-full border font-bold"
                         aria-label={t("detail.decrease")}
                       >
                         −
@@ -366,7 +366,7 @@ export default function CartPage() {
                       <button
                         type="button"
                         onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                        className="h-8 w-8 rounded-full border font-bold"
+                        className="h-11 w-11 rounded-full border font-bold"
                         aria-label={t("detail.increase")}
                       >
                         +
@@ -374,7 +374,7 @@ export default function CartPage() {
                     </div>
                   </div>
 
-                  <div className="text-right">
+                  <div className="col-span-2 flex flex-wrap items-center justify-between gap-3 sm:col-span-1 sm:block sm:text-right">
                     <p className="font-bold">{item.product.price > 0 ? formatCurrency(item.lineTotal) : "Price pending"}</p>
                     <button
                       type="button"
@@ -394,24 +394,24 @@ export default function CartPage() {
               <div className="mt-4 space-y-2 text-sm">
                 {!hasPendingPrices && cart.totalSavings > 0 && (
                   <>
-                    <div className="flex items-center justify-between text-zinc-500">
+                    <div className="flex items-center justify-between gap-3 text-zinc-500">
                       <span>{t("cart.retailSubtotal")}</span>
-                      <span className="line-through">
+                      <span className="shrink-0 whitespace-nowrap line-through">
                         {formatCurrency(cart.retailSubtotal)}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between font-semibold text-green-700">
+                    <div className="flex items-center justify-between gap-3 font-semibold text-green-700">
                       <span>{t("cart.totalSavings")}</span>
-                      <span>−{formatCurrency(cart.totalSavings)}</span>
+                      <span className="shrink-0 whitespace-nowrap">−{formatCurrency(cart.totalSavings)}</span>
                     </div>
                   </>
                 )}
 
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                   <span className="text-zinc-500">
                     {cart.totalQuantity} item(s)
                   </span>
-                  <span className="text-2xl font-bold">
+                  <span className="whitespace-nowrap text-2xl font-bold">
                     {hasPendingPrices ? "Awaiting prices" : formatCurrency(cart.total)}
                   </span>
                 </div>

@@ -13,12 +13,12 @@ export default function CategoryGrid({ language }: { language: "en" | "my" }) {
         {language === "en" ? "Categories" : "အမျိုးအစားများ"}
       </h2>
 
-      <div className="grid grid-cols-2 gap-5 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-4">
         {categories.map((category) => (
           <a
             key={category.en}
             href={category.href}
-            className="rounded-[2rem] bg-zinc-100 p-8 text-center transition hover:-translate-y-1 hover:shadow-xl"
+            className="rounded-[2rem] bg-zinc-100 px-3 py-6 sm:p-8 text-center transition hover:-translate-y-1 hover:shadow-xl"
           >
             <div className="text-5xl">{category.icon}</div>
 
