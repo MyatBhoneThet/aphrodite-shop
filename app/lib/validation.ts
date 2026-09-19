@@ -705,6 +705,25 @@ export const recentlyViewedInputSchema = z.object({
   product_id: z.number().int().positive("A valid product is required."),
 });
 
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().email("Enter a valid email address."),
+});
+
+// The token comes from the emailed link, so it is opaque here -- only its
+// shape is checked. Confirmation is matched in the form, not on the server:
+// the server has nothing to compare a typo against.
+export const passwordResetSchema = z.object({
+  token: z
+    .string()
+    .trim()
+    .min(1, "This reset link is incomplete. Request a new one.")
+    .max(512),
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters.")
+    .max(128),
+});
+
 export const loginInputSchema = z.object({
   email: z.string().trim().email("Enter a valid email address."),
   password: z.string().min(1, "Password is required."),

@@ -446,6 +446,11 @@ type AuthSignupResponse = {
   email?: string;
 };
 
+type AdminGenerateLinkResponse = {
+  hashed_token?: string;
+  properties?: { hashed_token?: string };
+};
+
 // Keep this projection in sync with the column-level grants in
 // supabase/schema.sql and the security-hardening migration. Exact inventory
 // and the legacy wholesale price are intentionally absent.
@@ -1075,6 +1080,120 @@ export async function updateUserPassword(
       body: JSON.stringify({ password }),
     },
     accessToken,
+    anonKey
+  );
+}
+
+/**
+ * Where to send the browser to start a social sign-in.
+ *
+ * `code_challenge` opts Supabase into the PKCE flow, so the callback receives
+ * an authorization code (redeemable only by this server, with the matching
+ * verifier) instead of an access token in the URL fragment. GoTrue expects
+ * the method spelled in lower case.
+ */
+export function oauthAuthorizeUrl({
+  provider,
+  redirectTo,
+  codeChallenge,
+}: {
+  provider: "google";
+  redirectTo: string;
+  codeChallenge: string;
+}) {
+  const { url } = requireSupabaseConfig();
+  const params = new URLSearchParams({
+    provider,
+    redirect_to: redirectTo,
+    code_challenge: codeChallenge,
+    code_challenge_method: "s256",
+  });
+
+  return `${url}/auth/v1/authorize?${params.toString()}`;
+}
+
+/** Swaps the authorization code from the OAuth callback for a session. */
+export async function exchangeOAuthCode(authCode: string, codeVerifier: string) {
+  const { anonKey } = requireSupabaseConfig();
+
+  return supabaseAuth<AuthSessionResponse>(
+    "token?grant_type=pkce",
+    {
+      method: "POST",
+      body: JSON.stringify({ auth_code: authCode, code_verifier: codeVerifier }),
+    },
+    anonKey,
+    anonKey
+  );
+}
+
+/**
+ * Mints a password-recovery token for an existing account.
+ *
+ * Uses the admin endpoint so the shop can send the email itself, through the
+ * same Gmail account as order receipts, instead of relying on Supabase's
+ * built-in mailer (which is rate limited to a handful of messages per hour on
+ * the free tier). Returns the hashed token that /reset-password redeems.
+ *
+ * Throws when the address has no account -- callers must swallow that and
+ * still answer "check your inbox", or the endpoint becomes a way to discover
+ * which email addresses are registered.
+ */
+export async function generatePasswordRecoveryToken(email: string) {
+  const { serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
+  const data = await supabaseAuth<AdminGenerateLinkResponse>(
+    "admin/generate_link",
+    {
+      method: "POST",
+      body: JSON.stringify({ type: "recovery", email }),
+    },
+    serviceRoleKey,
+    serviceRoleKey
+  );
+
+  // Older GoTrue releases nest the token under `properties`.
+  return data.hashed_token ?? data.properties?.hashed_token ?? null;
+}
+
+/**
+ * Fallback for deployments with no outgoing mail of their own: let Supabase
+ * send the recovery email. The dashboard template must be the one in
+ * docs/email-templates/supabase-reset-password.html so the link lands on this
+ * app's /reset-password page with the same `?token=` shape.
+ */
+export async function requestPasswordRecoveryEmail(
+  email: string,
+  redirectTo: string
+) {
+  const { anonKey } = requireSupabaseConfig();
+
+  return supabaseAuth<unknown>(
+    `recover?redirect_to=${encodeURIComponent(redirectTo)}`,
+    {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    },
+    anonKey,
+    anonKey
+  );
+}
+
+/**
+ * Redeems a recovery token and returns the short-lived session it grants.
+ * That session is the only thing that authorises the password change, so it
+ * stays on the server: it is used once and discarded, never sent to the
+ * browser.
+ */
+export async function verifyRecoveryToken(tokenHash: string) {
+  const { anonKey } = requireSupabaseConfig();
+
+  return supabaseAuth<AuthSessionResponse>(
+    "verify",
+    {
+      method: "POST",
+      body: JSON.stringify({ type: "recovery", token_hash: tokenHash }),
+    },
+    anonKey,
     anonKey
   );
 }

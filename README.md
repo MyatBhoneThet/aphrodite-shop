@@ -61,7 +61,7 @@ The browser calls only same-origin `/api/*` routes. `app/lib/backend.ts` contain
 | `GOOGLE_SHEETS_CLIENT_EMAIL` | For Sheets sync | Server only | Google service-account email. |
 | `GOOGLE_SHEETS_PRIVATE_KEY` | For Sheets sync | Secret, server only | PEM private key; escaped `\n` is accepted. |
 | `GOOGLE_SHEETS_SPREADSHEET_ID` | Optional | Server only | Overrides the built-in production inventory spreadsheet ID. |
-| `APP_URL` | For receipt email links | Server only | Public website URL, such as `http://localhost:3000` locally. |
+| `APP_URL` | For email links and Google sign-in | Server only | Public website URL, such as `http://localhost:3000` locally. Also builds the password-reset link and the Google sign-in callback, so it must match the site exactly and be allow-listed in Supabase. |
 | `RESEND_API_KEY` | Optional | Secret, server only | Sends the order-confirmation receipt email. The website receipt still works without it. |
 | `RECEIPT_FROM_EMAIL` | With Resend | Server only | Verified sender, for example `Aphrodite Myanmar <receipts@example.com>`. |
 | `RECEIPT_CURRENCY` | Optional | Server only | Currency used in receipt formatting; defaults to `MMK`. |
@@ -73,6 +73,8 @@ Do not set `NODE_ENV` in `.env.local`; Next.js selects it for `dev`, `build`, an
 ## Authentication and roles
 
 - Public registration uses Supabase's anonymous signup endpoint and honors the project's email-confirmation setting.
+- **Continue with Google** signs in through Supabase's Google provider using the PKCE flow. The authorization code is exchanged for a token *on the server*, so no access token ever reaches the browser's URL or JavaScript (see Google sign-in below).
+- **Forgot password?** emails a single-use link to `/reset-password`, which redeems the token server-side and sets the new password (see Password reset email below). No session is created by the reset: the customer signs in with the password they just chose.
 - Anonymous visitors can browse products, but cart, wishlist, checkout, and order history require login.
 - Access tokens are stored in `HttpOnly`, `SameSite=Lax`, production-`Secure` cookies for at most one hour.
 - `proxy.ts` only performs an optimistic cookie-presence redirect for admin pages. It is not the authorization boundary.
@@ -80,7 +82,7 @@ Do not set `NODE_ENV` in `.env.local`; Next.js selects it for `dev`, `build`, an
 - The database trigger always creates a `normal` profile. Wholesale/admin roles cannot be chosen in signup metadata.
 - Cart, wishlist, and order ownership is also enforced with Supabase RLS.
 
-The current implementation does not refresh sessions. Password reset, MFA, and a refresh-token flow remain production work; see the audit report.
+The current implementation does not refresh sessions. MFA and a refresh-token flow remain production work; see the audit report.
 
 ## Commands
 
@@ -186,6 +188,67 @@ which the order-receipt email imports. Supabase renders its template on its own
 servers and cannot import from this codebase, so **if you change one, change the
 other**.
 
+## Google sign-in
+
+"Continue with Google" needs no keys in `.env.local`: the credentials live in
+Google Cloud and Supabase. Three settings, once:
+
+1. **Google Cloud** → APIs & Services → Credentials → *Create OAuth client ID* →
+   **Web application**. Under *Authorised redirect URIs* add the Supabase
+   callback, which is your project URL plus `/auth/v1/callback`:
+
+   ```
+   https://YOUR_PROJECT_REF.supabase.co/auth/v1/callback
+   ```
+
+   Copy the **Client ID** and **Client secret**.
+
+2. **Supabase** → Authentication → Providers → **Google**. Enable it and paste
+   the Client ID and secret.
+
+3. **Supabase** → Authentication → **URL Configuration**. Add this app's OAuth
+   callback to *Redirect URLs*, once per environment:
+
+   ```
+   http://localhost:3000/api/auth/oauth/callback
+   https://your-production-domain/api/auth/oauth/callback
+   ```
+
+   The address comes from `APP_URL` (not from the incoming request, so a forged
+   `Host` header cannot move the callback). If `APP_URL` and this allow-list
+   disagree, Google returns the customer to the wrong place and sign-in fails.
+
+How it works: `/api/auth/oauth/google` mints a PKCE verifier, keeps it in a
+ten-minute `HttpOnly` cookie, and redirects to Supabase.
+`/api/auth/oauth/callback` swaps the returned code for a session using that
+verifier and stores the token in the usual session cookie. A first-time Google
+user gets a profile from the same `on_auth_user_created` trigger as everyone
+else, always with the `normal` role — signing in with Google cannot grant
+wholesale or admin access. Business accounts still need the invite-code form,
+so the Google button is hidden on the Business tab of `/register`.
+
+## Password reset email
+
+`/forgot-password` sends the link. Which mailer sends it depends on what is
+configured:
+
+- **With `GMAIL_USER` + `GMAIL_APP_PASSWORD` (or Resend)** — the app mints the
+  token with Supabase's admin API and sends its own branded message from
+  `app/lib/password-reset-email.ts`, through the same account as order
+  receipts. This is the recommended setup: Supabase's built-in mailer is rate
+  limited to a few messages per hour.
+- **With no mail configured** — the app falls back to Supabase's own recovery
+  email. Paste `docs/email-templates/supabase-reset-password.html` into
+  Supabase → Authentication → Emails → **Reset password**, subject
+  `Reset your Aphrodite Myanmar password`, and set *Site URL* under URL
+  Configuration. That template deliberately links to
+  `{{ .SiteURL }}/reset-password?token={{ .TokenHash }}` rather than the default
+  `{{ .ConfirmationURL }}`, so both paths land on the same page.
+
+`/api/auth/forgot-password` answers the same way for every address, whether or
+not it has an account — otherwise it would reveal which email addresses have
+registered with the shop. Check the server log to see what actually happened.
+
 ## Admin setup
 
 Create the user in Supabase Authentication, then give the profile the `admin` role in the Supabase SQL Editor:
@@ -209,6 +272,9 @@ Sign in at `/admin/login`. Never create an admin through public signup metadata.
 - Build blocks a remote product image: provide the correct Supabase URL at build time so `next.config.ts` can allow its storage hostname.
 - `next: command not found`: run `npm ci` in the project folder before `npm run dev`.
 - Turbopack panic mentioning `binding to a port`: this package already uses Webpack in both `dev` and `build`. Run only `npm run dev`; do not append another `--webpack`.
+- Google sign-in returns "This sign-in link has expired": the PKCE verifier cookie was missing — the sign-in took over ten minutes, or it started in a different browser. Start again from `/login`.
+- Google sign-in fails with a redirect error: `APP_URL` and the Supabase *Redirect URLs* allow-list must contain the same `/api/auth/oauth/callback` address.
+- The reset email never arrives: check the server log for `[auth.forgot-password]`. `User with this email not found` means no account uses that address; a mail error names the provider problem. The page says the same thing either way, by design.
 - Receipt email says `not_configured`: add `RESEND_API_KEY`, a verified `RECEIPT_FROM_EMAIL`, and `APP_URL`, then restart the application. The customer can still print or save the website receipt.
 
 ## Security notes

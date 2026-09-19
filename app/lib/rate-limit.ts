@@ -11,6 +11,15 @@ const LIMITS: Record<string, number> = {
   login: 10,
   register: 5,
   "admin-login": 8,
+  // Each reset request sends an email from the shop's own Gmail account, and
+  // an unthrottled endpoint would let a stranger flood someone's inbox.
+  "forgot-password": 4,
+  "reset-password": 8,
+  // The callback is limited as well as the start, so a stolen code cannot be
+  // brute-forced. One sign-in therefore spends two: double the `login` limit
+  // keeps the effective rate the same for both ways of signing in, which
+  // matters behind the shared/NAT addresses many customers arrive from.
+  oauth: 20,
   chat: 30,
   // Lower than live chat: each call can reach an external AI provider and
   // spends the shop's free Gemini quota.
