@@ -4,6 +4,9 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 import type { CurrentUser } from "../lib/useCurrentUser";
 import { useLanguage } from "../lib/language";
+import GoogleSignInButton, {
+  AuthDivider,
+} from "../components/GoogleSignInButton";
 import AuthShell, {
   authButtonClass,
   authFieldClass,
@@ -174,6 +177,16 @@ export default function RegisterPage() {
           </button>
         ))}
       </div>
+
+      {/* Personal accounts only. A business account needs an invite code and
+          the shop's details, which Google cannot supply -- a wholesale
+          applicant has to fill the form. */}
+      {!isWholesale && (
+        <div className="mb-5 space-y-5">
+          <GoogleSignInButton label={t("login.withGoogle")} />
+          <AuthDivider label={t("login.or")} />
+        </div>
+      )}
 
       <form onSubmit={handleRegister} className="space-y-5">
         {isWholesale && (

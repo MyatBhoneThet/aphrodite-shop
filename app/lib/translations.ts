@@ -204,6 +204,51 @@ export const translations = {
     en: "Save favourites and check out in seconds",
     my: "စိတ်ကြိုက်များ သိမ်းပြီး လျင်မြန်စွာ ဝယ်ယူနိုင်သည်",
   },
+  "login.withGoogle": {
+    en: "Continue with Google",
+    my: "Google ဖြင့် ဆက်လက်ဝင်ရောက်ရန်",
+  },
+  "login.or": { en: "or", my: "သို့မဟုတ်" },
+  "login.forgotPassword": {
+    en: "Forgot password?",
+    my: "စကားဝှက် မေ့နေပါသလား?",
+  },
+  "login.resetDone": {
+    en: "Your password has been changed. Sign in with your new password.",
+    my: "သင့်စကားဝှက်ကို ပြောင်းလဲပြီးပါပြီ။ စကားဝှက်အသစ်ဖြင့် ဝင်ရောက်ပါ။",
+  },
+
+  // Forgot / reset password
+  "forgot.title": { en: "Reset your password", my: "စကားဝှက် ပြန်လည်သတ်မှတ်ရန်" },
+  "forgot.subtitle": {
+    en: "Enter the email address on your account and we will send you a link to choose a new password.",
+    my: "သင့်အကောင့်၏ အီးမေးလ်လိပ်စာကို ထည့်ပါ။ စကားဝှက်အသစ် ရွေးချယ်ရန် လင့်ခ်တစ်ခု ပေးပို့ပါမည်။",
+  },
+  "forgot.email": { en: "Email", my: "အီးမေးလ်" },
+  "forgot.submit": { en: "Send reset link", my: "လင့်ခ် ပေးပို့ရန်" },
+  "forgot.submitting": { en: "Sending...", my: "ပေးပို့နေသည်..." },
+  "forgot.backToLogin": { en: "Back to sign in", my: "ဝင်ရောက်ရန် စာမျက်နှာသို့ ပြန်သွားရန်" },
+  "forgot.checkInbox": {
+    en: "If that email address has an account, a reset link is on its way. Check your inbox and spam folder.",
+    my: "ထိုအီးမေးလ်ဖြင့် အကောင့်ရှိပါက ပြန်လည်သတ်မှတ်ရန် လင့်ခ်ကို ပေးပို့လိုက်ပါပြီ။ Inbox နှင့် Spam folder ကို စစ်ဆေးပါ။",
+  },
+  "reset.title": { en: "Choose a new password", my: "စကားဝှက်အသစ် ရွေးချယ်ပါ" },
+  "reset.subtitle": {
+    en: "Pick a password you have not used on this account before. It must be at least 8 characters.",
+    my: "ဤအကောင့်တွင် ယခင်က မသုံးဖူးသော စကားဝှက်ကို ရွေးပါ။ အနည်းဆုံး စာလုံး ၈ လုံး ရှိရပါမည်။",
+  },
+  "reset.password": { en: "New password", my: "စကားဝှက် အသစ်" },
+  "reset.confirm": { en: "Confirm new password", my: "စကားဝှက် အသစ် အတည်ပြုရန်" },
+  "reset.mismatch": {
+    en: "The two passwords do not match.",
+    my: "စကားဝှက် နှစ်ခု မတူညီပါ။",
+  },
+  "reset.submit": { en: "Change my password", my: "စကားဝှက် ပြောင်းရန်" },
+  "reset.submitting": { en: "Changing...", my: "ပြောင်းလဲနေသည်..." },
+  "reset.missingToken": {
+    en: "This reset link is incomplete. Request a new one from the sign-in page.",
+    my: "ဤလင့်ခ်သည် မပြည့်စုံပါ။ ဝင်ရောက်ရန်စာမျက်နှာမှ အသစ်တစ်ခု တောင်းခံပါ။",
+  },
 
   // Wishlist
   "wishlist.title": { en: "Your Wishlist", my: "သင့် စိတ်ကြိုက်စာရင်း" },

@@ -1,10 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { FormEvent, Suspense, useState } from "react";
 import type { CurrentUser } from "../lib/useCurrentUser";
 import { useLanguage } from "../lib/language";
 import DeliveryLocationWelcome from "../components/DeliveryLocationWelcome";
+import GoogleSignInButton, {
+  AuthDivider,
+} from "../components/GoogleSignInButton";
 import AuthShell, {
   authButtonClass,
   authFieldClass,
@@ -24,17 +28,30 @@ async function readLoginResponse(response: Response) {
   }))) as LoginResponse;
 }
 
-export default function LoginPage() {
+/**
+ * `useSearchParams` makes the whole subtree client-rendered on demand, so it
+ * has to sit inside a <Suspense> boundary; LoginPage below provides one.
+ */
+function LoginForm() {
   const { t } = useLanguage();
+  const searchParams = useSearchParams();
+  // Set by the Google sign-in routes when they bounce back here, and by
+  // /reset-password after a successful change.
+  const redirectError = searchParams.get("error");
+  const passwordWasReset = searchParams.get("reset") === "success";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showDeliveryWelcome, setShowDeliveryWelcome] = useState(false);
+  // A message left in the URL by a failed Google sign-in is stale as soon as
+  // the customer tries the password form instead.
+  const [redirectErrorDismissed, setRedirectErrorDismissed] = useState(false);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setRedirectErrorDismissed(true);
     setIsSubmitting(true);
 
     try {
@@ -108,7 +125,21 @@ export default function LoginPage() {
         </div>
       }
     >
-      <form onSubmit={handleLogin} className="space-y-5">
+      {passwordWasReset && (
+        <p
+          role="status"
+          className="mb-5 rounded-2xl border border-green-200 bg-green-50 p-4 text-sm font-semibold text-green-800"
+        >
+          {t("login.resetDone")}
+        </p>
+      )}
+
+      <div className="space-y-5">
+        <GoogleSignInButton label={t("login.withGoogle")} />
+        <AuthDivider label={t("login.or")} />
+      </div>
+
+      <form onSubmit={handleLogin} className="mt-5 space-y-5">
         <div>
           <label htmlFor="login-email" className={authLabelClass}>
             {t("login.email")}
@@ -126,9 +157,22 @@ export default function LoginPage() {
         </div>
 
         <div>
-          <label htmlFor="login-password" className={authLabelClass}>
-            {t("login.password")}
-          </label>
+          <div className="mb-2 flex items-baseline justify-between gap-3">
+            {/* Not authLabelClass: that carries a bottom margin, which this
+                row supplies for the label and link together. */}
+            <label
+              htmlFor="login-password"
+              className="block text-sm font-semibold text-zinc-800"
+            >
+              {t("login.password")}
+            </label>
+            <Link
+              href="/forgot-password"
+              className="text-sm font-semibold text-red-600 underline underline-offset-4 hover:text-red-700"
+            >
+              {t("login.forgotPassword")}
+            </Link>
+          </div>
           <input
             id="login-password"
             type="password"
@@ -145,15 +189,23 @@ export default function LoginPage() {
           {isSubmitting ? t("login.submitting") : t("login.submit")}
         </button>
 
-        {error && (
+        {(error || (!redirectErrorDismissed && redirectError)) && (
           <p
             role="alert"
             className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700"
           >
-            {error}
+            {error || redirectError}
           </p>
         )}
       </form>
     </AuthShell>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   );
 }

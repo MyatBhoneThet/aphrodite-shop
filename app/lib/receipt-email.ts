@@ -1,5 +1,10 @@
-import nodemailer from "nodemailer";
 import { emailFooterHtml } from "./email-footer";
+import {
+  mailTransportConfig,
+  sendMail,
+  type MailContent,
+  type MailResult,
+} from "./mailer";
 import type { OrderRow } from "./supabase";
 import { translate } from "./translations";
 
@@ -8,14 +13,12 @@ import { translate } from "./translations";
  * when the order is delivered (cash on delivery, so that is when payment
  * happens). The admin can also send the receipt again from the order list.
  *
- * Primary path: the shop's own Gmail account over Gmail's SMTP server, using an
- * App Password (GMAIL_USER + GMAIL_APP_PASSWORD in .env.local). Resend remains
- * as an optional fallback, but Resend can only send from a domain you own and
- * verify -- it cannot send "from" an @gmail.com address -- which is why Gmail
- * SMTP is the default here.
+ * The transport (Gmail SMTP, or Resend as a fallback) lives in lib/mailer.ts,
+ * shared with the password-reset email. This module only decides what an order
+ * email says.
  *
- * Every function in this module returns a result instead of throwing. A mail
- * problem must never fail, block, or undo an order.
+ * Every function here returns a result instead of throwing. A mail problem
+ * must never fail, block, or undo an order.
  */
 
 export type OrderEmailKind = "placed" | "delivered" | "attempt_failed";
@@ -33,45 +36,11 @@ export type DeliveryAttemptInfo = {
   nextAttemptAt?: string | null;
 };
 
-export type ReceiptEmailResult =
-  | { status: "sent"; sentAt: string }
-  | { status: "not_configured" }
-  | { status: "failed"; error: string };
-
-export type MailTransportConfig =
-  | { provider: "gmail"; user: string; password: string; fromName: string }
-  | { provider: "resend"; apiKey: string; from: string };
-
-const DEFAULT_FROM_NAME = "Aphrodite Myanmar";
-
-/** The configured mail provider, or null when none is set up. */
-export function mailTransportConfig(
-  env: NodeJS.ProcessEnv = process.env
-): MailTransportConfig | null {
-  const gmailUser = env.GMAIL_USER?.trim();
-  // Google shows App Passwords in groups of four ("abcd efgh ijkl mnop"); the
-  // spaces are display-only and must be removed before logging in.
-  const gmailPassword = env.GMAIL_APP_PASSWORD?.replace(/\s+/g, "");
-
-  if (gmailUser && gmailPassword) {
-    return {
-      provider: "gmail",
-      user: gmailUser,
-      password: gmailPassword,
-      fromName: env.RECEIPT_FROM_NAME?.trim() || DEFAULT_FROM_NAME,
-    };
-  }
-
-  if (env.RESEND_API_KEY && env.RECEIPT_FROM_EMAIL) {
-    return {
-      provider: "resend",
-      apiKey: env.RESEND_API_KEY,
-      from: env.RECEIPT_FROM_EMAIL,
-    };
-  }
-
-  return null;
-}
+// Re-exported under their original names: the mail transport moved out of this
+// module, its callers did not.
+export { mailTransportConfig };
+export type { MailTransportConfig } from "./mailer";
+export type ReceiptEmailResult = MailResult;
 
 function escapeHtml(value: unknown) {
   return String(value ?? "")
@@ -153,7 +122,7 @@ function detailSectionText(title: string, rows: [string, string][]) {
     : ["", title.toUpperCase(), ...rows.map(([label, value]) => `${label}: ${value}`)];
 }
 
-export type OrderEmailContent = { subject: string; html: string; text: string };
+export type OrderEmailContent = MailContent;
 
 /** Subject, HTML and plain-text body for one order email. */
 export function orderEmailContent(
@@ -376,93 +345,6 @@ function deliveryAttemptContent(
   };
 }
 
-function describeMailError(error: unknown) {
-  const code =
-    error && typeof error === "object" && "code" in error
-      ? String((error as { code: unknown }).code)
-      : "";
-  const message = error instanceof Error ? error.message : String(error);
-
-  if (code === "EAUTH" || /invalid login|username and password not accepted/i.test(message)) {
-    return "Gmail rejected the login. Check GMAIL_USER, and that GMAIL_APP_PASSWORD is a Google App Password (not the normal account password).";
-  }
-
-  return `Mail server error: ${message.slice(0, 300)}`;
-}
-
-async function sendWithGmail(
-  config: Extract<MailTransportConfig, { provider: "gmail" }>,
-  recipient: string,
-  content: OrderEmailContent
-): Promise<ReceiptEmailResult> {
-  try {
-    const transporter = nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 465,
-      secure: true,
-      auth: { user: config.user, pass: config.password },
-      connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 20_000,
-    });
-
-    // Gmail only accepts mail "from" the account that logged in, so the
-    // display name is configurable but the address is always GMAIL_USER.
-    await transporter.sendMail({
-      from: { name: config.fromName, address: config.user },
-      to: recipient,
-      subject: content.subject,
-      html: content.html,
-      text: content.text,
-    });
-
-    return { status: "sent", sentAt: new Date().toISOString() };
-  } catch (error) {
-    return { status: "failed", error: describeMailError(error) };
-  }
-}
-
-async function sendWithResend(
-  config: Extract<MailTransportConfig, { provider: "resend" }>,
-  recipient: string,
-  content: OrderEmailContent,
-  idempotencyKey: string
-): Promise<ReceiptEmailResult> {
-  try {
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        "Content-Type": "application/json",
-        "Idempotency-Key": idempotencyKey,
-      },
-      body: JSON.stringify({
-        from: config.from,
-        to: [recipient],
-        subject: content.subject,
-        html: content.html,
-        text: content.text,
-      }),
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    if (!response.ok) {
-      const detail = await response.text();
-      return {
-        status: "failed",
-        error: `Receipt email provider returned ${response.status}: ${detail.slice(0, 300)}`,
-      };
-    }
-
-    return { status: "sent", sentAt: new Date().toISOString() };
-  } catch (error) {
-    return {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unable to send receipt email.",
-    };
-  }
-}
-
 /** Sends one order email. Never throws. */
 export async function sendOrderEmail(
   order: OrderRow,
@@ -474,12 +356,9 @@ export async function sendOrderEmail(
   },
   env: NodeJS.ProcessEnv = process.env
 ): Promise<ReceiptEmailResult> {
-  const config = mailTransportConfig(env);
   const recipient = order.profiles?.email;
 
-  if (!config || !recipient) {
-    return { status: "not_configured" };
-  }
+  if (!recipient) return { status: "not_configured" };
 
   const content = orderEmailContent(
     order,
@@ -488,14 +367,15 @@ export async function sendOrderEmail(
     env,
     options.attempt
   );
-  // Resend drops a repeat of the same key, so a deliberate "send again" needs its own.
-  const idempotencyKey = [options.kind, order.id, options.idempotencySuffix]
-    .filter(Boolean)
-    .join("-");
 
-  return config.provider === "gmail"
-    ? sendWithGmail(config, recipient, content)
-    : sendWithResend(config, recipient, content, idempotencyKey);
+  return sendMail(recipient, content, {
+    // Resend drops a repeat of the same key, so a deliberate "send again"
+    // needs its own.
+    idempotencyKey: [options.kind, order.id, options.idempotencySuffix]
+      .filter(Boolean)
+      .join("-"),
+    env,
+  });
 }
 
 /** The paid receipt sent on delivery. Kept under its original name. */
