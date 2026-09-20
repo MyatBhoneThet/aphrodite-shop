@@ -1,0 +1,124 @@
+@import "tailwindcss";
+
+/* Let nested panels shrink to the viewport. Explicit utility minimums (for
+   scrollable tables, for example) still take precedence over these defaults. */
+@layer base {
+  .grid > *,
+  .flex > * {
+    min-width: 0;
+  }
+
+  /* `break-word`, not `anywhere`: long tokens (URLs, SKUs) still break instead
+     of overflowing, but ordinary words keep their min-content width, so phones
+     no longer split labels like "Quantity" or "MMK" down the middle. */
+  body {
+    overflow-wrap: break-word;
+  }
+
+  input,
+  select,
+  textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+/* A 16px field font prevents iOS from zooming the page when a form is focused. */
+@media (max-width: 639px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 1rem;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: white;
+  color: #18181b;
+  font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 3px solid #ef4444;
+  outline-offset: 3px;
+}
+
+@keyframes hero-slide {
+  0% {
+    transform: translateX(0%);
+  }
+
+  28% {
+    transform: translateX(0%);
+  }
+
+  33% {
+    transform: translateX(-100%);
+  }
+
+  61% {
+    transform: translateX(-100%);
+  }
+
+  66% {
+    transform: translateX(-200%);
+  }
+
+  94% {
+    transform: translateX(-200%);
+  }
+
+  100% {
+    transform: translateX(0%);
+  }
+}
+
+.animate-hero-slide {
+  animation: hero-slide 15s infinite;
+}
+
+/* Homepage advertisement slideshow */
+@keyframes hero-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes hero-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes hero-progress {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+.hero-rise { animation: hero-rise 0.6s ease-out both; }
+.hero-float { animation: hero-float 6s ease-in-out infinite; }
+.hero-progress { transform-origin: left; animation: hero-progress 6s linear both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
