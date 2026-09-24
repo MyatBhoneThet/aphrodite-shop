@@ -28,7 +28,7 @@ import QueuePanel from "./QueuePanel";
 import WholesalePanel from "./WholesalePanel";
 import AdminOverviewPanel from "./AdminOverviewPanel";
 import CustomerLocationsPanel from "./CustomerLocationsPanel";
-import { orderTracking } from "../lib/order-tracking";
+import { orderTracking, trackingSteps } from "../lib/order-tracking";
 import { orderNextStep, nextStepLabels } from "../lib/next-step";
 import CodDeliveryForm from "./CodDeliveryForm";
 
@@ -276,14 +276,11 @@ function describeAutoSync(status: AutoSyncStatus | null) {
   return parts.join(" ");
 }
 
-function allowedOrderStatuses(order: AdminOrder) {
+type DeliveryProgressStage = (typeof trackingSteps)[number];
+
+function allowedDeliveryProgress(order: AdminOrder) {
   if (order.status === "cancelled" || order.status === "returned") return [order.status];
-  const next: Partial<Record<OrderStatus, OrderStatus>> = {
-    pending: "confirmed",
-    confirmed: "shipped",
-    shipped: "delivered",
-  };
-  return next[order.status] ? [order.status, next[order.status]!] : [order.status];
+  return trackingSteps;
 }
 
 function emptyProductForm(): ProductFormState {
@@ -648,7 +645,7 @@ export default function AdminPage() {
   const { t } = useLanguage();
   const [resendingOrderId, setResendingOrderId] = useState<string | null>(null);
 
-  async function handleOrderStatusChange(orderId: string, status: OrderStatus) {
+  async function handleOrderStatusChange(orderId: string, stage: DeliveryProgressStage) {
     setMessage("");
     setError("");
 
@@ -659,7 +656,7 @@ export default function AdminPage() {
           ...authHeaders(),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ action: "advance_delivery_progress", stage }),
       });
 
       if (!response.ok) {
@@ -1070,20 +1067,20 @@ export default function AdminPage() {
 
   return (
     <main className="min-h-screen bg-[#f4f6f9] text-zinc-900">
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 flex-col border-r border-zinc-800 bg-[#111115] text-white lg:flex">
-        <div className="flex h-20 shrink-0 items-center bg-white px-6">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-zinc-800 bg-[#111115] text-white lg:flex">
+        <div className="flex h-16 shrink-0 items-center bg-white px-4">
           <BrandLogo />
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 [scrollbar-width:thin]">
-        <div className="my-5 flex items-center gap-3 rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.08] to-white/[0.02] p-3">
-          <span aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-500/15 text-sm font-bold text-red-300">{(currentUser?.full_name || a("Admin")).split(" ").slice(0, 2).map(part => part[0]).join("").toUpperCase()}</span>
+        <div className="my-3 flex items-center gap-3 rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.08] to-white/[0.02] p-2.5">
+          <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-500/15 text-xs font-bold text-red-300">{(currentUser?.full_name || a("Admin")).split(" ").slice(0, 2).map(part => part[0]).join("").toUpperCase()}</span>
           <div className="min-w-0"><p className="truncate text-sm font-semibold">{currentUser?.full_name || a("Admin")}</p><p className="mt-1 truncate text-[11px] text-zinc-400" title={currentUser?.email}>{currentUser?.email}</p></div>
         </div>
-        <label className="mb-5 flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 transition focus-within:border-red-400/60 focus-within:ring-2 focus-within:ring-red-500/15">
+        <label className="mb-3 flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 transition focus-within:border-red-400/60 focus-within:ring-2 focus-within:ring-red-500/15">
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-4 w-4 shrink-0 text-zinc-500"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>
           <span className="sr-only">{a("Search admin products and orders")}</span>
-          <input placeholder={a("Search products & orders")} value={search} onChange={event => setSearch(event.target.value)} className="min-w-0 w-full bg-transparent py-3 text-xs text-white outline-none placeholder:text-zinc-500" />
+          <input placeholder={a("Search products & orders")} value={search} onChange={event => setSearch(event.target.value)} className="min-w-0 w-full bg-transparent py-2.5 text-xs text-white outline-none placeholder:text-zinc-500" />
         </label>
 
         <nav aria-label={a("Admin navigation")} className="space-y-1 text-sm">
@@ -1112,7 +1109,7 @@ export default function AdminPage() {
             label={t("admin.queue")}
             onClick={() => setActivePanel("queue")}
           />
-          <p className="px-3 pb-2 pt-5 text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500">{a("Customer care")}</p>
+          <p className="px-3 pb-2 pt-3 text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500">{a("Customer care")}</p>
           <SidebarButton
             active={activePanel === "locations"}
             icon="📍"
@@ -1125,7 +1122,7 @@ export default function AdminPage() {
             label={t("admin.liveChat")}
             onClick={() => setActivePanel("support")}
           />
-          <p className="px-3 pb-2 pt-5 text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500">{a("Business tools")}</p>
+          <p className="px-3 pb-2 pt-3 text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500">{a("Business tools")}</p>
           <SidebarButton
             active={activePanel === "wholesale"}
             icon="🏢"
@@ -1148,36 +1145,36 @@ export default function AdminPage() {
         </nav>
         </div>
         <div className="shrink-0 border-t border-white/10 bg-white/[0.02] p-3">
-          <Link href="/" className="group flex min-h-11 items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-zinc-300 transition hover:bg-white/5 hover:text-white">
+          <Link href="/" className="group flex min-h-10 items-center gap-3 rounded-xl px-3 py-1.5 text-sm font-medium text-zinc-300 transition hover:bg-white/5 hover:text-white">
             <SidebarIcon icon="store" />{t("admin.backToStore")}<span aria-hidden="true" className="ml-auto text-zinc-500 transition group-hover:translate-x-0.5">↗</span>
           </Link>
-          <button type="button" onClick={handleLogout} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-zinc-500 transition hover:bg-red-500/10 hover:text-red-300"><SidebarIcon icon="logout" />{t("nav.logout")}</button>
+          <button type="button" onClick={handleLogout} className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 py-1.5 text-sm font-medium text-zinc-500 transition hover:bg-red-500/10 hover:text-red-300"><SidebarIcon icon="logout" />{t("nav.logout")}</button>
         </div>
       </aside>
 
-      <section className="lg:pl-72">
+      <section className="lg:pl-64">
         <header className="sticky top-0 z-30 border-b bg-white shadow-sm">
-          <div className="flex min-h-16 flex-wrap items-center justify-between gap-4 px-5 py-3">
+          <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 px-4 py-2">
             <div>
-              <h1 className="text-xl font-bold">{t("admin.manage")}</h1>
+              <h1 className="text-lg font-bold">{t("admin.manage")}</h1>
               <p className="text-xs text-zinc-500">
                 {a(activePanel.replaceAll("_", " "))}  {a("/ Aphrodite Admin Panel")} </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               <LanguageSwitcher />
 
               <button
                 onClick={loadDashboardData}
                 disabled={isLoadingData}
-                className="rounded-full border px-4 py-2 text-sm font-semibold disabled:bg-zinc-100"
+                className="rounded-full border px-3 py-1.5 text-xs font-semibold disabled:bg-zinc-100"
               >
                 {isLoadingData ? t("common.loading") : t("common.refresh")}
               </button>
 
               <button
                 onClick={handleLogout}
-                className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white"
+                className="rounded-full bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white"
               >
                 {t("nav.logout")}
               </button>
@@ -1700,14 +1697,14 @@ function SidebarButton({
       onClick={onClick}
       type="button"
       aria-current={active ? "page" : undefined}
-      className={`group relative flex min-h-11 w-full items-center gap-3 rounded-xl border px-3 py-2 text-left transition motion-reduce:transition-none ${
+      className={`group relative flex min-h-10 w-full items-center gap-3 rounded-xl border px-3 py-1.5 text-left transition motion-reduce:transition-none ${
         active
           ? "border-red-500/25 bg-gradient-to-r from-red-500/20 to-red-500/5 text-white shadow-[inset_3px_0_0_#ef4444]"
           : "border-transparent text-zinc-400 hover:border-white/5 hover:bg-white/5 hover:text-white"
       }`}
     >
-      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${active ? "bg-red-500 text-white shadow-lg shadow-red-950/30" : "bg-white/[0.03] text-zinc-500 group-hover:text-zinc-200"}`}><SidebarIcon icon={icon} /></span>
-      <span className="text-[13px] font-medium">{label}</span>
+      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition ${active ? "bg-red-500 text-white shadow-lg shadow-red-950/30" : "bg-white/[0.03] text-zinc-500 group-hover:text-zinc-200"}`}><SidebarIcon icon={icon} /></span>
+      <span className="text-xs font-medium">{label}</span>
       {active && <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" />}
     </button>
   );
@@ -1822,7 +1819,7 @@ function OrdersTable({
   resendingOrderId,
 }: {
   orders: AdminOrder[];
-  onStatusChange: (orderId: string, status: OrderStatus) => void;
+  onStatusChange: (orderId: string, stage: DeliveryProgressStage) => void;
   onResolveRequest: (
     orderId: string,
     requestType: OrderRequestType,
@@ -1899,20 +1896,31 @@ function OrdersTable({
               <td className="p-4">
                 <p className="mb-2 text-xs font-bold text-blue-700">{a(orderTracking(order).label)}</p>
                 <select
-                  value={order.status}
+                  value={order.status === "cancelled" || order.status === "returned"
+                    ? order.status
+                    : trackingSteps[Math.max(0, orderTracking(order).step)]}
                   disabled={
                     order.status === "cancelled" ||
                     order.status === "returned" ||
                     order.cancellation_request_status === "requested"
                   }
                   onChange={(event) =>
-                    onStatusChange(order.id, event.target.value as OrderStatus)
+                    onStatusChange(order.id, event.target.value as DeliveryProgressStage)
                   }
                   className="rounded-full border px-3 py-2 text-xs font-semibold capitalize outline-none focus:border-red-500 disabled:bg-zinc-100"
                 >
-                  {allowedOrderStatuses(order).map((status) => (
-                    <option key={status} value={status}>
-                      {a(status)}
+                  {allowedDeliveryProgress(order).map((stage) => (
+                    <option
+                      key={stage}
+                      value={stage}
+                      disabled={
+                        stage !== "cancelled" &&
+                        stage !== "returned" &&
+                        trackingSteps.indexOf(stage) !== Math.max(0, orderTracking(order).step) &&
+                        trackingSteps.indexOf(stage) !== Math.max(0, orderTracking(order).step) + 1
+                      }
+                    >
+                      {stage === "cancelled" || stage === "returned" ? a(stage) : t(`tracking.${stage}`)}
                     </option>
                   ))}
                 </select>

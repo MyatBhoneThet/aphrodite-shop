@@ -1,6 +1,7 @@
 import { NextResponse, after, type NextRequest } from "next/server";
 import {
   adminCancelOrder,
+  advanceOrderDeliveryProgress,
   advanceReturnWorkflow,
   authenticate,
   getOrder,
@@ -81,6 +82,21 @@ export async function PATCH(
         return NextResponse.json({ error: "Order not found." }, { status: 404 });
       }
       return NextResponse.json({ order: verified });
+    }
+
+    if ("action" in parsed.data && parsed.data.action === "advance_delivery_progress") {
+      const stage = parsed.data.stage;
+      const order = await advanceOrderDeliveryProgress(user, id, stage);
+      if (!order) {
+        return NextResponse.json({ error: "Order not found." }, { status: 404 });
+      }
+
+      if (stage === "delivered") {
+        after(() => notifyOrderDelivered(user, id));
+      } else {
+        after(() => notifyOrderProgress(user, id, stage));
+      }
+      return NextResponse.json({ order });
     }
 
     // A failed delivery attempt keeps the order shipped, so it never goes

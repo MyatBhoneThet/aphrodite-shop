@@ -33,7 +33,11 @@ export default function CodDeliveryForm({ order, onClose, onSaved }: {
   const a = useAdminText();
   const heading = useRef<HTMLHeadingElement>(null);
   const [context, setContext] = useState<Context | null>(null);
-  const [status, setStatus] = useState(order.cod_verification_status === "deposit_verified" ? "pending" : order.cod_verification_status ?? "pending");
+  const [status, setStatus] = useState(
+    order.cod_verification_status === "approved" || order.cod_verification_status === "rejected"
+      ? order.cod_verification_status
+      : "pending"
+  );
   const [callback, setCallback] = useState(false);
   const [address, setAddress] = useState(false);
   const [note, setNote] = useState("");
@@ -112,7 +116,7 @@ export default function CodDeliveryForm({ order, onClose, onSaved }: {
         <label className="block text-sm font-semibold">{a("Callback / review note")}<textarea className={field} maxLength={500} value={note} onChange={e => setNote(e.target.value)} placeholder={a("Example: Called today; customer confirmed 1 laptop and the cash total, landmark and recipient availability. No ID numbers.")} /></label>
         {context?.review && <p className="text-xs text-zinc-500">{a("Last staff review:")} {formatDateTime(context.review.reviewed_at)}</p>}
         <label className="block text-sm font-semibold">{a("COD decision")}<select className={field} value={status} onChange={e => setStatus(e.target.value)}>
-          <option value="pending">{a("Pending — do not dispatch")}</option><option value="phone_verified">{a("Phone checked — address/review still needed")}</option>
+          <option value="pending">{a("Pending — do not dispatch")}</option>
           <option value="approved">{a("Approved for COD")}</option><option value="rejected">{a("On hold / rejected — do not dispatch")}</option>
         </select></label>
         <div className="border-t pt-4"><h4 className="font-bold">{a("2. Delivery details — visible to the customer")}</h4>

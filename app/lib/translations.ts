@@ -718,6 +718,7 @@ export const translations = {
 
   // Refund tracker: the five steps a customer can follow
   "refund.title": { en: "Refund progress", my: "ငွေပြန်အမ်းမှု အခြေအနေ" },
+  "refund.view": { en: "View refund status", my: "ငွေပြန်အမ်းမှု အခြေအနေ ကြည့်ရန်" },
   "refund.step.request_received": { en: "Request received", my: "တောင်းဆိုချက် လက်ခံရရှိပြီး" },
   "refund.step.under_review": { en: "Under review", my: "စစ်ဆေးနေဆဲ" },
   "refund.step.item_received": { en: "Item received", my: "ပစ္စည်း လက်ခံရရှိပြီး" },
@@ -751,6 +752,14 @@ export const translations = {
   "return.status.inspected": { en: "Inspected", my: "စစ်ဆေးပြီး" },
   "return.status.completed": { en: "Completed", my: "ပြီးဆုံးပြီး" },
   "return.status.cancelled": { en: "Cancelled", my: "ပယ်ဖျက်ပြီး" },
+  "return.bar.title": { en: "Last return process", my: "နောက်ဆုံး ပြန်အပ်မှု အခြေအနေ" },
+  "return.bar.view": { en: "View return status", my: "ပြန်အပ်မှု အခြေအနေ ကြည့်ရန်" },
+  "return.order.requested": { en: "Return requested", my: "ပြန်အပ်ရန် တောင်းဆိုပြီး" },
+  "return.order.approved": { en: "Return approved", my: "ပြန်အပ်မှု အတည်ပြုပြီး" },
+  "return.order.pickup_scheduled": { en: "Pickup / drop-off scheduled", my: "လာယူရန် / ပို့ရန် စီစဉ်ပြီး" },
+  "return.order.received": { en: "Item received", my: "ပစ္စည်း လက်ခံရရှိပြီး" },
+  "return.order.refunded": { en: "Refunded", my: "ငွေပြန်အမ်းပြီး" },
+  "return.order.rejected": { en: "Return rejected", my: "ပြန်အပ်မှု ငြင်းပယ်ထားသည်" },
   "return.askReview": { en: "Ask us to look again", my: "ပြန်လည် စစ်ဆေးပေးရန် တောင်းဆိုမည်" },
   "return.askReviewHelp": {
     en: "If you think this decision is wrong, tell us why and a second person will review it.",

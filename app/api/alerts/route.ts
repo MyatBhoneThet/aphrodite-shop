@@ -1,10 +1,11 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, after, type NextRequest } from "next/server";
 import {
   addProductAlert,
   authenticate,
   getProductAlerts,
 } from "@/app/lib/backend";
 import { handleRouteError } from "@/app/lib/errors";
+import { notifySubscribedProductAlert } from "@/app/lib/product-alert-email";
 import { readJsonBody } from "@/app/lib/request";
 import { firstIssueMessage, productAlertInputSchema } from "@/app/lib/validation";
 
@@ -29,9 +30,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({
-      alerts: await addProductAlert(user, parsed.data),
-    });
+    const alerts = await addProductAlert(user, parsed.data);
+    const { product_id: productId, kind } = parsed.data;
+    after(() => notifySubscribedProductAlert(user.id, productId, kind));
+
+    return NextResponse.json({ alerts });
   } catch (error) {
     return handleRouteError("alerts.add", error);
   }

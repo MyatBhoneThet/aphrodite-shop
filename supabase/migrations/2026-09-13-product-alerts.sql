@@ -6,9 +6,9 @@
 -- Design note: the alert stores a BASELINE snapshot of the product's price and
 -- stock at the moment the customer started following it. Whether an alert has
 -- fired is then decided by comparing that baseline with the product's current
--- row, live, whenever the customer loads a page. That deliberately avoids
--- needing a background worker or a mail provider, neither of which this
--- project has -- see app/lib/product-alerts.ts.
+-- row, live, whenever the customer loads a page. The catalogue synchronizer
+-- now uses that same comparison for email and advances the stored baseline
+-- after a successful notification -- see app/lib/product-alerts.ts.
 --
 -- Apply after 2026-07-29-customer-settings-recently-viewed.sql.
 

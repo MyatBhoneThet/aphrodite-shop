@@ -2222,6 +2222,10 @@ export type ProductAlertRow = {
   target_price: number | null;
   created_at: string;
   products?: ProductRow | null;
+  profiles?: {
+    email: string;
+    full_name: string | null;
+  } | null;
 };
 
 // These three use the SERVICE ROLE, like recently_viewed_products: the table
@@ -2234,6 +2238,18 @@ export async function selectProductAlerts(userId: string) {
     `product_alerts?select=id,user_id,product_id,kind,baseline_price,baseline_stock,target_price,created_at,products(${PUBLIC_PRODUCT_COLUMNS})&user_id=eq.${encodeURIComponent(
       userId
     )}&order=created_at.desc`
+  );
+}
+
+/** Service-side alert scan used after catalogue synchronization. */
+export async function selectAllProductAlerts(productIds?: number[]) {
+  const productFilter =
+    productIds && productIds.length > 0
+      ? `&product_id=in.(${[...new Set(productIds)].join(",")})`
+      : "";
+
+  return supabaseRest<ProductAlertRow[]>(
+    `product_alerts?select=id,user_id,product_id,kind,baseline_price,baseline_stock,target_price,created_at,profiles(email,full_name),products(${PUBLIC_PRODUCT_COLUMNS})${productFilter}&order=created_at.asc`
   );
 }
 
@@ -2271,6 +2287,24 @@ export async function deleteProductAlert(userId: string, id: string) {
     `product_alerts?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}`,
     { method: "DELETE" }
   );
+}
+
+/** Moves a delivered alert's baseline forward so the same change is not sent
+ * again, while keeping the customer's watch active for a later price drop or
+ * another restock. */
+export async function updateProductAlertBaseline(
+  id: string,
+  baselinePrice: number,
+  baselineStock: string
+) {
+  await supabaseRest(`product_alerts?id=eq.${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      baseline_price: Math.max(0, Math.round(baselinePrice)),
+      baseline_stock: baselineStock,
+    }),
+  });
 }
 
 // The payment_slips table arrives with

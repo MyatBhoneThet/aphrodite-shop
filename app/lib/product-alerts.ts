@@ -8,11 +8,10 @@ import { formatCurrency } from "./format";
  * Pure module, no React and no fetch, so every rule is unit testable.
  *
  * How an alert fires: when the customer starts following a product we store a
- * BASELINE of its price and stock. Whether the alert has fired is then worked
- * out live, by comparing that baseline with the product's current row, each
- * time a page loads. There is no background worker and no mail provider in
- * this project, so a "check on read" design is the only one that actually
- * delivers -- and it cannot silently fail the way an unconfigured mailer does.
+ * BASELINE of its price and stock. The storefront compares that baseline with
+ * the live product row, and the catalogue synchronizer uses the same rule for
+ * email. After a successful email it moves the baseline forward, preventing a
+ * duplicate notification while keeping the watch active for the next change.
  *
  * The trap this file exists to avoid: a price of 0 means "Price pending" in
  * this catalogue, NOT free. Comparing it as a number would fire a bogus

@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { serviceUnavailable } from "./errors";
 import { fetchProductsSheet, hasGoogleSheetsConfig } from "./google-sheets";
 import { withSheetStockLock } from "./sheet-stock-lock";
+import { sendTriggeredProductAlertEmails } from "./product-alert-email";
 import {
   markRemovedProductsOutOfStock,
   previewStockCorrections,
@@ -92,6 +93,13 @@ async function applySheetSnapshot(sheet: SheetSnapshot) {
     await markRemovedProductsOutOfStock(stockCorrections.removedFromSheet);
   }
 
+  // Price and stock watches are checked only after the authoritative sheet
+  // update is safely stored. Mail failures are swallowed by the notifier and
+  // never roll back or fail the catalogue synchronization.
+  const notificationEmails = await sendTriggeredProductAlertEmails(
+    syncedProducts.map((product) => product.id)
+  );
+
   return {
     ok: true as const,
     wholesale,
@@ -101,6 +109,7 @@ async function applySheetSnapshot(sheet: SheetSnapshot) {
     warnings,
     stockCorrections,
     productIds: syncedProducts.map((product) => product.id),
+    notificationEmails,
   };
 }
 
@@ -218,6 +227,9 @@ export async function runAutomaticProductSync(): Promise<AutoSyncStatus> {
       const sheet = await fetchProductsSheet();
 
       if (sheetFingerprint(sheet) === state.fingerprint) {
+        // A scheduled promotion can become active as time passes even when no
+        // spreadsheet cell changed, so alert checks must still run.
+        await sendTriggeredProductAlertEmails();
         state.lastResult = "unchanged";
         return;
       }

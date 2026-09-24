@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   adminOrderCancellationSchema,
   adminDeliveryUpdateSchema,
+  adminDeliveryProgressSchema,
   adminOrderResolutionSchema,
   adminReturnWorkflowSchema,
   customerOrderActionSchema,
@@ -191,6 +192,19 @@ describe("order input validation", () => {
 });
 
 describe("order lifecycle validation", () => {
+  it("accepts only customer-visible delivery progress milestones", () => {
+    for (const stage of ["verified", "packed", "handed_to_courier", "out_for_delivery", "delivered"]) {
+      expect(adminDeliveryProgressSchema.safeParse({
+        action: "advance_delivery_progress",
+        stage,
+      }).success).toBe(true);
+    }
+    expect(adminDeliveryProgressSchema.safeParse({
+      action: "advance_delivery_progress",
+      stage: "in_transit",
+    }).success).toBe(false);
+  });
+
   it("accepts customer requests and administrator resolutions", () => {
     expect(customerOrderActionSchema.safeParse({
       action: "request_cancellation",

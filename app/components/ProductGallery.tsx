@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useLanguage } from "../lib/language";
 import type { Product } from "../data/products";
 import { productPhotos, PRODUCT_PLACEHOLDER } from "../lib/product-gallery";
@@ -17,6 +17,8 @@ export default function ProductGallery({ product }: { product: Product }) {
   const [selected, setSelected] = useState(0);
   const [model, setModel] = useState(false);
   const [zoom, setZoom] = useState<ZoomPosition | null>(null);
+  const [touchZoomOpen, setTouchZoomOpen] = useState(false);
+  const [touchScale, setTouchScale] = useState(1);
   const photo = photos[Math.min(selected, Math.max(0, photos.length - 1))];
   const imageUrl = photo?.url ?? PRODUCT_PLACEHOLDER;
   const source =
@@ -24,6 +26,20 @@ export default function ProductGallery({ product }: { product: Product }) {
     /^https:\/\//.test(product.fullSpecs.photoSource)
       ? product.fullSpecs.photoSource
       : null;
+
+  useEffect(() => {
+    if (!touchZoomOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setTouchZoomOpen(false);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [touchZoomOpen]);
 
   function updateZoom(event: ReactPointerEvent<HTMLDivElement>) {
     // Hover magnification is deliberately desktop/mouse-only. Touch customers
@@ -46,6 +62,12 @@ export default function ProductGallery({ product }: { product: Product }) {
     setZoom(null);
   }
 
+  function openTouchZoom() {
+    if (model) return;
+    setTouchScale(1);
+    setTouchZoomOpen(true);
+  }
+
   return (
     <div className="space-y-4">
       <div className="relative">
@@ -64,21 +86,28 @@ export default function ProductGallery({ product }: { product: Product }) {
               productName={product.name}
             />
           ) : (
-            <img
-              key={imageUrl}
-              src={imageUrl}
-              alt={
-                photo
-                  ? `${product.name} — ${text(photo.label)}`
-                  : `${product.name} — ${text("photo not yet available")}`
-              }
-              className="h-full w-full object-contain p-8"
-              onError={(event) => {
-                event.currentTarget.onerror = null;
-                event.currentTarget.src = PRODUCT_PLACEHOLDER;
-                setZoom(null);
-              }}
-            />
+            <button
+              type="button"
+              aria-label={text("Open product photo zoom")}
+              onClick={openTouchZoom}
+              className="h-full w-full"
+            >
+              <img
+                key={imageUrl}
+                src={imageUrl}
+                alt={
+                  photo
+                    ? `${product.name} — ${text(photo.label)}`
+                    : `${product.name} — ${text("photo not yet available")}`
+                }
+                className="h-full w-full object-contain p-8"
+                onError={(event) => {
+                  event.currentTarget.onerror = null;
+                  event.currentTarget.src = PRODUCT_PLACEHOLDER;
+                  setZoom(null);
+                }}
+              />
+            </button>
           )}
 
           {zoom && !model && (
@@ -96,9 +125,10 @@ export default function ProductGallery({ product }: { product: Product }) {
           )}
 
           {!model && !zoom && (
-            <div className="pointer-events-none absolute bottom-4 right-4 hidden items-center gap-2 rounded-full border border-zinc-200 bg-white/95 px-3 py-2 text-xs font-semibold text-zinc-700 shadow-sm lg:flex">
+            <div className="pointer-events-none absolute bottom-4 right-4 flex items-center gap-2 rounded-full border border-zinc-200 bg-white/95 px-3 py-2 text-xs font-semibold text-zinc-700 shadow-sm">
               <span aria-hidden="true">⌕</span>
-              {text("Hover over the photo to zoom")}
+              <span className="[@media(hover:hover)]:hidden">{text("Tap photo to zoom")}</span>
+              <span className="hidden [@media(hover:hover)]:inline">{text("Hover over the photo to zoom")}</span>
             </div>
           )}
 
@@ -202,6 +232,62 @@ export default function ProductGallery({ product }: { product: Product }) {
             {text("Photo source ↗")}
           </a>
         </p>
+      )}
+
+      {touchZoomOpen && !model && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={text("Product photo zoom")}
+          className="fixed inset-0 z-[100] flex flex-col bg-black/95 text-white"
+        >
+          <div className="flex items-center justify-between gap-4 border-b border-white/15 px-4 py-3">
+            <p className="min-w-0 truncate text-sm font-bold">{product.name}</p>
+            <button
+              type="button"
+              autoFocus
+              onClick={() => setTouchZoomOpen(false)}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 text-2xl"
+              aria-label={text("Close zoom")}
+            >
+              ×
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto overscroll-contain bg-black">
+            <div
+              className="relative min-h-full min-w-full transition-[width,height] duration-200"
+              style={{ width: `${touchScale * 100}%`, height: `${touchScale * 100}%` }}
+            >
+              <img
+                src={imageUrl}
+                alt={photo ? `${product.name} — ${text(photo.label)}` : product.name}
+                className="absolute inset-0 h-full w-full max-w-none select-none object-contain p-3"
+                draggable={false}
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-center gap-4 border-t border-white/15 px-4 py-4">
+            <button
+              type="button"
+              onClick={() => setTouchScale((value) => Math.max(1, value - 0.5))}
+              disabled={touchScale <= 1}
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-2xl font-bold text-black disabled:opacity-40"
+              aria-label={text("Zoom out")}
+            >
+              −
+            </button>
+            <p className="w-20 text-center text-sm font-bold" aria-live="polite">{Math.round(touchScale * 100)}%</p>
+            <button
+              type="button"
+              onClick={() => setTouchScale((value) => Math.min(4, value + 0.5))}
+              disabled={touchScale >= 4}
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-2xl font-bold text-black disabled:opacity-40"
+              aria-label={text("Zoom in")}
+            >
+              +
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

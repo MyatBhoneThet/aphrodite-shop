@@ -1,6 +1,7 @@
 import { activePromotion } from "./promotions";
 import { createHash, randomUUID } from "node:crypto";
 import { codReviewError } from "./cod-verification";
+import { orderTracking, trackingLabels, trackingSteps } from "./order-tracking";
 import { reviewOrderDeliveryRpc } from "./supabase";
 import { isApproximatelyInYangon, isMyanmarCountry, normalizeMyanmarRegion, normalizeYangonTownship } from "./delivery-country";
 import type { Product } from "../data/products";
@@ -1107,8 +1108,8 @@ export async function removeWishlistItem(user: CurrentUser, id: string) {
 /**
  * Alerts carry their live status, worked out by comparing the baseline stored
  * when the customer started following with the product's current row. The
- * storefront therefore never has to poll, and there is no background job that
- * could silently stop running.
+ * storefront therefore never has to poll. The same comparison is used by the
+ * catalogue synchronization job to send opted-in email notifications.
  */
 function productAlertResponse(rows: ProductAlertRow[]) {
   return rows.flatMap((row) => {
@@ -2291,6 +2292,73 @@ export async function patchOrderStatus(
   }
 
   return order ? orderResponse(order) : null;
+}
+
+export type DeliveryProgressStage = (typeof trackingSteps)[number];
+
+/** Advance exactly one of the six customer-visible delivery milestones. */
+export async function advanceOrderDeliveryProgress(
+  user: CurrentUser,
+  id: string,
+  stage: Exclude<DeliveryProgressStage, "order_placed">
+) {
+  requireAdmin(user);
+
+  const existing = await selectOrderById(user, id);
+  if (!existing) return null;
+  if (existing.status === "cancelled" || existing.status === "returned") {
+    throw conflict("A closed order cannot move to another delivery step.");
+  }
+
+  const current = orderTracking(existing);
+  const targetIndex = trackingSteps.indexOf(stage);
+  if (targetIndex === current.step) return orderResponse(existing);
+  if (targetIndex !== current.step + 1) {
+    throw conflict("Complete each of the six delivery steps in order.");
+  }
+  if (stage === "packed" && existing.status !== "confirmed") {
+    throw conflict("Verify the order before marking it packed.");
+  }
+  if (stage === "out_for_delivery" && existing.status !== "shipped") {
+    throw conflict("Hand the order to the courier before marking it out for delivery.");
+  }
+
+  if (stage === "verified") {
+    await patchOrderStatus(user, id, "confirmed");
+  } else if (stage === "handed_to_courier") {
+    await patchOrderStatus(user, id, "shipped");
+  } else if (stage === "delivered") {
+    await patchOrderStatus(user, id, "delivered");
+  }
+
+  const now = new Date().toISOString();
+  await insertDeliveryEvent({
+    order_id: id,
+    stage,
+    title: trackingLabels[stage],
+    created_by: user.id,
+  });
+  await updateOrderDeliveryService(id, {
+    delivery_status_detail: trackingLabels[stage],
+    delivery_last_event_at: now,
+  });
+
+  await insertAuditLog({
+    actor_id: user.id,
+    action: "order.delivery.progress",
+    target_type: "order",
+    target_id: id,
+    previous_data: { stage: current.stage },
+    new_data: { stage },
+  }).catch((error) => {
+    console.error("[orders] could not audit delivery progress", {
+      order_id: id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+
+  const updated = await selectOrderById(user, id);
+  return updated ? orderResponse(updated) : null;
 }
 
 // ---------------------------------------------------------------------------

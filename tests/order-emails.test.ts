@@ -253,4 +253,58 @@ describe("email content", () => {
     expect(message.html).toContain("https://shop.example.com/track?order=12345678");
     expect(message.text).toContain("Current status: Out for delivery");
   });
+
+  it("emails the customer for every one of the six visible order steps", async () => {
+    await sendOrderEmail(order, { kind: "placed" }, GMAIL_ENV);
+
+    const laterSteps = [
+      ["verified", "Order verified"],
+      ["packed", "Packed"],
+      ["handed_to_courier", "Handed to courier"],
+      ["out_for_delivery", "Out for delivery"],
+    ] as const;
+
+    for (const [stage, label] of laterSteps) {
+      await sendOrderEmail(
+        order,
+        { kind: "progress", progressStage: stage, idempotencySuffix: stage },
+        GMAIL_ENV
+      );
+      expect(mail.sendMail.mock.calls.at(-1)?.[0].subject).toContain(label);
+    }
+
+    await sendOrderEmail(
+      order,
+      { kind: "delivered", receiptNumber: "APH-DELIVERED" },
+      GMAIL_ENV
+    );
+
+    expect(mail.sendMail).toHaveBeenCalledTimes(6);
+    for (const [message] of mail.sendMail.mock.calls) {
+      expect(message.to).toBe("customer@example.com");
+    }
+    expect(mail.sendMail.mock.calls.at(-1)?.[0].subject).toContain("APH-DELIVERED");
+  });
+
+  it("shows the same six-stage timeline in progress emails as the website", () => {
+    const content = orderEmailContent(
+      order,
+      "progress",
+      undefined,
+      GMAIL_ENV,
+      undefined,
+      "packed"
+    );
+
+    for (const label of [
+      "Order received",
+      "Order verified",
+      "Packed",
+      "Handed to courier",
+      "Out for delivery",
+      "Delivered",
+    ]) {
+      expect(content.html).toContain(label);
+    }
+  });
 });

@@ -614,6 +614,19 @@ export const adminReceiptResendSchema = z
   .object({ action: z.literal("resend_receipt") })
   .strict();
 
+export const adminDeliveryProgressSchema = z
+  .object({
+    action: z.literal("advance_delivery_progress"),
+    stage: z.enum([
+      "verified",
+      "packed",
+      "handed_to_courier",
+      "out_for_delivery",
+      "delivered",
+    ]),
+  })
+  .strict();
+
 export const orderMutationSchema = z.union([
   orderStatusSchema,
   customerOrderActionSchema,
@@ -622,6 +635,7 @@ export const orderMutationSchema = z.union([
   adminReturnWorkflowSchema,
   adminDeliveryUpdateSchema,
   adminReceiptResendSchema,
+  adminDeliveryProgressSchema,
   adminDeliveryAttemptSchema,
   adminPaymentVerificationSchema,
 ]);

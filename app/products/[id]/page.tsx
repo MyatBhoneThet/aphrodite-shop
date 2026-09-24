@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { Product, UserRole } from "../../data/products";
 import ProductPrice from "../../components/ProductPrice";
@@ -49,6 +49,7 @@ type ProductResponse = {
 export default function ProductDetailsPage() {
   const { t, text } = useLanguage();
   const params = useParams();
+  const router = useRouter();
   const productId = Number(params.id);
 
   const { user: currentUser } = useCurrentUser();
@@ -225,6 +226,14 @@ export default function ProductDetailsPage() {
   const modelName =
     variants.length > 1 ? productVariant(product)?.model ?? product.name : product.name;
 
+  function goToPreviousPage() {
+    if (window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/");
+    }
+  }
+
   async function addToCart(productItem: Product) {
     if (!currentUser) {
       setCartMessage(t("detail.loginToCart"));
@@ -298,23 +307,13 @@ export default function ProductDetailsPage() {
             <BrandLogo />
           </Link>
 
-          <div className="flex items-center gap-3">
-            {currentUser && (
-              <span
-                className={`hidden rounded-full px-4 py-2 text-sm md:inline ${
-                  isWholesale
-                    ? "bg-green-100 font-semibold text-green-700"
-                    : "bg-zinc-100"
-                }`}
-              >
-                {isWholesale ? text("Wholesale ✓") : text("User")}
-              </span>
-            )}
-
-            <Link href="/" className="rounded-full border px-5 py-2 text-sm">
-              {text("Back to Store")}
-            </Link>
-          </div>
+          <button
+            type="button"
+            onClick={goToPreviousPage}
+            className="rounded-full border px-5 py-2 text-sm"
+          >
+            ← {text("Back")}
+          </button>
         </div>
       </header>
 

@@ -287,13 +287,14 @@ export function orderEmailContent(
   return { subject, html, text };
 }
 
-const PROGRESS_STAGES: OrderProgressEmailStage[] = [
+const EMAIL_TIMELINE_STAGES = [
+  "order_placed",
   "verified",
   "packed",
   "handed_to_courier",
   "out_for_delivery",
   "delivered",
-];
+] as const;
 
 /** A concise bilingual status update for the customer's delivery timeline. */
 function orderProgressContent(
@@ -305,7 +306,7 @@ function orderProgressContent(
   const englishStatus = translate("en", `tracking.${stage}`);
   const burmeseStatus = translate("my", `tracking.${stage}`);
   const orderUrl = `${base}/track?order=${encodeURIComponent(shortOrderCode(order.id))}`;
-  const currentIndex = PROGRESS_STAGES.indexOf(stage);
+  const currentIndex = EMAIL_TIMELINE_STAGES.indexOf(stage);
   const items = order.order_items ?? [];
   const deliveryRows = compactRows([
     ["Delivery address", order.shipping_address],
@@ -314,9 +315,9 @@ function orderProgressContent(
     ["Estimated delivery", formatDate(order.estimated_delivery_at)],
   ]);
 
-  const progressHtml = PROGRESS_STAGES.map((step, index) => {
+  const progressHtml = EMAIL_TIMELINE_STAGES.map((step, index) => {
     const complete = index <= currentIndex;
-    return `<td style="width:20%;padding:8px 3px;text-align:center;vertical-align:top;color:${
+    return `<td style="width:16.666%;padding:8px 3px;text-align:center;vertical-align:top;color:${
       complete ? "#15803d" : "#a1a1aa"
     };font-size:11px;font-weight:${complete ? "700" : "400"}">
       <div style="height:5px;border-radius:999px;background:${complete ? "#16a34a" : "#e4e4e7"};margin-bottom:7px"></div>
