@@ -17,6 +17,9 @@ import {
 } from "../lib/laptop-quiz";
 import { productPhotos } from "../lib/product-gallery";
 import { getProductFamily } from "../lib/product-specifications";
+import { useCurrentUser } from "../lib/useCurrentUser";
+import { useDeliveryEstimate } from "../lib/useDeliveryEstimate";
+import DeliveryEstimateBadge from "../components/DeliveryEstimateBadge";
 
 const USE_ICONS: Record<string, string> = {
   office: "💼",
@@ -37,6 +40,8 @@ const BUDGET_PRESETS = [
 const STEPS = ["Budget", "Main use", "Screen size"];
 
 export default function FindMyLaptopPage() {
+  const { user } = useCurrentUser();
+  const deliveryEstimate = useDeliveryEstimate(Boolean(user && user.role !== "admin"));
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -505,6 +510,7 @@ export default function FindMyLaptopPage() {
                           {pick.product.brand}
                         </p>
                         <div className="mt-3"><ProductPrice price={effectiveProductPrice(pick.product)} regularPrice={pick.product.price} /></div>
+                        <DeliveryEstimateBadge estimate={deliveryEstimate} compact />
 
                         {pick.caveat && (
                           <p className="mt-2 inline-flex rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-800">

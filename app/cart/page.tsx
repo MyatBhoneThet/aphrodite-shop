@@ -7,8 +7,11 @@ import type { Product } from "../data/products";
 import { authHeaders } from "../lib/client-auth";
 import { formatCurrency } from "../lib/format";
 import { useCurrentUser } from "../lib/useCurrentUser";
-import { MYANMAR_REGIONS, normalizeMyanmarRegion } from "../lib/delivery-country";
+import { YANGON_TOWNSHIPS, normalizeYangonTownship } from "../lib/delivery-country";
+import type { SavedAddress } from "../lib/address-book";
 import DeliveryPinPicker, { type DeliveryPin } from "../components/DeliveryPinPicker";
+import DeliveryEstimateBadge from "../components/DeliveryEstimateBadge";
+import { estimateDelivery } from "../lib/delivery-estimate";
 import { PaymentLogo, PaymentQr } from "../components/PaymentLogo";
 import { useLanguage } from "../lib/language";
 import {
@@ -55,6 +58,7 @@ export default function CartPage() {
   const [cart, setCart] = useState<CartSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [isClearingCart, setIsClearingCart] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [placedOrderId, setPlacedOrderId] = useState<string | null>(null);
 
@@ -63,7 +67,7 @@ export default function CartPage() {
   const [addressLine1, setAddressLine1] = useState("");
   const [addressLine2, setAddressLine2] = useState("");
   const [shippingCity, setShippingCity] = useState("");
-  const [shippingState, setShippingState] = useState("");
+  const shippingState = "Yangon";
   const [postalCode, setPostalCode] = useState("");
   const shippingCountry = "Myanmar";
   const [notes, setNotes] = useState("");
@@ -73,7 +77,18 @@ export default function CartPage() {
   const [paymentAccount, setPaymentAccount] = useState<PaymentAccountId | null>(null);
   const [deliveryLocation, setDeliveryLocation] = useState<DeliveryPin | null>(null);
   const [addressByPhone, setAddressByPhone] = useState(false);
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState("");
+  const [saveAddress, setSaveAddress] = useState(true);
+  const [addressLabel, setAddressLabel] = useState("Home");
+  const [isResolvingAddress, setIsResolvingAddress] = useState(false);
+  const [addressLookupMessage, setAddressLookupMessage] = useState("");
+  const [isSavingAddress, setIsSavingAddress] = useState(false);
+  const [addressSaveMessage, setAddressSaveMessage] = useState("");
   const hasPendingPrices = cart?.items.some((item) => !Number.isFinite(item.product.price) || item.product.price <= 0) ?? false;
+  const savedAddressDeliveryEstimate = selectedAddressId && deliveryLocation && shippingCity
+    ? estimateDelivery(deliveryLocation.latitude, deliveryLocation.longitude, shippingCity)
+    : null;
 
   const loadCart = useCallback(async () => {
     setIsLoading(true);
@@ -99,11 +114,15 @@ export default function CartPage() {
         setAddressLine2(
           (current) => current || user.shipping_address_line2 || ""
         );
-        setShippingCity((current) => current || user.shipping_city || "");
-        setShippingState((current) => current || normalizeMyanmarRegion(user.shipping_state) || "");
-        setPostalCode(
-          (current) => current || user.shipping_postal_code || ""
-        );
+        setShippingCity((current) => current || normalizeYangonTownship(user.shipping_city) || "");
+        setPostalCode((current) => current || user.shipping_postal_code || "");
+        const addressResponse = await fetch("/api/addresses", { headers: authHeaders(), cache: "no-store" });
+        if (addressResponse.ok) {
+          const data = await addressResponse.json() as { addresses: SavedAddress[] };
+          setSavedAddresses(data.addresses);
+          const preferred = data.addresses.find((address) => address.is_default) ?? data.addresses[0];
+          if (preferred) applySavedAddress(preferred);
+        }
       } else if (userStatus === "ready") {
         setIsLoading(false);
       }
@@ -111,6 +130,102 @@ export default function CartPage() {
 
     loadOnMount();
   }, [userStatus, user, loadCart]);
+
+  function applySavedAddress(address: SavedAddress) {
+    setSelectedAddressId(address.id);
+    setShippingName(address.recipient_name);
+    setShippingPhone(address.phone);
+    setAddressLine1(address.address_line1);
+    setAddressLine2(address.address_line2 ?? "");
+    setShippingCity(address.township);
+    setPostalCode(address.postal_code ?? "");
+    setDeliveryLocation({
+      latitude: address.latitude,
+      longitude: address.longitude,
+      accuracy_m: address.accuracy_m,
+      captured_at: new Date().toISOString(),
+    });
+    setAddressByPhone(false);
+    setSaveAddress(false);
+  }
+
+  async function resolvePinAddress(pin: DeliveryPin) {
+    setAddressByPhone(false);
+    setSelectedAddressId("");
+    setSaveAddress(true);
+    setIsResolvingAddress(true);
+    setAddressLookupMessage("Finding the street and township from your pin…");
+    try {
+      const response = await fetch(`/api/geocode/reverse?lat=${encodeURIComponent(pin.latitude)}&lng=${encodeURIComponent(pin.longitude)}`, {
+        headers: authHeaders(),
+        cache: "no-store",
+      });
+      const data = await response.json() as { address?: { address_line2?: string | null; township?: string | null; postal_code?: string | null } };
+      if (response.ok && data.address) {
+        if (data.address.address_line2) setAddressLine2(data.address.address_line2);
+        if (data.address.township) setShippingCity(data.address.township);
+        if (data.address.postal_code) setPostalCode(data.address.postal_code);
+        const autofilled = [
+          data.address.address_line2,
+          data.address.township ? `${data.address.township} Township` : null,
+          data.address.postal_code,
+        ].filter(Boolean).join(" · ");
+        setAddressLookupMessage(autofilled
+          ? `Autofilled: ${autofilled}. Add your house or building details above.`
+          : "The pin is selected, but no street details were available. Please enter them manually.");
+      } else {
+        setAddressLookupMessage("The pin is selected, but address lookup failed. Please choose the township and enter the street manually.");
+      }
+    } catch {
+      setAddressLookupMessage("The pin is selected, but address lookup failed. Please choose the township and enter the street manually.");
+    } finally {
+      setIsResolvingAddress(false);
+    }
+  }
+
+  function handlePinChange(pin: DeliveryPin | null) {
+    setDeliveryLocation(pin);
+    if (pin) setAddressByPhone(false);
+  }
+
+  async function persistCurrentAddress() {
+    if (!deliveryLocation) throw new Error("Place and confirm the delivery pin first.");
+    if (!shippingName.trim() || !shippingPhone.trim() || !addressLine1.trim() || !shippingCity) {
+      throw new Error("Complete the recipient, phone, house details, and Yangon township before saving.");
+    }
+    if (!addressLabel.trim()) throw new Error("Give this address a label, such as Home or Office.");
+    const saveResponse = await fetch("/api/addresses", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        label: addressLabel.trim(), recipient_name: shippingName.trim(), phone: shippingPhone.trim(),
+        address_line1: addressLine1.trim(), address_line2: addressLine2.trim() || null,
+        township: shippingCity, postal_code: postalCode.trim() || null,
+        latitude: deliveryLocation.latitude, longitude: deliveryLocation.longitude,
+        accuracy_m: deliveryLocation.accuracy_m, is_default: savedAddresses.length === 0,
+      }),
+    });
+    const saved = await saveResponse.json().catch(() => null) as { address?: SavedAddress; error?: string } | null;
+    if (!saveResponse.ok || !saved?.address) throw new Error(saved?.error ?? "Unable to save this address.");
+    setSavedAddresses((current) => [...current, saved.address!]);
+    setSelectedAddressId(saved.address.id);
+    setSaveAddress(false);
+    return saved.address;
+  }
+
+  async function saveAddressNow() {
+    setIsSavingAddress(true);
+    setAddressSaveMessage("");
+    setError("");
+    try {
+      const saved = await persistCurrentAddress();
+      setAddressSaveMessage(`${saved.label} saved${saved.is_default ? " as your default address" : ""}. The delivery estimate is now shown for every product in this order and across the store.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to save this address.");
+    } finally {
+      setIsSavingAddress(false);
+    }
+  }
 
   async function updateQuantity(id: string, quantity: number) {
     setError("");
@@ -147,6 +262,29 @@ export default function CartPage() {
     setCart((await response.json()) as CartSummary);
   }
 
+  async function deleteAllCartItems() {
+    if (!cart || cart.items.length === 0 || isClearingCart) return;
+    if (!window.confirm(text("Remove every product from your cart? This cannot be undone."))) return;
+
+    setError("");
+    setIsClearingCart(true);
+    try {
+      const response = await fetch("/api/cart", {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      const data = await response.json().catch(() => null) as CartSummary | { error?: string } | null;
+      if (!response.ok) {
+        throw new Error(data && "error" in data ? data.error : "Unable to clear your cart.");
+      }
+      setCart(data as CartSummary);
+    } catch (clearError) {
+      setError(clearError instanceof Error ? clearError.message : "Unable to clear your cart.");
+    } finally {
+      setIsClearingCart(false);
+    }
+  }
+
   async function handleCheckout(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -170,6 +308,9 @@ export default function CartPage() {
     setIsPlacingOrder(true);
 
     try {
+      if (saveAddress && !selectedAddressId && deliveryLocation) {
+        await persistCurrentAddress();
+      }
       const response = await fetch("/api/orders", {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
@@ -294,7 +435,19 @@ export default function CartPage() {
       </header>
 
       <section className="mx-auto max-w-5xl px-5 py-10">
-        <h1 className="text-4xl font-bold">{t("cart.title")}</h1>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <h1 className="text-4xl font-bold">{t("cart.title")}</h1>
+          {cart && cart.items.length > 0 && (
+            <button
+              type="button"
+              disabled={isClearingCart || isPlacingOrder}
+              onClick={() => void deleteAllCartItems()}
+              className="rounded-full border border-red-300 bg-white px-5 py-2.5 text-sm font-bold text-red-600 transition hover:border-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isClearingCart ? text("Deleting all…") : text("Delete all")}
+            </button>
+          )}
+        </div>
         {hasPendingPrices && <p className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">{t("cart.pendingPrices")}</p>}
 
         {error && (
@@ -348,6 +501,8 @@ export default function CartPage() {
                         {formatCurrency(item.pricing.nextTier.unitPrice)}/unit
                       </p>
                     )}
+
+                    <DeliveryEstimateBadge estimate={savedAddressDeliveryEstimate} compact />
 
                     <div className="mt-2 flex items-center gap-2">
                       <button
@@ -422,6 +577,18 @@ export default function CartPage() {
               </div>
 
               <form onSubmit={handleCheckout} className="mt-6 space-y-4">
+                {savedAddresses.length > 0 && <div>
+                  <label htmlFor="saved-address" className="mb-1 block text-sm font-semibold">Saved address</label>
+                  <select id="saved-address" value={selectedAddressId} onChange={(event) => {
+                    const address = savedAddresses.find((item) => item.id === event.target.value);
+                    if (address) applySavedAddress(address);
+                    else { setSelectedAddressId(""); setSaveAddress(true); }
+                  }} className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500">
+                    <option value="">Use a new address</option>
+                    {savedAddresses.map((address) => <option key={address.id} value={address.id}>{address.label}{address.is_default ? " (Default)" : ""} — {address.township}</option>)}
+                  </select>
+                  <Link href="/addresses" className="mt-2 inline-block text-xs font-semibold text-red-600">Manage my addresses →</Link>
+                </div>}
                 <div>
                   <label htmlFor="shipping-name" className="mb-1 block text-sm font-semibold">
                     {text("Full name")}
@@ -451,12 +618,12 @@ export default function CartPage() {
 
                 <div>
                   <label htmlFor="address-line-1" className="mb-1 block text-sm font-semibold">
-                    {text("Address line 1")}
+                    {text("House number / building details")}
                   </label>
                   <input
                     id="address-line-1"
                     required
-                    placeholder={t("cart.addressLine1")}
+                    placeholder={text("House number, building, floor, or room")}
                     value={addressLine1}
                     onChange={(event) => setAddressLine1(event.target.value)}
                     className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500"
@@ -465,11 +632,11 @@ export default function CartPage() {
 
                 <div>
                   <label htmlFor="address-line-2" className="mb-1 block text-sm font-semibold">
-                    {text("Address line 2 (optional)")}
+                    {text("Street / ward / landmark")}
                   </label>
                   <input
                     id="address-line-2"
-                    placeholder={t("cart.addressLine2")}
+                    placeholder={text("Filled automatically from your pin; you can edit it")}
                     value={addressLine2}
                     onChange={(event) => setAddressLine2(event.target.value)}
                     className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500"
@@ -479,28 +646,27 @@ export default function CartPage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <label htmlFor="shipping-city" className="mb-1 block text-sm font-semibold">
-                      {text("City / District")}
+                      {text("Yangon township")}
                     </label>
-                    <input id="shipping-city" required value={shippingCity}
+                    <select id="shipping-city" required value={shippingCity}
                       onChange={(event) => setShippingCity(event.target.value)}
-                      className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500" />
-                  </div>
-                  <div>
-                    <label htmlFor="shipping-state" className="mb-1 block text-sm font-semibold">
-                      {text("Myanmar state / region")}
-                    </label>
-                    <select id="shipping-state" required value={shippingState}
-                      onChange={(event) => setShippingState(event.target.value)}
                       className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500">
-                      <option value="">{text("Select state / region")}</option>
-                      {MYANMAR_REGIONS.map((region) => <option key={region} value={region}>{text(region)}</option>)}
+                      <option value="">{text("Select township")}</option>
+                      {YANGON_TOWNSHIPS.map((township) => <option key={township} value={township}>{township}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label htmlFor="postal-code" className="mb-1 block text-sm font-semibold">
-                      {text("Postal code")}
+                    <label htmlFor="shipping-state" className="mb-1 block text-sm font-semibold">
+                      {text("Region")}
                     </label>
-                    <input id="postal-code" required value={postalCode}
+                    <input id="shipping-state" readOnly value="Yangon"
+                      className="w-full rounded-xl border bg-zinc-50 px-4 py-3 text-zinc-600" />
+                  </div>
+                  <div>
+                    <label htmlFor="postal-code" className="mb-1 block text-sm font-semibold">
+                      {text("Postal code (optional)")}
+                    </label>
+                    <input id="postal-code" value={postalCode}
                       onChange={(event) => setPostalCode(event.target.value)}
                       className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500" />
                   </div>
@@ -510,18 +676,28 @@ export default function CartPage() {
                     </label>
                     <input id="shipping-country" readOnly value={text(shippingCountry)}
                       className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500" />
-                    <p className="mt-1 text-xs text-zinc-500">{t("cart.myanmarOnly")}</p>
+                    <p className="mt-1 text-xs text-zinc-500">{text("Delivery is available in Yangon only.")}</p>
                   </div>
                 </div>
 
-                <DeliveryPinPicker value={deliveryLocation} onChange={(pin) => {
-                  setDeliveryLocation(pin);
-                  if (pin) setAddressByPhone(false);
-                }} />
+                <DeliveryPinPicker value={deliveryLocation} onChange={handlePinChange} onPinPlaced={resolvePinAddress} addressLookupStatus={addressLookupMessage} showDeliveryEstimate />
+                {isResolvingAddress && <span className="sr-only" role="status">Finding the street and township from your pin…</span>}
                 {!deliveryLocation && <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">
                   <input type="checkbox" required checked={addressByPhone} onChange={(event) => setAddressByPhone(event.target.checked)} className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-red-600" />
                   <span>{t("cart.noPin")}</span>
                 </label>}
+
+                {!selectedAddressId && deliveryLocation && <fieldset className="rounded-2xl border border-zinc-200 bg-white p-4">
+                  <label className="flex cursor-pointer items-start gap-3 text-sm font-semibold">
+                    <input type="checkbox" checked={saveAddress} onChange={(event) => setSaveAddress(event.target.checked)} className="mt-1 h-4 w-4 accent-red-600" />
+                    <span>Save this to My addresses{savedAddresses.length === 0 ? " as my default address" : ""}</span>
+                  </label>
+                  {saveAddress && <label className="mt-3 block text-sm font-semibold">Address label
+                    <input required value={addressLabel} onChange={(event) => setAddressLabel(event.target.value)} placeholder="Home or Office" className="mt-1 w-full rounded-xl border bg-white px-4 py-3 font-normal outline-none focus:border-red-500" />
+                  </label>}
+                  {saveAddress && <button type="button" disabled={isSavingAddress} onClick={() => void saveAddressNow()} className="mt-3 w-full rounded-full bg-zinc-950 px-4 py-3 text-sm font-bold text-white disabled:bg-zinc-400">{isSavingAddress ? "Saving address…" : savedAddresses.length === 0 ? "Save as my default address now" : "Save address now"}</button>}
+                </fieldset>}
+                {addressSaveMessage && <p role="status" className="rounded-xl bg-green-50 p-4 text-sm font-semibold text-green-800">✓ {addressSaveMessage}</p>}
 
                 <fieldset className="rounded-2xl border border-green-200 bg-green-50 p-4">
                   <legend className="px-1 text-sm font-bold">{t("cart.paymentMethod")}</legend>

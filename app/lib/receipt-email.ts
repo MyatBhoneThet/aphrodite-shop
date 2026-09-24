@@ -23,7 +23,14 @@ import { translate } from "./translations";
  * must never fail, block, or undo an order.
  */
 
-export type OrderEmailKind = "placed" | "delivered" | "attempt_failed";
+export type OrderEmailKind = "placed" | "delivered" | "attempt_failed" | "progress";
+
+export type OrderProgressEmailStage =
+  | "verified"
+  | "packed"
+  | "handed_to_courier"
+  | "out_for_delivery"
+  | "delivered";
 
 /** A failed delivery attempt, for the "we tried to deliver" email. */
 export type DeliveryAttemptInfo = {
@@ -134,7 +141,8 @@ export function orderEmailContent(
   kind: OrderEmailKind,
   receiptNumber?: string,
   env: NodeJS.ProcessEnv = process.env,
-  attempt?: DeliveryAttemptInfo
+  attempt?: DeliveryAttemptInfo,
+  progressStage?: OrderProgressEmailStage
 ): OrderEmailContent {
   const base = siteUrl(env);
   const customerName = order.profiles?.full_name || order.shipping_name || "customer";
@@ -145,6 +153,9 @@ export function orderEmailContent(
   // language a customer reads, and this message needs to be understood.
   if (kind === "attempt_failed") {
     return deliveryAttemptContent(order, base, customerName, attempt);
+  }
+  if (kind === "progress") {
+    return orderProgressContent(order, base, customerName, progressStage ?? "verified");
   }
 
   const heading = isReceipt ? "Receipt — paid" : "Order received";
@@ -276,6 +287,104 @@ export function orderEmailContent(
   return { subject, html, text };
 }
 
+const PROGRESS_STAGES: OrderProgressEmailStage[] = [
+  "verified",
+  "packed",
+  "handed_to_courier",
+  "out_for_delivery",
+  "delivered",
+];
+
+/** A concise bilingual status update for the customer's delivery timeline. */
+function orderProgressContent(
+  order: OrderRow,
+  base: string,
+  customerName: string,
+  stage: OrderProgressEmailStage
+): OrderEmailContent {
+  const englishStatus = translate("en", `tracking.${stage}`);
+  const burmeseStatus = translate("my", `tracking.${stage}`);
+  const orderUrl = `${base}/track?order=${encodeURIComponent(shortOrderCode(order.id))}`;
+  const currentIndex = PROGRESS_STAGES.indexOf(stage);
+  const items = order.order_items ?? [];
+  const deliveryRows = compactRows([
+    ["Delivery address", order.shipping_address],
+    ["Courier", order.courier_name],
+    ["Tracking / reference", order.delivery_tracking_number],
+    ["Estimated delivery", formatDate(order.estimated_delivery_at)],
+  ]);
+
+  const progressHtml = PROGRESS_STAGES.map((step, index) => {
+    const complete = index <= currentIndex;
+    return `<td style="width:20%;padding:8px 3px;text-align:center;vertical-align:top;color:${
+      complete ? "#15803d" : "#a1a1aa"
+    };font-size:11px;font-weight:${complete ? "700" : "400"}">
+      <div style="height:5px;border-radius:999px;background:${complete ? "#16a34a" : "#e4e4e7"};margin-bottom:7px"></div>
+      ${escapeHtml(translate("en", `tracking.${step}`))}
+    </td>`;
+  }).join("");
+
+  const itemText = items.length
+    ? items
+        .map(
+          (item) =>
+            `${item.products?.name ?? `Product #${item.product_id}`} × ${item.quantity}`
+        )
+        .join(", ")
+    : "Your order";
+
+  const html = `<!doctype html>
+  <html><body style="margin:0;background:#f4f4f5;font-family:Arial,sans-serif;color:#18181b">
+    <div style="max-width:640px;margin:24px auto;background:white;border-radius:20px;overflow:hidden">
+      <div style="background:#18181b;color:white;padding:24px">
+        <div style="font-size:24px;font-weight:800">APHRODITE MYANMAR</div>
+        <div style="margin-top:6px;color:#86efac;font-weight:700">Order update</div>
+      </div>
+      <div style="padding:24px">
+        <p>Hello ${escapeHtml(customerName)},</p>
+        <p>Your order status has been updated.</p>
+        <div style="margin:20px 0;padding:18px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px">
+          <div style="font-size:12px;color:#166534;text-transform:uppercase;letter-spacing:1px">Current status</div>
+          <div style="font-size:24px;font-weight:800;color:#15803d;margin-top:5px">${escapeHtml(englishStatus)}</div>
+          <div style="font-size:17px;font-weight:700;color:#166534;margin-top:5px">${escapeHtml(burmeseStatus)}</div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;table-layout:fixed"><tr>${progressHtml}</tr></table>
+        <div style="margin:20px 0;padding:16px;background:#fafafa;border-radius:14px;line-height:1.7">
+          <strong>Order:</strong> ${escapeHtml(order.id)}<br>
+          <strong>Items:</strong> ${escapeHtml(itemText)}
+        </div>
+        ${detailSectionHtml("Delivery", deliveryRows)}
+        <hr style="border:none;border-top:1px solid #e4e4e7;margin:24px 0">
+        <p style="font-weight:700">အော်ဒါအခြေအနေကို အပ်ဒိတ်လုပ်ထားပါသည်။</p>
+        <p>လက်ရှိအခြေအနေ — ${escapeHtml(burmeseStatus)}</p>
+        <a href="${escapeHtml(orderUrl)}" style="display:inline-block;margin-top:20px;padding:12px 20px;background:#dc2626;color:white;text-decoration:none;border-radius:999px;font-weight:700">Track your order</a>
+      </div>
+      ${emailFooterHtml()}
+    </div>
+  </body></html>`;
+
+  const text = [
+    "APHRODITE MYANMAR — Order update",
+    "",
+    `Hello ${customerName},`,
+    "Your order status has been updated.",
+    `Current status: ${englishStatus}`,
+    `လက်ရှိအခြေအနေ: ${burmeseStatus}`,
+    "",
+    `Order: ${order.id}`,
+    `Items: ${itemText}`,
+    ...detailSectionText("Delivery", deliveryRows),
+    "",
+    `Track your order: ${orderUrl}`,
+  ].join("\n");
+
+  return {
+    subject: `Order update: ${englishStatus} — Aphrodite Myanmar`,
+    html,
+    text,
+  };
+}
+
 /** The "we tried to deliver" email, in both languages. */
 function deliveryAttemptContent(
   order: OrderRow,
@@ -362,6 +471,7 @@ export async function sendOrderEmail(
     receiptNumber?: string;
     idempotencySuffix?: string;
     attempt?: DeliveryAttemptInfo;
+    progressStage?: OrderProgressEmailStage;
   },
   env: NodeJS.ProcessEnv = process.env
 ): Promise<ReceiptEmailResult> {
@@ -383,7 +493,8 @@ export async function sendOrderEmail(
     options.kind,
     options.receiptNumber,
     env,
-    options.attempt
+    options.attempt,
+    options.progressStage
   );
 
   return sendMail(recipient, content, {

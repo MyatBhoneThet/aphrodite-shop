@@ -25,6 +25,7 @@ import {
   filterAndSortProducts,
   type ProductFilterState,
 } from "./lib/product-filters";
+import { useDeliveryEstimate } from "./lib/useDeliveryEstimate";
 
 export default function HomePage() {
   const [search, setSearch] = useState("");
@@ -32,6 +33,7 @@ export default function HomePage() {
   // Shared with every other page, and remembered between visits.
   const { language, setLanguage, text } = useLanguage();
   const { user: currentUser, refresh: refreshUser } = useCurrentUser();
+  const deliveryEstimate = useDeliveryEstimate(Boolean(currentUser && currentUser.role !== "admin"));
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [productLoadError, setProductLoadError] = useState("");
@@ -168,6 +170,9 @@ export default function HomePage() {
   }, [currentUser]);
 
   const userRole: UserRole = currentUser?.role ?? "normal";
+  // Signed-in customers get a compact homepage preview. Full category pages
+  // keep their normal pagination and the public homepage remains unchanged.
+  const compactSignedInHomepage = Boolean(currentUser && currentUser.role !== "admin");
   const brands = useMemo(
     () =>
       Array.from(new Set(products.map((product) => product.brand))).sort(
@@ -280,10 +285,11 @@ export default function HomePage() {
             title={text("Laptops")}
             products={laptopProducts}
             userRole={userRole}
-            initialVisibleCount={3}
-            showLoadMore={false}
             viewAllHref={CATALOG_SECTION_DETAILS.Laptops.href}
             viewAllLabel={language === "en" ? "View all laptops" : "အားလုံးကြည့်ရန်"}
+            deliveryEstimate={deliveryEstimate}
+            itemsPerPage={compactSignedInHomepage ? 4 : undefined}
+            showPagination={!compactSignedInHomepage}
           />
         )}
       </div>
@@ -293,10 +299,11 @@ export default function HomePage() {
           title={text("Accessories")}
           products={accessoryProducts}
           userRole={userRole}
-          initialVisibleCount={3}
-          showLoadMore={false}
           viewAllHref={CATALOG_SECTION_DETAILS.Accessories.href}
           viewAllLabel={language === "en" ? "View all accessories" : "အားလုံးကြည့်ရန်"}
+          deliveryEstimate={deliveryEstimate}
+          itemsPerPage={compactSignedInHomepage ? 4 : undefined}
+          showPagination={!compactSignedInHomepage}
         />
       </div>
 
@@ -325,10 +332,11 @@ export default function HomePage() {
           title={text("PC Parts")}
           products={pcPartProducts}
           userRole={userRole}
-          initialVisibleCount={3}
-          showLoadMore={false}
           viewAllHref={CATALOG_SECTION_DETAILS["PC Parts"].href}
           viewAllLabel={language === "en" ? "View all PC parts" : "အားလုံးကြည့်ရန်"}
+          deliveryEstimate={deliveryEstimate}
+          itemsPerPage={compactSignedInHomepage ? 4 : undefined}
+          showPagination={!compactSignedInHomepage}
         />
       </div>
 
@@ -336,6 +344,7 @@ export default function HomePage() {
         products={recentlyViewed}
         userRole={userRole}
         onClear={clearRecentlyViewed}
+        deliveryEstimate={deliveryEstimate}
       />
 
       <section id="support" className="mx-auto max-w-7xl px-5 pb-24">

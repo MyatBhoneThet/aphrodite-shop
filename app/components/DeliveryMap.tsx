@@ -6,12 +6,6 @@ import "leaflet/dist/leaflet.css";
 
 export type MapPoint = { latitude: number; longitude: number };
 
-const towns = [
-  { name: "Yangon", latitude: 16.8409, longitude: 96.1735 },
-  { name: "Mandalay", latitude: 21.9588, longitude: 96.0891 },
-  { name: "Naypyidaw", latitude: 19.7633, longitude: 96.0785 },
-];
-
 /** Mounted only after the customer chooses to load the third-party map. */
 export default function DeliveryMap({ point, onSelect }: {
   point: MapPoint | null;
@@ -34,12 +28,13 @@ export default function DeliveryMap({ point, onSelect }: {
       if (disposed || !container.current) return;
       const start = initialPoint.current;
       const instance = L.map(container.current, {
-        center: start ? [start.latitude, start.longitude] : [21.0, 96.0],
-        zoom: start ? 17 : 6,
-        minZoom: 4,
+        center: start ? [start.latitude, start.longitude] : [16.8409, 96.1735],
+        zoom: start ? 17 : 11,
+        minZoom: 9,
         maxZoom: 19,
-        // Navigation boundary only, not a country-verification boundary.
-        maxBounds: [[8, 90], [31, 103]],
+        // Yangon-only navigation boundary. Final validation also happens on
+        // the server because this client boundary is only a UI guide.
+        maxBounds: [[15.65, 95.65], [17.85, 96.95]],
         maxBoundsViscosity: 1,
         scrollWheelZoom: false,
       });
@@ -57,7 +52,7 @@ export default function DeliveryMap({ point, onSelect }: {
         iconSize: [32, 44],
         iconAnchor: [16, 44],
       });
-      const pin = L.marker(start ? [start.latitude, start.longitude] : [21, 96], {
+      const pin = L.marker(start ? [start.latitude, start.longitude] : [16.8409, 96.1735], {
         icon,
         draggable: true,
         title: "Delivery pin — drag to your entrance",
@@ -99,16 +94,7 @@ export default function DeliveryMap({ point, onSelect }: {
 
   return (
     <div>
-      <label className="mb-3 flex flex-wrap items-center gap-2 text-sm font-semibold">
-        Start near
-        <select defaultValue="" onChange={(event) => {
-          const town = towns.find((item) => item.name === event.target.value);
-          if (town) map.current?.setView([town.latitude, town.longitude], 14);
-        }} className="rounded-lg border bg-white px-3 py-2">
-          <option value="">Choose a city (optional)</option>
-          {towns.map((town) => <option key={town.name}>{town.name}</option>)}
-        </select>
-      </label>
+      <p className="mb-3 text-sm font-semibold">Yangon delivery area</p>
       <div ref={container} role="region" aria-label="Delivery map. Click to place a pin, drag it to adjust, or use the map centre button." className="relative z-0 h-80 w-full overflow-hidden rounded-xl border bg-zinc-100" />
       <button type="button" disabled={!ready} className="mt-3 rounded-full border bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50" onClick={() => {
         const centre = map.current?.getCenter();

@@ -223,4 +223,34 @@ describe("email content", () => {
     expect(orderEmailContent(order, "delivered", "APH-1", GMAIL_ENV).html).toContain("7 days after delivery");
     expect(orderEmailContent(order, "placed", undefined, GMAIL_ENV).html).not.toContain("7 days after delivery");
   });
+
+  it("sends bilingual delivery progress with a secure tracking link", async () => {
+    const progressOrder = {
+      ...order,
+      status: "shipped",
+      courier_name: "Royal Express",
+      delivery_tracking_number: "RX-778",
+      estimated_delivery_at: "2026-09-26T08:00:00.000Z",
+    } as unknown as OrderRow;
+
+    const result = await sendOrderEmail(
+      progressOrder,
+      {
+        kind: "progress",
+        progressStage: "out_for_delivery",
+        idempotencySuffix: "out_for_delivery",
+      },
+      GMAIL_ENV
+    );
+
+    expect(result.status).toBe("sent");
+    const message = mail.sendMail.mock.calls[0][0];
+    expect(message.subject).toContain("Out for delivery");
+    expect(message.html).toContain("ပို့ဆောင်နေဆဲ");
+    expect(message.html).toContain("ASUS ExpertBook P2 × 1");
+    expect(message.html).toContain("Royal Express");
+    expect(message.html).toContain("RX-778");
+    expect(message.html).toContain("https://shop.example.com/track?order=12345678");
+    expect(message.text).toContain("Current status: Out for delivery");
+  });
 });

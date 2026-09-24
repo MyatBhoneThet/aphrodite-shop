@@ -3,8 +3,10 @@
 import { useLanguage } from "../lib/language";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
-import { isApproximatelyInMyanmar } from "../lib/delivery-country";
+import { isApproximatelyInYangon } from "../lib/delivery-country";
 import type { MapPoint } from "./DeliveryMap";
+import { estimateDelivery } from "../lib/delivery-estimate";
+import DeliveryEstimateBadge from "./DeliveryEstimateBadge";
 
 const DeliveryMap = dynamic(() => import("./DeliveryMap"), {
   ssr: false,
@@ -22,9 +24,12 @@ export type DeliveryPin = MapPoint & {
   captured_at: string;
 };
 
-export default function DeliveryPinPicker({ value, onChange, preview = false }: {
+export default function DeliveryPinPicker({ value, onChange, onPinPlaced, addressLookupStatus, showDeliveryEstimate = false, preview = false }: {
   value: DeliveryPin | null;
   onChange: (pin: DeliveryPin | null) => void;
+  onPinPlaced?: (pin: DeliveryPin) => void | Promise<void>;
+  addressLookupStatus?: string;
+  showDeliveryEstimate?: boolean;
   preview?: boolean;
 }) {
   const { text, t } = useLanguage();
@@ -42,12 +47,14 @@ export default function DeliveryPinPicker({ value, onChange, preview = false }: 
     requestVersion.current += 1;
     setLocating(false);
     onChange(null);
-    setCandidate({ ...point, accuracy_m: accuracy, captured_at: new Date().toISOString() });
+    const next = { ...point, accuracy_m: accuracy, captured_at: new Date().toISOString() };
+    setCandidate(next);
+    void onPinPlaced?.(next);
     setLatitude(point.latitude.toFixed(6));
     setLongitude(point.longitude.toFixed(6));
-    setMessage(isApproximatelyInMyanmar(point.latitude, point.longitude)
+    setMessage(isApproximatelyInYangon(point.latitude, point.longitude)
       ? text("Check that the red pin is at the recipient’s entrance, then confirm below.")
-      : text("This pin appears outside Myanmar. Choose the recipient’s Myanmar address, or use written-address verification if the map boundary is incorrect."));
+      : text("This pin appears outside Yangon Region. Choose a Yangon delivery address."));
   }
 
   function useDeviceLocation() {
@@ -59,9 +66,9 @@ export default function DeliveryPinPicker({ value, onChange, preview = false }: 
     setLocating(true);
     navigator.geolocation.getCurrentPosition((position) => {
       if (request !== requestVersion.current) return;
-      if (!isApproximatelyInMyanmar(position.coords.latitude, position.coords.longitude)) {
+      if (!isApproximatelyInYangon(position.coords.latitude, position.coords.longitude)) {
         setLocating(false);
-        setMessage(text("Your device appears outside Myanmar. Its position has not been placed on the map. Select the recipient’s Myanmar delivery address manually."));
+        setMessage(text("Your device appears outside Yangon Region. Select the recipient’s Yangon delivery address manually."));
         return;
       }
       choosePoint({ latitude: position.coords.latitude, longitude: position.coords.longitude }, position.coords.accuracy);
@@ -84,12 +91,12 @@ export default function DeliveryPinPicker({ value, onChange, preview = false }: 
     setMessage(text("Pin removed. No coordinates will be attached to this order."));
   }
 
-  const inside = candidate && isApproximatelyInMyanmar(candidate.latitude, candidate.longitude);
+  const inside = candidate && isApproximatelyInYangon(candidate.latitude, candidate.longitude);
 
   return (
     <fieldset className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-zinc-950">
       <legend className="px-1 text-sm font-bold">{text("Pin the delivery entrance")}</legend>
-      <p className="text-sm leading-6 text-zinc-600">{text("Place the pin at the recipient\u2019s address, not necessarily your current location. GPS access is optional. A pin helps the courier but does not verify identity.")}</p>
+      <p className="text-sm leading-6 text-zinc-600">{text("Place the pin at the recipient\u2019s Yangon address, not necessarily your current location. GPS access is optional. A pin helps the courier but does not verify identity.")}</p>
       {preview && <p className="mt-2 text-sm font-semibold">{text("Practice map only: nothing is saved. Confirm your actual delivery pin again at checkout.")}</p>}
       {!open ? (
         <>
@@ -100,6 +107,23 @@ export default function DeliveryPinPicker({ value, onChange, preview = false }: 
         <div className="mt-4 space-y-4">
           <button type="button" disabled={locating} onClick={useDeviceLocation} className="rounded-full border border-blue-700 bg-white px-4 py-2 text-sm font-bold text-blue-800 disabled:opacity-50">{locating ? text("Finding device location…") : text("Use my current location")}</button>
           <DeliveryMap point={candidate} onSelect={choosePoint} />
+          {candidate && <div className="rounded-xl border border-blue-200 bg-white p-3">
+            <p className="text-sm font-semibold text-blue-900">✓ Pin selected</p>
+            <p className="mt-1 text-xs leading-5">{candidate.latitude.toFixed(6)}, {candidate.longitude.toFixed(6)}. {candidate.accuracy_m == null ? text("Manually selected; accuracy is not verified.") : t("location.pinAccuracy", { meters: Math.round(candidate.accuracy_m) })}</p>
+            {addressLookupStatus && <p role="status" className="mt-2 text-xs font-semibold leading-5 text-blue-800">{addressLookupStatus}</p>}
+            {showDeliveryEstimate && <div className="mt-3">
+              <p className="text-xs font-bold text-zinc-700">Delivery estimate after this address is saved:</p>
+              <DeliveryEstimateBadge estimate={estimateDelivery(candidate.latitude, candidate.longitude, "Yangon")} compact showDestination={false} />
+            </div>}
+          </div>}
+          <button type="button" disabled={!inside || locating} onClick={() => {
+            if (candidate && inside) {
+              onChange(candidate);
+              setMessage(preview
+                ? text("Practice pin confirmed. Nothing was saved to your account.")
+                : text("Delivery pin confirmed. Review the autofilled address fields above and add your house details."));
+            }
+          }} className="w-full rounded-full bg-blue-700 px-4 py-3 text-sm font-bold text-white disabled:bg-zinc-400">{preview ? text("Confirm practice pin") : text("Confirm this delivery pin")}</button>
           <details className="rounded-xl border bg-white p-3 text-sm">
             <summary className="cursor-pointer font-semibold">{text("Enter coordinates instead")}</summary>
             <div className="mt-3 grid grid-cols-2 gap-3">
@@ -116,14 +140,7 @@ export default function DeliveryPinPicker({ value, onChange, preview = false }: 
               choosePoint({ latitude: lat, longitude: lng });
             }}>{text("Apply coordinates")}</button>
           </details>
-          {candidate && <p className="text-xs leading-5">{text("Selected:")} {candidate.latitude.toFixed(6)}, {candidate.longitude.toFixed(6)}. {candidate.accuracy_m == null ? text("Manually selected; accuracy is not verified.") : t("location.pinAccuracy", { meters: Math.round(candidate.accuracy_m) })}</p>}
           <p className="text-xs leading-5 text-zinc-600">{preview ? text("This practice pin stays in this page only.") : text("Confirming the pin gives permission to attach it to the order you place and share it with authorised store staff for delivery. It is not saved until you place the order.")}</p>
-          <button type="button" disabled={!inside || locating} onClick={() => {
-            if (candidate && inside) {
-              onChange(candidate);
-              setMessage(preview ? text("Practice pin confirmed. Nothing was saved to your account.") : text("Delivery pin confirmed. It will be attached when you place your order."));
-            }
-          }} className="w-full rounded-full bg-blue-700 px-4 py-3 text-sm font-bold text-white disabled:bg-zinc-400">{preview ? text("Confirm practice pin") : text("Confirm and share this delivery pin")}</button>
           {candidate && <button type="button" onClick={clearPin} className="rounded-full border bg-white px-4 py-2 text-sm font-semibold">{text("Remove pin")}</button>}
           {value && <p className="rounded-lg bg-green-100 p-3 text-sm font-semibold text-green-900">{text("\u2713 Pin confirmed")}</p>}
         </div>

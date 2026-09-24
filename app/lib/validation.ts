@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isApproximatelyInMyanmar, isMyanmarCountry, normalizeMyanmarRegion } from "./delivery-country";
+import { isApproximatelyInYangon, isMyanmarCountry, normalizeMyanmarRegion, normalizeYangonTownship } from "./delivery-country";
 
 const productJsonSchema = z.record(z.string(), z.unknown());
 
@@ -51,6 +51,11 @@ export const cartQuantityUpdateSchema = z.object({
   quantity: z.number().int().positive().max(9999),
 });
 
+export const pcBuildCartInputSchema = z.object({
+  product_ids: z.array(z.number().int().positive()).min(1).max(8),
+  quantity: z.number().int().positive().max(999),
+});
+
 export const wishlistInputSchema = z.object({
   product_id: z.number().int().positive().optional(),
   productId: z.number().int().positive().optional(),
@@ -84,9 +89,18 @@ export const orderInputSchema = z
     shipping_address: z.string().trim().min(5).max(1000).optional(),
     shipping_address_line1: z.string().trim().min(3).max(300).optional(),
     shipping_address_line2: z.string().trim().max(300).optional().nullable(),
-    shipping_city: z.string().trim().min(2).max(120).optional(),
-    shipping_state: z.string().trim().refine((value) => Boolean(normalizeMyanmarRegion(value)), "Select a Myanmar state or region.").transform((value) => normalizeMyanmarRegion(value)!),
-    shipping_postal_code: z.string().trim().min(2).max(20).optional(),
+    // Optional only for older clients that still send one combined
+    // `shipping_address`. The current checkout always sends a township.
+    shipping_city: z.string().trim().max(120).optional().transform((value, context) => {
+      if (!value) return value;
+      const township = normalizeYangonTownship(value);
+      if (township) return township;
+      if (value.toLowerCase() === "yangon") return "Yangon";
+      context.addIssue({ code: "custom", message: "Select a Yangon township." });
+      return z.NEVER;
+    }),
+    shipping_state: z.string().trim().refine((value) => normalizeMyanmarRegion(value) === "Yangon", "Delivery is available in Yangon only.").transform(() => "Yangon"),
+    shipping_postal_code: z.string().trim().max(20).optional(),
     shipping_country: z.string().trim().refine(isMyanmarCountry, "We currently deliver within Myanmar only.").transform(() => "Myanmar"),
     payment_method: z
       .enum(["cash_on_delivery", "bank_transfer", "mmqr"])
@@ -147,11 +161,11 @@ export const orderInputSchema = z
         message: "Choose the KBZ or AYA bank account for a bank transfer.",
       });
     }
-    if (value.delivery_location && !isApproximatelyInMyanmar(value.delivery_location.latitude, value.delivery_location.longitude)) {
+    if (value.delivery_location && !isApproximatelyInYangon(value.delivery_location.latitude, value.delivery_location.longitude)) {
       context.addIssue({
         code: "custom",
         path: ["delivery_location"],
-        message: "This pin appears outside Myanmar. Select the recipient’s Myanmar location, or remove the pin and request written-address verification.",
+        message: "This pin appears outside Yangon Region. Select the recipient’s Yangon location.",
       });
     }
     if (value.delivery_location && !value.delivery_location_consent) {
@@ -168,7 +182,6 @@ export const orderInputSchema = z
       ["shipping_address_line1", value.shipping_address_line1],
       ["shipping_city", value.shipping_city],
       ["shipping_state", value.shipping_state],
-      ["shipping_postal_code", value.shipping_postal_code],
       ["shipping_country", value.shipping_country],
     ] as const;
 

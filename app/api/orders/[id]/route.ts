@@ -6,6 +6,7 @@ import {
   getOrder,
   notifyDeliveryAttemptFailed,
   notifyOrderDelivered,
+  notifyOrderProgress,
   recordFailedDeliveryAttempt,
   patchOrderStatus,
   requestOrderAction,
@@ -15,8 +16,21 @@ import {
   updateOrderDelivery,
 } from "@/app/lib/backend";
 import { handleRouteError } from "@/app/lib/errors";
+import type { OrderProgressEmailStage } from "@/app/lib/receipt-email";
 import { readJsonBody } from "@/app/lib/request";
 import { firstIssueMessage, orderMutationSchema } from "@/app/lib/validation";
+
+const EMAILED_PROGRESS_STAGES = new Set<OrderProgressEmailStage>([
+  "verified",
+  "packed",
+  "handed_to_courier",
+  "out_for_delivery",
+  "delivered",
+]);
+
+function isEmailedProgressStage(stage: string | null | undefined): stage is OrderProgressEmailStage {
+  return Boolean(stage && EMAILED_PROGRESS_STAGES.has(stage as OrderProgressEmailStage));
+}
 
 export async function GET(
   request: NextRequest,
@@ -107,6 +121,18 @@ export async function PATCH(
     // delivered never waits on, or fails because of, the mail server.
     if ("status" in parsed.data && parsed.data.status === "delivered") {
       after(() => notifyOrderDelivered(user, id));
+    }
+
+    // Saving a customer-visible delivery milestone sends a bilingual update.
+    // This runs after the response so the admin UI remains fast even if the
+    // configured mail provider is slow or temporarily unavailable.
+    if (
+      "action" in parsed.data &&
+      parsed.data.action === "update_delivery" &&
+      isEmailedProgressStage(parsed.data.stage)
+    ) {
+      const stage = parsed.data.stage;
+      after(() => notifyOrderProgress(user, id, stage));
     }
 
     return NextResponse.json({ order });

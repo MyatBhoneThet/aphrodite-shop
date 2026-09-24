@@ -6,12 +6,25 @@ import {
   adminReturnWorkflowSchema,
   customerOrderActionSchema,
   orderInputSchema,
+  pcBuildCartInputSchema,
   productInputSchema,
   productUpdateSchema,
   registerInputSchema,
   tierInputSchema,
   wholesaleAccountUpdateSchema,
 } from "../app/lib/validation";
+
+describe("PC build cart validation", () => {
+  it("accepts 20 identical builds and rejects invalid bulk requests", () => {
+    expect(pcBuildCartInputSchema.safeParse({
+      product_ids: [1, 2, 3, 4, 5, 6, 7, 8],
+      quantity: 20,
+    }).success).toBe(true);
+    expect(pcBuildCartInputSchema.safeParse({ product_ids: [], quantity: 20 }).success).toBe(false);
+    expect(pcBuildCartInputSchema.safeParse({ product_ids: [1, 2], quantity: 0 }).success).toBe(false);
+    expect(pcBuildCartInputSchema.safeParse({ product_ids: [1, 2], quantity: 1000 }).success).toBe(false);
+  });
+});
 
 describe("tier input validation", () => {
   const valid = {

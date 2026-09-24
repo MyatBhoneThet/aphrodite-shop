@@ -5,37 +5,48 @@ import { discountPercent } from "../lib/promotions";
 import { useLanguage } from "../lib/language";
 
 /** A price and its matching regular price must always refer to one variant. */
-export default function ProductPrice({ price, regularPrice, from = false, large = false }: {
+export default function ProductPrice({ price, regularPrice, priceMax, regularPriceMax, from = false, large = false }: {
   price: number;
   regularPrice: number;
+  priceMax?: number;
+  regularPriceMax?: number;
   from?: boolean;
   large?: boolean;
 }) {
   const { t } = useLanguage();
-  const discounted = price > 0 && price < regularPrice;
+  const highestPrice = priceMax ?? price;
+  const highestRegularPrice = regularPriceMax ?? regularPrice;
+  const discounted = price > 0 && (
+    price < regularPrice || highestPrice < highestRegularPrice
+  );
   const percent = discountPercent(regularPrice, price);
+  const formattedPrice = highestPrice > price
+    ? `${formatCurrency(price)} – ${formatCurrency(highestPrice)}`
+    : formatCurrency(price);
+  const formattedRegularPrice = highestRegularPrice > regularPrice
+    ? `${formatCurrency(regularPrice)} – ${formatCurrency(highestRegularPrice)}`
+    : formatCurrency(regularPrice);
+
   return (
     <div className="@container">
       {from && <p className="mb-1 text-sm font-semibold text-zinc-500">{t("product.from")}</p>}
       {discounted ? (
-        // Sizes are em-based off this block so the badge, sale price and
-        // original price keep the same proportions in a card and on a detail page.
-        <div className={`inline-flex max-w-full flex-col items-stretch leading-none ${large ? "text-[clamp(1.25rem,8cqw,3rem)]" : "text-[clamp(1rem,8cqw,1.5rem)]"}`}>
+        <div className="inline-flex max-w-full flex-col items-start gap-1">
           {percent > 0 && (
-            <span className="mb-[0.1em] self-end rounded-full bg-[#fbdad6] px-[0.7em] py-[0.2em] text-[0.58em] font-extrabold tracking-tight text-[#ea3323]">
+            <span className="self-end rounded-full bg-red-100 px-3 py-1 text-sm font-bold text-red-600">
               -{percent}%
             </span>
           )}
-          <span className="whitespace-nowrap font-extrabold tracking-tight text-[#ea3323]">
-            {formatCurrency(price)}
+          <span className={`font-bold tracking-tight text-red-600 ${large ? "text-2xl sm:text-3xl" : "text-lg sm:text-xl"}`}>
+            {formattedPrice}
           </span>
-          <span className="mt-[0.05em] whitespace-nowrap text-[0.82em] font-bold text-[#adadad] [&>s]:decoration-[0.08em]">
-            {t("product.originalPrice")}: <s>{formatCurrency(regularPrice)}</s>
+          <span className={`${large ? "text-sm sm:text-base" : "text-xs sm:text-sm"} font-medium text-zinc-950`}>
+            {t("product.originalPrice")}: <s>{formattedRegularPrice}</s>
           </span>
         </div>
       ) : (
-        <p className={`font-bold tracking-tight text-zinc-950 ${large ? "text-3xl sm:text-4xl" : "text-2xl"}`}>
-          {formatProductPrice(price)}
+        <p className={`font-bold tracking-tight text-red-600 ${large ? "text-2xl sm:text-3xl" : "text-lg sm:text-xl"}`}>
+          {highestPrice > price ? formattedPrice : formatProductPrice(price)}
         </p>
       )}
     </div>

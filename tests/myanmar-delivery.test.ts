@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isApproximatelyInMyanmar, isMyanmarCountry, normalizeMyanmarRegion } from "../app/lib/delivery-country";
+import { isApproximatelyInMyanmar, isApproximatelyInYangon, isMyanmarCountry, normalizeMyanmarRegion, normalizeYangonTownship } from "../app/lib/delivery-country";
 import { orderInputSchema } from "../app/lib/validation";
 
 describe("Myanmar delivery checks", () => {
@@ -16,6 +16,17 @@ describe("Myanmar delivery checks", () => {
     expect(isMyanmarCountry("Thailand")).toBe(false);
     expect(normalizeMyanmarRegion("Yangon Region")).toBe("Yangon");
     expect(normalizeMyanmarRegion("Bangkok")).toBeUndefined();
+  });
+  it("limits checkout geography to Yangon and recognizes Yangon townships", () => {
+    expect(isApproximatelyInYangon(16.8661, 96.1951)).toBe(true);
+    expect(isApproximatelyInYangon(21.9588, 96.0891)).toBe(false);
+    expect(normalizeYangonTownship("Bahan Township")).toBe("Bahan");
+    expect(normalizeYangonTownship("Mandalay")).toBeUndefined();
+    expect(orderInputSchema.safeParse({
+      shipping_name: "Customer", shipping_phone: "09123456789",
+      shipping_address: "123 Test Road", shipping_country: "Myanmar",
+      shipping_state: "Mandalay", cod_confirmation: true, cod_contact_confirmation: true,
+    }).success).toBe(false);
   });
   it("does not let a legacy address bypass the country requirement", () => {
     const body = { shipping_name: "Customer", shipping_phone: "09123456789", shipping_address: "123 Test Road", cod_confirmation: true, cod_contact_confirmation: true };

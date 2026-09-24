@@ -308,7 +308,7 @@ export default function OrdersPage() {
             const awaitingRetry =
               order.status === "shipped" &&
               deliveryEvents[deliveryEvents.length - 1]?.stage === "delivery_failed";
-            return <article key={order.id} className="overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm">
+            return <article id={`order-${order.id}`} key={order.id} className="scroll-mt-6 overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4 border-b p-6"><div><p className="text-xl font-black">Order #{order.id.slice(0, 8).toUpperCase()}</p><p className="mt-1 text-sm text-zinc-500">{formatDateTime(order.created_at)}</p>{order.receipt_number && <p className="mt-1 text-xs font-semibold text-zinc-500">Receipt {order.receipt_number}</p>}</div><div className="flex flex-wrap items-center gap-2">{order.receipt_number && <Link href={`/orders/${order.id}/receipt`} className="rounded-full border px-4 py-2 text-xs font-bold hover:border-red-500 hover:text-red-600">View / print receipt</Link>}<span className={`rounded-full px-3 py-2 text-xs font-bold capitalize ${statusStyles[order.status]}`}>{order.status}</span></div></div>
               <div className="p-6">
                 {/* The one thing to do next, derived from this order rather

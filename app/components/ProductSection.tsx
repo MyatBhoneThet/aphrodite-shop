@@ -1,43 +1,63 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Product, UserRole } from "../data/products";
 import { groupProductVariants } from "../lib/product-variants";
 import { useLanguage } from "../lib/language";
 import ProductCard from "./ProductCard";
+import type { DeliveryEstimate } from "../lib/delivery-estimate";
 
-const PAGE_SIZE = 12;
+const DEFAULT_PAGE_SIZE = 8;
 
 type Props = {
   title: string;
   products: Product[];
   userRole: UserRole;
-  initialVisibleCount?: number;
-  pageSize?: number;
-  showLoadMore?: boolean;
   viewAllHref?: string;
   viewAllLabel?: string;
+  deliveryEstimate?: DeliveryEstimate | null;
+  itemsPerPage?: number;
+  showPagination?: boolean;
 };
 
 export default function ProductSection({
   title,
   products,
   userRole,
-  initialVisibleCount = PAGE_SIZE,
-  pageSize = PAGE_SIZE,
-  showLoadMore = true,
   viewAllHref,
   viewAllLabel,
+  deliveryEstimate = null,
+  itemsPerPage = DEFAULT_PAGE_SIZE,
+  showPagination = true,
 }: Props) {
-  const { t } = useLanguage();
-  const [visibleCount, setVisibleCount] = useState(initialVisibleCount);
+  const { t, language } = useLanguage();
+  const [page, setPage] = useState(1);
+  const [pageInput, setPageInput] = useState("1");
+  const sectionRef = useRef<HTMLElement>(null);
   // Versions of one model (e.g. 256 GB / 512 GB) share a single card.
   const groups = useMemo(() => groupProductVariants(products), [products]);
-  const visibleGroups = groups.slice(0, visibleCount);
+  const totalPages = Math.max(1, Math.ceil(groups.length / itemsPerPage));
+  const currentPage = Math.min(page, totalPages);
+  const visibleGroups = showPagination
+    ? groups.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+    : groups.slice(0, itemsPerPage);
+
+  function changePage(nextPage: number) {
+    const validPage = Math.min(totalPages, Math.max(1, nextPage));
+    setPage(validPage);
+    setPageInput(String(validPage));
+    sectionRef.current?.scrollIntoView({ block: "start" });
+  }
+
+  function submitPage(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const requestedPage = Number.parseInt(pageInput, 10);
+    changePage(Number.isFinite(requestedPage) ? requestedPage : currentPage);
+  }
 
   return (
-    <section className="mx-auto max-w-7xl px-5 pb-16">
+    <section ref={sectionRef} className="mx-auto max-w-7xl scroll-mt-24 px-5 pb-16">
       <div className="mb-8 flex flex-wrap items-end justify-between gap-5 border-b border-zinc-200 pb-5">
         <div>
           <h2 className="text-3xl font-black sm:text-4xl">{title}</h2>
@@ -67,7 +87,7 @@ export default function ProductSection({
       {products.length === 0 ? (
         <p className="text-center text-zinc-500">{t("section.noProducts")}</p>
       ) : (
-        <div className="grid gap-6 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {visibleGroups.map(({ product, model, options }) => (
             <ProductCard
               key={product.id}
@@ -75,21 +95,52 @@ export default function ProductSection({
               userRole={userRole}
               model={model}
               options={options}
+              deliveryEstimate={deliveryEstimate}
             />
           ))}
         </div>
       )}
 
-      {showLoadMore && visibleCount < groups.length && (
-        <div className="mt-8 text-center">
+      {showPagination && groups.length > 0 && (
+        <nav aria-label={`${title} pagination`} className="mt-8 flex flex-wrap items-center justify-end gap-3">
+          <form onSubmit={submitPage} className="mr-2 flex items-center gap-2 text-sm font-medium text-zinc-600">
+            <label htmlFor={`${title}-page`}>{language === "en" ? "Page" : "စာမျက်နှာ"}</label>
+            <input
+              id={`${title}-page`}
+              type="number"
+              min={1}
+              max={totalPages}
+              inputMode="numeric"
+              value={pageInput}
+              onChange={(event) => setPageInput(event.target.value)}
+              onBlur={() => {
+                const requestedPage = Number.parseInt(pageInput, 10);
+                changePage(Number.isFinite(requestedPage) ? requestedPage : currentPage);
+              }}
+              aria-label={language === "en" ? "Page number" : "စာမျက်နှာ နံပါတ်"}
+              className="w-16 rounded-lg border border-zinc-300 bg-white px-2 py-2 text-center font-bold text-zinc-950 outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
+            />
+            <span aria-live="polite" aria-atomic="true">
+              {language === "en" ? `of ${totalPages}` : `/ ${totalPages}`}
+            </span>
+          </form>
           <button
             type="button"
-            onClick={() => setVisibleCount((count) => count + pageSize)}
-            className="rounded-full border border-zinc-300 bg-white px-6 py-3 font-bold transition hover:border-red-500 hover:text-red-600"
+            disabled={currentPage === 1}
+            onClick={() => changePage(currentPage - 1)}
+            className="rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm font-semibold transition enabled:hover:border-red-500 enabled:hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {t("section.showMore", { count: Math.min(pageSize, groups.length - visibleCount) })}
+            {language === "en" ? "← Previous" : "← နောက်သို့"}
           </button>
-        </div>
+          <button
+            type="button"
+            disabled={currentPage === totalPages}
+            onClick={() => changePage(currentPage + 1)}
+            className="rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm font-semibold transition enabled:hover:border-red-500 enabled:hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {language === "en" ? "Next →" : "ရှေ့သို့ →"}
+          </button>
+        </nav>
       )}
     </section>
   );

@@ -20,6 +20,8 @@ import {
 import { getProductSpecifications } from "../../lib/product-specifications";
 import { useCurrentUser } from "../../lib/useCurrentUser";
 import { useLanguage } from "../../lib/language";
+import { useDeliveryEstimate } from "../../lib/useDeliveryEstimate";
+import DeliveryEstimateBadge from "../../components/DeliveryEstimateBadge";
 
 type PublicTier = { minQuantity: number; unitPrice: number };
 
@@ -50,6 +52,7 @@ export default function ProductDetailsPage() {
   const productId = Number(params.id);
 
   const { user: currentUser } = useCurrentUser();
+  const deliveryEstimate = useDeliveryEstimate(Boolean(currentUser && currentUser.role !== "admin"));
   const [product, setProduct] = useState<ProductResponse["product"] | null>(null);
   const [pricing, setPricing] = useState<Pricing | null>(null);
   const [isWholesale, setIsWholesale] = useState(false);
@@ -328,7 +331,7 @@ export default function ProductDetailsPage() {
               {product.brand}
             </p>
 
-            <h1 className="mt-3 text-4xl font-bold md:text-6xl">
+            <h1 className="mt-3 text-3xl font-bold leading-tight md:text-4xl">
               {modelName}
             </h1>
 
@@ -405,6 +408,8 @@ export default function ProductDetailsPage() {
                   {text("Wholesale pricing is available for approved business accounts. Contact the store to open one.")}
                 </p>
               )}
+
+              <DeliveryEstimateBadge estimate={deliveryEstimate} />
 
               <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-3">
                 <span className="shrink-0 text-sm font-semibold">{t("detail.quantity")}</span>
@@ -517,44 +522,29 @@ export default function ProductDetailsPage() {
               )}
             </div>
 
-            {specification && specification.rows.length > 3 ? (
-              <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {specification.rows.slice(3, 7).map((row) => (
-                  <div key={row.label} className="rounded-2xl bg-zinc-100 p-4">
-                    <p className="text-xs text-zinc-500">{text(row.label)}</p>
-                    <p className="font-bold">{row.label === "Category" || row.label === "Availability" ? text(row.value) : row.value}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="mt-8 rounded-2xl bg-zinc-100 p-5">
-                {text("Product information is being prepared. Contact support for a confirmed compatibility check before purchase.")}
-              </p>
-            )}
-
             <div className="mt-8 flex flex-wrap gap-3">
               {currentUser ? (
                 <>
                   <button onClick={() => addToCart(product)}
                     disabled={product.stock === "Out of Stock" || product.price <= 0}
-                    className="rounded-full bg-red-600 px-7 py-3 font-semibold text-white disabled:bg-zinc-400">
+                    className="rounded-lg bg-red-600 px-7 py-3 font-semibold text-white disabled:bg-zinc-400">
                     {product.price <= 0 ? t("detail.pricePending") : t("detail.addToCart")}
                   </button>
                   <button onClick={() => toggleWishlist(product)}
-                    className="rounded-full border px-7 py-3 font-semibold">
+                    className="rounded-lg border px-7 py-3 font-semibold">
                     {isWishlisted ? text("♥ Saved") : text("♡ Add to Wishlist")}
                   </button>
                 </>
               ) : (
                 <Link href="/login"
-                  className="rounded-full bg-red-600 px-7 py-3 font-semibold text-white">
+                  className="rounded-lg bg-red-600 px-7 py-3 font-semibold text-white">
                   {text("Login to purchase")}
                 </Link>
               )}
 
               <Link
                 href={`/compare?primary=${product.id}`}
-                className="rounded-full border px-7 py-3 font-semibold"
+                className="rounded-lg border px-7 py-3 font-semibold"
               >
                 {text("Compare")}
               </Link>
@@ -581,7 +571,7 @@ export default function ProductDetailsPage() {
                 {text("Only specifications relevant to this product category are shown.")}
               </p>
 
-              <div className="mt-5 overflow-hidden rounded-[2rem] border">
+              <div className="mt-5 overflow-hidden rounded-lg border">
                 {specification.rows.map((row) => (
                   <div
                     key={row.label}
@@ -622,6 +612,7 @@ export default function ProductDetailsPage() {
                   <h3 className="mt-4 font-bold">{item.name}</h3>
 
                   <div className="mt-2"><ProductPrice price={effectiveProductPrice(item)} regularPrice={item.price} /></div>
+                  <DeliveryEstimateBadge estimate={deliveryEstimate} compact />
                 </Link>
               ))}
             </div>

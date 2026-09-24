@@ -175,6 +175,8 @@ export const translations = {
   "section.count": { en: "{count} products", my: "ပစ္စည်း {count} ခု" },
   "section.countOne": { en: "1 product", my: "ပစ္စည်း ၁ ခု" },
   "section.noProducts": { en: "No products found.", my: "ပစ္စည်း မတွေ့ပါ။" },
+  "section.promotions": { en: "Promotions", my: "အထူးလျှော့ဈေး ပစ္စည်းများ" },
+  "section.regularItems": { en: "Regular items", my: "ပုံမှန်ဈေး ပစ္စည်းများ" },
   "section.showMore": { en: "Show {count} more", my: "နောက်ထပ် {count} ခု ကြည့်ရန်" },
 
   "recent.title": { en: "Recently viewed", my: "မကြာသေးမီက ကြည့်ခဲ့သည်များ" },

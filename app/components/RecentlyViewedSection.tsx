@@ -3,17 +3,20 @@
 import type { Product, UserRole } from "../data/products";
 import { useLanguage } from "../lib/language";
 import ProductCard from "./ProductCard";
+import type { DeliveryEstimate } from "../lib/delivery-estimate";
 
 type Props = {
   products: Product[];
   userRole: UserRole;
   onClear: () => void;
+  deliveryEstimate?: DeliveryEstimate | null;
 };
 
 export default function RecentlyViewedSection({
   products,
   userRole,
   onClear,
+  deliveryEstimate = null,
 }: Props) {
   const { t } = useLanguage();
   if (products.length === 0) return null;
@@ -50,6 +53,7 @@ export default function RecentlyViewedSection({
               key={product.id}
               product={product}
               userRole={userRole}
+              deliveryEstimate={deliveryEstimate}
             />
           ))}
         </div>

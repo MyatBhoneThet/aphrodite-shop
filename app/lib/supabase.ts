@@ -7,6 +7,7 @@ import { specVariantBaseKey } from "./google-sheets";
 import { forbidden, notFound, unauthorized } from "./errors";
 import { conflict, serviceUnavailable } from "./errors";
 import type { SupabaseSocialProvider } from "./oauth";
+import type { SavedAddress, SavedAddressInput } from "./address-book";
 
 export type { PriceTierRow } from "./pricing";
 
@@ -513,6 +514,70 @@ export async function listLocationShares() {
 
 export async function removeLocationShare(userId: string) {
   await supabaseRest(`customer_location_shares?user_id=eq.${encodeURIComponent(userId)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+}
+
+export async function selectCustomerAddresses(userId: string) {
+  return supabaseRest<SavedAddress[]>(
+    `customer_addresses?select=id,label,recipient_name,phone,address_line1,address_line2,township,postal_code,latitude,longitude,accuracy_m,is_default,created_at,updated_at&user_id=eq.${encodeURIComponent(userId)}&order=is_default.desc,created_at.asc`
+  );
+}
+
+export async function insertCustomerAddress(userId: string, input: SavedAddressInput) {
+  const existing = await selectCustomerAddresses(userId);
+  const makeDefault = existing.length === 0 || input.is_default;
+  if (makeDefault && existing.some((address) => address.is_default)) {
+    await supabaseRest(
+      `customer_addresses?user_id=eq.${encodeURIComponent(userId)}&is_default=eq.true`,
+      { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ is_default: false }) }
+    );
+  }
+  const rows = await supabaseRest<SavedAddress[]>("customer_addresses", {
+    method: "POST",
+    body: JSON.stringify({ ...input, user_id: userId, is_default: makeDefault }),
+  });
+  return rows[0] ?? null;
+}
+
+export async function updateCustomerAddress(userId: string, addressId: string, input: SavedAddressInput) {
+  const currentRows = await supabaseRest<SavedAddress[]>(
+    `customer_addresses?select=*&id=eq.${encodeURIComponent(addressId)}&user_id=eq.${encodeURIComponent(userId)}&limit=1`
+  );
+  const current = currentRows[0];
+  if (!current) return null;
+  const staysDefault = current.is_default || input.is_default;
+  if (staysDefault) {
+    await supabaseRest(
+      `customer_addresses?user_id=eq.${encodeURIComponent(userId)}&is_default=eq.true&id=neq.${encodeURIComponent(addressId)}`,
+      { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ is_default: false }) }
+    );
+  }
+  const rows = await supabaseRest<SavedAddress[]>(
+    `customer_addresses?id=eq.${encodeURIComponent(addressId)}&user_id=eq.${encodeURIComponent(userId)}`,
+    { method: "PATCH", body: JSON.stringify({ ...input, is_default: staysDefault, updated_at: new Date().toISOString() }) }
+  );
+  return rows[0] ?? null;
+}
+
+export async function deleteCustomerAddress(userId: string, addressId: string) {
+  const matches = await supabaseRest<SavedAddress[]>(
+    `customer_addresses?select=*&id=eq.${encodeURIComponent(addressId)}&user_id=eq.${encodeURIComponent(userId)}&limit=1`
+  );
+  const deleted = matches[0];
+  if (!deleted) return false;
+  await supabaseRest(
+    `customer_addresses?id=eq.${encodeURIComponent(addressId)}&user_id=eq.${encodeURIComponent(userId)}`,
+    { method: "DELETE", headers: { Prefer: "return=minimal" } }
+  );
+  if (deleted.is_default) {
+    const remaining = await selectCustomerAddresses(userId);
+    if (remaining[0]) {
+      await supabaseRest(
+        `customer_addresses?id=eq.${encodeURIComponent(remaining[0].id)}&user_id=eq.${encodeURIComponent(userId)}`,
+        { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ is_default: true }) }
+      );
+    }
+  }
+  return true;
 }
 
 function upstreamSignal(signal?: AbortSignal | null) {

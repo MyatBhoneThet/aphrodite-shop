@@ -112,6 +112,21 @@ a {
 .hero-float { animation: hero-float 6s ease-in-out infinite; }
 .hero-progress { transform-origin: left; animation: hero-progress 6s linear both; }
 
+@keyframes order-status-sheen {
+  0% { transform: translateX(-130%) skewX(-18deg); }
+  55%, 100% { transform: translateX(430%) skewX(-18deg); }
+}
+
+.order-status-banner::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 24%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.1), transparent);
+  animation: order-status-sheen 5.5s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

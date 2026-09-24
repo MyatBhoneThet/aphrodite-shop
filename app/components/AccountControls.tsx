@@ -44,6 +44,7 @@ export default function AccountControls({ user, wishlistCount, cartCount, onLogo
 
   const links = [
     { href: "/orders", label: t("nav.orders") },
+    ...(user.role !== "admin" ? [{ href: "/addresses", label: language === "my" ? "ကျွန်ုပ်၏လိပ်စာများ" : "My addresses" }] : []),
     { href: "/location", label: t("nav.locationSharing") },
     { href: "/wishlist", label: t("nav.wishlist") },
     { href: "/cart", label: t("nav.cart") },
@@ -64,7 +65,10 @@ export default function AccountControls({ user, wishlistCount, cartCount, onLogo
       ))}
     </div>
     <details ref={menu} className="group/account relative" onBlur={event => {
-      if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+      // Touch browsers can blur the trigger without focusing the tapped link.
+      // Outside pointer presses are handled above; only close here when focus
+      // moves to a known element outside the menu.
+      if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
     }}>
       <summary ref={trigger} className="flex h-12 cursor-pointer list-none items-center gap-2 rounded-2xl bg-zinc-950 px-2.5 text-white shadow-sm transition hover:bg-zinc-800 [&::-webkit-details-marker]:hidden sm:pr-3">
         <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/10 text-red-300"><Icon kind="user" /></span>

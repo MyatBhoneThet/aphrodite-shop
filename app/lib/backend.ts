@@ -2,7 +2,7 @@ import { activePromotion } from "./promotions";
 import { createHash, randomUUID } from "node:crypto";
 import { codReviewError } from "./cod-verification";
 import { reviewOrderDeliveryRpc } from "./supabase";
-import { isApproximatelyInMyanmar, isMyanmarCountry, normalizeMyanmarRegion } from "./delivery-country";
+import { isApproximatelyInYangon, isMyanmarCountry, normalizeMyanmarRegion, normalizeYangonTownship } from "./delivery-country";
 import type { Product } from "../data/products";
 import { isSameVariantGroup, productVariant, variantOptions } from "./product-variants";
 import {
@@ -140,7 +140,12 @@ import {
   type WishlistItemRow,
 } from "./supabase";
 import { isOverdue, queueLane, type QueueLane } from "./work-queue";
-import { makeReceiptNumber, sendOrderEmail, type ReceiptEmailResult } from "./receipt-email";
+import {
+  makeReceiptNumber,
+  sendOrderEmail,
+  type OrderProgressEmailStage,
+  type ReceiptEmailResult,
+} from "./receipt-email";
 import {
   alertBaseline,
   evaluateAlert,
@@ -979,6 +984,52 @@ export async function addCartItem(
   return getCart(user);
 }
 
+/** Adds the same quantity of every selected PC component after validating the
+ * complete build first, so a known stock problem cannot create a partial
+ * internet-cafe build in the cart. */
+export async function addPcBuildToCart(
+  user: CurrentUser,
+  productIds: number[],
+  quantity: number
+) {
+  const uniqueProductIds = [...new Set(productIds)];
+  const requestedBuilds = cleanQuantity(quantity);
+  const [products, cartRows] = await Promise.all([
+    selectProductsByIdsService(uniqueProductIds),
+    selectCart(user.id, user.accessToken),
+  ]);
+  const productById = new Map(products.map((product) => [product.id, product]));
+  const cartQuantityByProduct = new Map(
+    cartRows.map((row) => [row.product_id, row.quantity])
+  );
+
+  for (const productId of uniqueProductIds) {
+    const product = productById.get(productId);
+    if (!product) throw notFound("A selected PC component is no longer available.");
+    if (!Number.isFinite(product.price) || product.price <= 0) {
+      throw badRequest(`${product.name} is awaiting a confirmed MMK price.`);
+    }
+    const requestedQuantity = (cartQuantityByProduct.get(productId) ?? 0) + requestedBuilds;
+    const available = availableStock(product);
+    if (requestedQuantity > available) {
+      throw badRequest(
+        `Only ${available} unit(s) of ${product.name} available; ${requestedBuilds} complete PC builds cannot be added.`
+      );
+    }
+  }
+
+  await Promise.all(uniqueProductIds.map((productId) =>
+    upsertCartItem(
+      user.id,
+      productId,
+      (cartQuantityByProduct.get(productId) ?? 0) + requestedBuilds,
+      user.accessToken
+    )
+  ));
+
+  return getCart(user);
+}
+
 export async function changeCartItem(
   user: CurrentUser,
   id: string,
@@ -1177,15 +1228,16 @@ export async function createOrder(
   const shippingAddressLine1 =
     body.shipping_address_line1?.trim() || body.shipping_address?.trim() || "";
   const shippingAddressLine2 = body.shipping_address_line2?.trim() || null;
-  const shippingCity = body.shipping_city?.trim() || "";
+  const rawShippingCity = body.shipping_city?.trim() || "";
+  const shippingCity = normalizeYangonTownship(rawShippingCity) || (rawShippingCity.toLowerCase() === "yangon" ? "Yangon" : "");
   const shippingState = normalizeMyanmarRegion(body.shipping_state);
   const shippingPostalCode = body.shipping_postal_code?.trim() || "";
-  if (!isMyanmarCountry(body.shipping_country) || !shippingState) {
-    throw badRequest("We currently deliver within Myanmar only. Select a Myanmar state or region and enter the recipient’s complete address.");
+  if (!isMyanmarCountry(body.shipping_country) || shippingState !== "Yangon" || (!body.shipping_address && !shippingCity)) {
+    throw badRequest("We currently deliver in Yangon only. Select a Yangon township and enter the recipient’s complete address.");
   }
   const shippingCountry = "Myanmar";
-  if (body.delivery_location && (!body.delivery_location_consent || !isApproximatelyInMyanmar(body.delivery_location.latitude, body.delivery_location.longitude))) {
-    throw badRequest("A delivery pin needs your consent and must be in Myanmar. Remove an incorrect pin and ask staff to verify your written address.");
+  if (body.delivery_location && (!body.delivery_location_consent || !isApproximatelyInYangon(body.delivery_location.latitude, body.delivery_location.longitude))) {
+    throw badRequest("A delivery pin needs your consent and must be in Yangon Region.");
   }
   const shippingAddress =
     body.shipping_address?.trim() ||
@@ -2400,6 +2452,41 @@ export async function notifyOrderPlaced(user: CurrentUser, orderId: string) {
   } catch (error) {
     console.error("[orders] order-received email could not run", {
       order_id: orderId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Customer-facing delivery progress email, scheduled by the order route after
+ * an admin saves one of the visible tracking milestones.
+ */
+export async function notifyOrderProgress(
+  user: CurrentUser,
+  orderId: string,
+  stage: OrderProgressEmailStage
+) {
+  try {
+    const order = await selectOrderById(user, orderId);
+    if (!order || !(await wantsOrderUpdates(order.user_id))) return;
+
+    const result = await sendOrderEmail(await withCustomerContact(order), {
+      kind: "progress",
+      progressStage: stage,
+      idempotencySuffix: stage,
+    });
+
+    if (result.status === "failed") {
+      console.error("[orders] progress email failed", {
+        order_id: orderId,
+        stage,
+        error: result.error,
+      });
+    }
+  } catch (error) {
+    console.error("[orders] progress email could not run", {
+      order_id: orderId,
+      stage,
       error: error instanceof Error ? error.message : String(error),
     });
   }

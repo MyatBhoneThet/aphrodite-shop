@@ -7,6 +7,7 @@ import LanguageSwitcher from "./LanguageSwitcher";
 import AccountControls from "./AccountControls";
 import type { Product, UserRole } from "../data/products";
 import { useLanguage } from "../lib/language";
+import LastOrderStatusBar from "./LastOrderStatusBar";
 
 type CurrentUser = { email: string; role: UserRole; wholesale_status?: string };
 type Props = {
@@ -32,7 +33,7 @@ function SearchBox({ search, setSearch, suggestions }: {
     <div className="relative min-w-0">
       <label className="sr-only" htmlFor="store-search">{t("nav.search")}</label>
       <input id="store-search" value={search} onChange={(event) => setSearch(event.target.value)} autoComplete="off" placeholder={t("nav.search")} className="w-full rounded-full border border-zinc-300 bg-white px-5 py-3 pr-11 outline-none transition focus:border-red-500 focus:ring-4 focus:ring-red-50" />
-      {search && <button type="button" aria-label={t("nav.clearSearch")} onClick={() => setSearch("")} className="absolute right-4 top-3 text-zinc-400 hover:text-zinc-950">×</button>}
+      {search && <button type="button" aria-label={t("nav.clearSearch")} onClick={() => setSearch("")} className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center text-zinc-400 hover:text-zinc-950">×</button>}
       {showSuggestions && (
         <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-[70] overflow-hidden rounded-2xl border bg-white shadow-2xl">
           <p className="border-b px-4 py-2 text-xs font-bold uppercase tracking-wider text-zinc-400">{t("nav.suggestions")}</p>
@@ -91,6 +92,7 @@ export default function Navbar({ search, setSearch, searchSuggestions, language,
       </div>
       <div className="px-4 pb-3 md:hidden"><SearchBox search={search} setSearch={setSearch} suggestions={searchSuggestions} /></div>
       <nav aria-label={text("Product categories")} className="flex gap-5 overflow-x-auto [&>a]:shrink-0 border-t border-zinc-100 px-5 py-3 text-sm font-semibold 2xl:hidden"><Link href="/catalog/laptops" className="whitespace-nowrap">{text("Laptops")}</Link><Link href="/catalog/accessories" className="whitespace-nowrap">{text("Accessories")}</Link><Link href="/catalog/pc-parts" className="whitespace-nowrap">{text("PC Parts")}</Link><Link href="/find-my-laptop" className="whitespace-nowrap text-red-600">{text("Find my laptop")} →</Link><Link href="/pc-builder" className="whitespace-nowrap text-red-600">{text("Build a PC")} →</Link></nav>
+      <LastOrderStatusBar enabled={Boolean(currentUser && currentUser.role !== "admin")} />
     </header>
   );
 }

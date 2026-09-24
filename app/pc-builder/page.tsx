@@ -241,6 +241,10 @@ export default function PcBuilderPage() {
             : plans.length === 0 ? <div className="rounded-3xl bg-white p-10 text-center shadow-sm"><h3 className="text-xl font-black">{text("Not enough recognised PC parts yet")}</h3><p className="mt-2 text-sm text-zinc-500">{text("Sync or add products with categories such as CPU, Motherboard, RAM, GPU, Storage, PSU, Case, and Cooling.")}</p></div>
             : <div className="space-y-6">{plans.map((plan) => {
               const theme = tierThemes[plan.label] ?? tierThemes.Balanced;
+              const editorHref = `/pc-builder/customize?${new URLSearchParams({
+                parts: plan.parts.map((part) => part.product.id).join(","),
+                name: `${plan.label} build`,
+              }).toString()}`;
               return <article key={plan.id} className={`hero-rise overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm ring-4 ${theme.ring}`}>
                 <div className={`relative p-6 ${theme.soft}`}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -265,6 +269,14 @@ export default function PcBuilderPage() {
                 })}</ul>
 
                 {(plan.missing.length > 0 || plan.warnings.length > 0) && <div className="border-t border-amber-100 bg-amber-50 p-5 text-sm text-amber-950">{plan.missing.length > 0 && <p><b>{text("Missing catalogue categories:")}</b> {plan.missing.map(text).join("၊ ")}</p>}{plan.warnings.map((warning) => <p key={warning} className="mt-1">⚠️ {translateBuildWarning(warning)}</p>)}</div>}
+                <div className="flex justify-end border-t border-zinc-100 p-5">
+                  <Link
+                    href={editorHref}
+                    className="inline-flex items-center gap-2 rounded-xl bg-zinc-950 px-5 py-3 text-sm font-black text-white transition hover:bg-red-600"
+                  >
+                    {text("Customize & edit build")} <span aria-hidden="true">→</span>
+                  </Link>
+                </div>
               </article>;
             })}</div>}
         </div>

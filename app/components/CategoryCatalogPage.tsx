@@ -21,6 +21,8 @@ import ProductFilters from "./ProductFilters";
 import ProductSection from "./ProductSection";
 import { groupProductVariants } from "../lib/product-variants";
 import { useLanguage } from "../lib/language";
+import { activePromotion } from "../lib/promotions";
+import { useDeliveryEstimate } from "../lib/useDeliveryEstimate";
 
 type Props = {
   section: CatalogSection;
@@ -39,7 +41,19 @@ export default function CategoryCatalogPage({ section }: Props) {
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
   // Shared with every other page, and remembered between visits.
-  const { language, setLanguage } = useLanguage();
+  const { language, setLanguage, t } = useLanguage();
+  const [promotionTime, setPromotionTime] = useState(() => new Date());
+
+  useEffect(() => {
+    // Re-evaluate scheduled offers while the catalogue stays open.
+    const refresh = () => setPromotionTime(new Date());
+    const interval = window.setInterval(refresh, 30_000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
   const [filters, setFilters] = useState<ProductFilterState>({
     ...EMPTY_PRODUCT_FILTERS,
   });
@@ -48,6 +62,7 @@ export default function CategoryCatalogPage({ section }: Props) {
   const [wishlist, setWishlist] = useState<number[]>([]);
   const [cart, setCart] = useState<number[]>([]);
   const { user: currentUser, refresh: refreshUser } = useCurrentUser();
+  const deliveryEstimate = useDeliveryEstimate(Boolean(currentUser && currentUser.role !== "admin"));
 
   useEffect(() => {
     let cancelled = false;
@@ -152,9 +167,28 @@ export default function CategoryCatalogPage({ section }: Props) {
     [products, search]
   );
   const visibleProducts = useMemo(
-    () => filterAndSortProducts(searchedProducts, filters),
-    [searchedProducts, filters]
+    () => {
+      // Price filters and sorting must also refresh when an offer changes.
+      void promotionTime;
+      return filterAndSortProducts(searchedProducts, filters);
+    },
+    [searchedProducts, filters, promotionTime]
   );
+  const { promotionProducts, regularProducts } = useMemo(() => {
+    const promotionProducts: Product[] = [];
+    const regularProducts: Product[] = [];
+    for (const product of visibleProducts) {
+      const target = activePromotion(product.price, product.fullSpecs?.promotion, promotionTime)
+        ? promotionProducts
+        : regularProducts;
+      target.push(product);
+    }
+    return { promotionProducts, regularProducts };
+  }, [visibleProducts, promotionTime]);
+  const resultCount = groupProductVariants(promotionProducts).length
+    + groupProductVariants(regularProducts).length;
+  const sectionKey = `${section}-${search}-${JSON.stringify(filters)}`;
+
   const brands = useMemo(
     () =>
       Array.from(new Set(products.map((product) => product.brand))).sort(
@@ -225,7 +259,7 @@ export default function CategoryCatalogPage({ section }: Props) {
           brands={brands}
           categories={categories}
           filters={filters}
-          resultCount={groupProductVariants(visibleProducts).length}
+          resultCount={resultCount}
           onChange={setFilters}
         />
 
@@ -243,12 +277,28 @@ export default function CategoryCatalogPage({ section }: Props) {
             Loading {details.title.toLowerCase()}...
           </p>
         ) : (
-          <ProductSection
-            key={`${section}-${search}-${JSON.stringify(filters)}`}
-            title={`All ${details.title}`}
-            products={visibleProducts}
-            userRole={userRole}
-          />
+          <>
+            {promotionProducts.length > 0 && (
+              <div className="mb-12 border-y border-red-100 bg-red-50/50 pt-10">
+                <ProductSection
+                  key={`promotions-${sectionKey}`}
+                  title={t("section.promotions")}
+                  products={promotionProducts}
+                  userRole={userRole}
+                  deliveryEstimate={deliveryEstimate}
+                />
+              </div>
+            )}
+            {(regularProducts.length > 0 || promotionProducts.length === 0) && (
+              <ProductSection
+                key={`regular-${sectionKey}`}
+                title={t("section.regularItems")}
+                products={regularProducts}
+                userRole={userRole}
+                deliveryEstimate={deliveryEstimate}
+              />
+            )}
+          </>
         )}
       </div>
 

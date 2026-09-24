@@ -12,6 +12,8 @@ import ProductAlertButtons, {
 import { authHeaders } from "../lib/client-auth";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { useLanguage } from "../lib/language";
+import { useDeliveryEstimate } from "../lib/useDeliveryEstimate";
+import DeliveryEstimateBadge from "../components/DeliveryEstimateBadge";
 
 type WishlistItem = {
   id: string;
@@ -22,6 +24,7 @@ type WishlistItem = {
 export default function WishlistPage() {
   const { user, status: userStatus } = useCurrentUser();
   const { t } = useLanguage();
+  const deliveryEstimate = useDeliveryEstimate(Boolean(user && user.role !== "admin"));
   const [items, setItems] = useState<WishlistItem[]>([]);
   const [alerts, setAlerts] = useState<FollowedAlert[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -216,6 +219,7 @@ export default function WishlistPage() {
                 </Link>
 
                 <div className="mt-2"><ProductPrice price={effectiveProductPrice(item.product)} regularPrice={item.product.price} /></div>
+                <DeliveryEstimateBadge estimate={deliveryEstimate} compact />
 
                 <p
                   className={`mt-1 text-xs font-bold ${

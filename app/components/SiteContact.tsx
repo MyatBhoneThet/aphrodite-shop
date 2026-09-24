@@ -42,7 +42,7 @@ export default function SiteContact() {
   return (
     <section
       aria-labelledby="contact-heading"
-      className="mt-10 rounded-3xl border border-zinc-200 bg-white p-7 sm:p-10"
+      className="mt-10 border-t border-zinc-200 bg-white py-7 sm:py-10"
     >
       <div className="flex flex-col gap-4 border-b border-zinc-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
         <div>

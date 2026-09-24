@@ -16,7 +16,7 @@ type Props = {
 };
 
 const fieldClassName =
-  "w-full rounded-2xl border border-zinc-300 bg-white px-4 py-3 outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100";
+  "w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100";
 
 export default function ProductFilters({
   brands,
@@ -40,11 +40,12 @@ export default function ProductFilters({
       className="mx-auto max-w-7xl px-5 pb-12"
       aria-label={text("Product filters")}
     >
-      <details className="group rounded-[2rem] border border-zinc-200 bg-zinc-50 shadow-sm">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5">
-          <span>
-            <span className="font-bold">{t("filter.title")}</span>
-            <span className="ml-2 text-sm text-zinc-500">
+      <details className="group rounded-xl border border-zinc-200 bg-white">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-4 sm:px-5 [&::-webkit-details-marker]:hidden">
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-5 w-5 text-red-600"><path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="3" fill="white" /><circle cx="15" cy="17" r="3" fill="white" /></svg>
+            <span className="text-sm font-bold">{t("filter.title")}</span>
+            <span className="text-xs text-zinc-500">
               {t(resultCount === 1 ? "filter.result" : "filter.results", { count: resultCount })}
             </span>
           </span>
@@ -55,13 +56,13 @@ export default function ProductFilters({
                 {t("filter.activeCount", { count: activeCount })}
               </span>
             )}
-            <span className="text-xl transition group-open:rotate-180">⌄</span>
+            <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-5 w-5 shrink-0 text-zinc-400 transition group-open:rotate-180"><path d="m5 7 5 5 5-5" /></svg>
           </span>
         </summary>
 
-        <div className="border-t border-zinc-200 px-6 py-6">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-            <label className="text-sm font-semibold">
+        <div className="border-t border-zinc-100 px-4 py-5 sm:px-5">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="text-xs font-semibold text-zinc-600">
               {text("Minimum price (MMK)")}
               <input
                 className={`${fieldClassName} mt-2`}
@@ -74,7 +75,7 @@ export default function ProductFilters({
               />
             </label>
 
-            <label className="text-sm font-semibold">
+            <label className="text-xs font-semibold text-zinc-600">
               {text("Maximum price (MMK)")}
               <input
                 className={`${fieldClassName} mt-2`}
@@ -87,7 +88,7 @@ export default function ProductFilters({
               />
             </label>
 
-            <label className="text-sm font-semibold">
+            <label className="text-xs font-semibold text-zinc-600">
               {text("Product type")}
               <select
                 className={`${fieldClassName} mt-2`}
@@ -106,7 +107,7 @@ export default function ProductFilters({
               </select>
             </label>
 
-            <label className="text-sm font-semibold">
+            <label className="text-xs font-semibold text-zinc-600">
               {text("Category")}
               <select
                 className={`${fieldClassName} mt-2`}
@@ -122,7 +123,7 @@ export default function ProductFilters({
               </select>
             </label>
 
-            <label className="text-sm font-semibold">
+            <label className="text-xs font-semibold text-zinc-600">
               {text("Stock")}
               <select
                 className={`${fieldClassName} mt-2`}
@@ -140,7 +141,7 @@ export default function ProductFilters({
               </select>
             </label>
 
-            <label className="text-sm font-semibold">
+            <label className="text-xs font-semibold text-zinc-600">
               {text("Brand")}
               <select
                 className={`${fieldClassName} mt-2`}
@@ -156,7 +157,7 @@ export default function ProductFilters({
               </select>
             </label>
 
-            <label className="text-sm font-semibold">
+            <label className="text-xs font-semibold text-zinc-600">
               {text("Sort")}
               <select
                 className={`${fieldClassName} mt-2`}
@@ -180,7 +181,7 @@ export default function ProductFilters({
             <button
               type="button"
               onClick={() => onChange({ ...EMPTY_PRODUCT_FILTERS })}
-              className="mt-5 rounded-full border border-zinc-300 bg-white px-5 py-2 text-sm font-semibold hover:border-red-500 hover:text-red-600"
+              className="mt-5 min-h-11 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold hover:border-red-500 hover:text-red-600"
             >
               {text("Clear all filters")}
             </button>

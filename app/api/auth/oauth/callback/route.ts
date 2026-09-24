@@ -3,6 +3,7 @@ import { exchangeOAuthCode, getProfile } from "@/app/lib/supabase";
 import { checkRateLimit } from "@/app/lib/rate-limit";
 import { setSessionCookies } from "@/app/lib/session-cookies";
 import {
+  appOrigin,
   isSupabaseSocialProvider,
   OAUTH_VERIFIER_COOKIE,
   safeNextPath,
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest) {
   const rateLimit = checkRateLimit(request, "oauth");
 
   if (!rateLimit.allowed) {
-    return failure(request, "Too many sign-in attempts. Please try again in a minute.");
+    return failure("Too many sign-in attempts. Please try again in a minute.");
   }
 
   const providerError = params.get("error");
@@ -59,7 +60,6 @@ export async function GET(request: NextRequest) {
     // problem -- most often the provider not being enabled in Supabase --
     // and saying so saves the shop a long hunt.
     return failure(
-      request,
       providerError === "access_denied"
         ? `${name} sign-in was cancelled. Please try again.`
         : `${name} sign-in could not be completed. If this keeps happening, the store may not have finished setting up ${name} sign-in.`
@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
   if (!authCode || !verifier) {
     // A missing verifier means this callback did not start in this browser
     // (or took longer than the cookie's ten minutes).
-    return failure(request, "This sign-in link has expired. Please try again.");
+    return failure("This sign-in link has expired. Please try again.");
   }
 
   try {
@@ -80,7 +80,9 @@ export async function GET(request: NextRequest) {
     const profile = await getProfile(session.user.id, session.access_token);
 
     const destination = profile?.role === "admin" ? "/admin/dashboard" : next;
-    const response = NextResponse.redirect(new URL(destination, request.url));
+    // The server URL may use an internal host such as 0.0.0.0 behind a proxy.
+    // Use the same public origin as the OAuth start route.
+    const response = NextResponse.redirect(new URL(destination, appOrigin()));
 
     setSessionCookies(response, session.access_token, {
       isAdmin: profile?.role === "admin",
@@ -93,14 +95,13 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("[auth.oauth.callback] failed", { provider, error });
     return failure(
-      request,
       `Could not finish signing in with ${name}. Please try again.`
     );
   }
 }
 
-function failure(request: NextRequest, message: string) {
-  const url = new URL("/login", request.url);
+function failure(message: string) {
+  const url = new URL("/login", appOrigin());
   url.searchParams.set("error", message);
 
   const response = NextResponse.redirect(url);

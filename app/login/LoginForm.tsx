@@ -47,6 +47,7 @@ export default function LoginForm({
   const passwordWasReset = searchParams.get("reset") === "success";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showDeliveryWelcome, setShowDeliveryWelcome] = useState(false);
@@ -168,16 +169,42 @@ export default function LoginForm({
               {t("login.forgotPassword")}
             </Link>
           </div>
-          <input
-            id="login-password"
-            type="password"
-            required
-            autoComplete="current-password"
-            placeholder={t("login.passwordPlaceholder")}
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            className={authFieldClass}
-          />
+          <div className="relative">
+            <input
+              id="login-password"
+              type={showPassword ? "text" : "password"}
+              required
+              autoComplete="current-password"
+              placeholder={t("login.passwordPlaceholder")}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "login-error" : undefined}
+              className={`${authFieldClass} pr-14`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((current) => !current)}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              aria-pressed={showPassword}
+              title={showPassword ? "Hide password" : "Show password"}
+              className="absolute inset-y-0 right-2 my-auto flex h-10 w-10 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+            >
+              {showPassword ? (
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5 fill-none stroke-current" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 3l18 18" />
+                  <path d="M10.6 10.7a2 2 0 0 0 2.7 2.7" />
+                  <path d="M9.9 4.2A10.7 10.7 0 0 1 12 4c5.5 0 9 8 9 8a16.7 16.7 0 0 1-2.1 3.2" />
+                  <path d="M6.6 6.6C4.4 8.1 3 12 3 12s3.5 8 9 8a9.8 9.8 0 0 0 4.1-.9" />
+                </svg>
+              ) : (
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5 fill-none stroke-current" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
 
         <button type="submit" disabled={isSubmitting} className={authButtonClass}>
@@ -186,6 +213,7 @@ export default function LoginForm({
 
         {(error || (!redirectErrorDismissed && redirectError)) && (
           <p
+            id="login-error"
             role="alert"
             className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700"
           >
