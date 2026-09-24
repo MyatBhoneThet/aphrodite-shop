@@ -87,7 +87,7 @@ export const orderInputSchema = z
     // `shipping_address` remains accepted for older API clients. New clients
     // submit the structured COD delivery fields below.
     shipping_address: z.string().trim().min(5).max(1000).optional(),
-    shipping_address_line1: z.string().trim().min(3).max(300).optional(),
+    shipping_address_line1: z.string().trim().min(1).max(300).optional(),
     shipping_address_line2: z.string().trim().max(300).optional().nullable(),
     // Optional only for older clients that still send one combined
     // `shipping_address`. The current checkout always sends a township.
@@ -337,6 +337,16 @@ export const returnRequestInputSchema = z
     preferred_resolution: returnResolution,
     collection_method: z.enum(["courier_pickup", "store_dropoff"]),
     pickup_address: z.string().trim().max(500).optional().nullable(),
+    refund_bank_name: z.string().trim().max(120).optional().nullable(),
+    refund_account_name: z.string().trim().max(160).optional().nullable(),
+    refund_account_number: z
+      .string()
+      .trim()
+      .max(80)
+      .regex(/^[0-9A-Za-z .-]*$/, "Enter a valid bank account number.")
+      .optional()
+      .nullable(),
+    preferred_service_at: z.string().datetime({ offset: true }).optional().nullable(),
     // The customer states they filmed the parcel before opening it.
     unboxing_video_confirmed: z.boolean().default(false),
     evidence_url: z.string().trim().url().max(1000).optional().nullable(),
@@ -364,6 +374,23 @@ export const returnRequestInputSchema = z
         message:
           "Transit damage needs the unboxing video you recorded before opening the parcel.",
       });
+    }
+    if (value.preferred_resolution === "refund") {
+      if ((value.refund_bank_name ?? "").trim().length < 2) {
+        context.addIssue({ code: "custom", path: ["refund_bank_name"], message: "Enter the bank or wallet name for your refund." });
+      }
+      if ((value.refund_account_name ?? "").trim().length < 2) {
+        context.addIssue({ code: "custom", path: ["refund_account_name"], message: "Enter the account holder name for your refund." });
+      }
+      if ((value.refund_account_number ?? "").trim().length < 5) {
+        context.addIssue({ code: "custom", path: ["refund_account_number"], message: "Enter the bank account or wallet number for your refund." });
+      }
+    }
+    if (
+      (value.preferred_resolution === "replacement" || value.preferred_resolution === "repair") &&
+      !value.preferred_service_at
+    ) {
+      context.addIssue({ code: "custom", path: ["preferred_service_at"], message: "Choose your preferred replacement or repair date." });
     }
   });
 

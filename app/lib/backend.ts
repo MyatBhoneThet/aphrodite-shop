@@ -3457,6 +3457,10 @@ export async function createItemReturnRequest(
     preferred_resolution: ReturnResolution;
     collection_method: ReturnPickupMethod;
     pickup_address?: string | null;
+    refund_bank_name?: string | null;
+    refund_account_name?: string | null;
+    refund_account_number?: string | null;
+    preferred_service_at?: string | null;
     unboxing_video_confirmed: boolean;
     evidence_url?: string | null;
   }
@@ -3497,6 +3501,10 @@ export async function createItemReturnRequest(
       preferred_resolution: input.preferred_resolution,
       collection_method: input.collection_method,
       pickup_address: input.pickup_address ?? null,
+      refund_bank_name: input.refund_bank_name ?? null,
+      refund_account_name: input.refund_account_name ?? null,
+      refund_account_number: input.refund_account_number ?? null,
+      preferred_service_at: input.preferred_service_at ?? null,
       unboxing_video_confirmed: input.unboxing_video_confirmed,
     });
   } catch (error) {
@@ -3855,11 +3863,10 @@ export async function decideReturnRequest(
  */
 type RefundStage = "collected" | "inspected" | "refund_approved" | "completed";
 
-const RETURN_STAGE_ORDER: Record<RefundStage, string> = {
+const RETURN_STAGE_ORDER: Record<Exclude<RefundStage, "completed">, string> = {
   collected: "approved",
   inspected: "collected",
   refund_approved: "inspected",
-  completed: "refund_approved",
 };
 
 export async function advanceItemReturn(
@@ -3878,9 +3885,20 @@ export async function advanceItemReturn(
   const existing = await selectReturnRequestById(requestId);
   if (!existing) throw notFound("Return request not found.");
 
-  if (existing.status !== RETURN_STAGE_ORDER[input.stage]) {
+  const resolution = existing.resolution_granted ?? existing.preferred_resolution;
+  const requiredPrevious = input.stage === "completed"
+    ? resolution === "refund" ? "refund_approved" : "inspected"
+    : RETURN_STAGE_ORDER[input.stage];
+  const validPrevious = input.stage === "completed" && resolution !== "refund"
+    ? existing.status === "inspected" || existing.status === "refund_approved"
+    : existing.status === requiredPrevious;
+
+  if (input.stage === "refund_approved" && resolution !== "refund") {
+    throw conflict("Only a refund request can be marked refund approved.");
+  }
+  if (!validPrevious) {
     throw conflict(
-      `This return must be ${RETURN_STAGE_ORDER[input.stage]} before it can be marked ${input.stage}.`
+      `This return must be ${requiredPrevious} before it can be marked ${input.stage}.`
     );
   }
 
@@ -3889,7 +3907,7 @@ export async function advanceItemReturn(
   // reference is required rather than merely encouraged.
   const reference = (input.refund_reference ?? existing.refund_reference ?? "").trim();
 
-  if (input.stage === "completed" && !reference) {
+  if (input.stage === "completed" && resolution === "refund" && !reference) {
     throw badRequest(
       "Enter the bank, wallet or cash payment reference before marking the refund as sent."
     );
@@ -3910,7 +3928,7 @@ export async function advanceItemReturn(
           refund_method: input.refund_method ?? existing.refund_method ?? null,
         }
       : {}),
-    ...(input.stage === "completed"
+    ...(input.stage === "completed" && resolution === "refund"
       ? {
           refund_sent_at: now,
           refund_reference: reference,

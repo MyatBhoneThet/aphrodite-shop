@@ -122,6 +122,7 @@ const validInput = {
   reason_code: "defective" as const,
   description: "The left button does not click at all.",
   preferred_resolution: "replacement" as const,
+  preferred_service_at: "2026-09-18T03:30:00.000Z",
   collection_method: "store_dropoff" as const,
   unboxing_video_confirmed: true,
 };
@@ -274,6 +275,42 @@ describe("administrator decisions", () => {
     expect(updateReturnRequestService).toHaveBeenCalledWith(
       "request-1",
       expect.objectContaining({ status: "collected" })
+    );
+  });
+
+  it("requires a payment reference before completing a refund", async () => {
+    vi.mocked(selectReturnRequestById).mockResolvedValue(request({
+      status: "refund_approved",
+      preferred_resolution: "refund",
+      resolution_granted: "refund",
+    }));
+
+    await expect(
+      advanceItemReturn(user("admin"), "request-1", { stage: "completed" })
+    ).rejects.toMatchObject({ status: 400 });
+
+    await advanceItemReturn(user("admin"), "request-1", {
+      stage: "completed",
+      refund_reference: "BANK-123",
+      refund_method: "bank_transfer",
+    });
+    expect(updateReturnRequestService).toHaveBeenCalledWith(
+      "request-1",
+      expect.objectContaining({ status: "completed", refund_reference: "BANK-123" })
+    );
+  });
+
+  it("completes a replacement after inspection without asking for a payment reference", async () => {
+    vi.mocked(selectReturnRequestById).mockResolvedValue(request({
+      status: "inspected",
+      preferred_resolution: "replacement",
+      resolution_granted: "replacement",
+    }));
+
+    await advanceItemReturn(user("admin"), "request-1", { stage: "completed" });
+    expect(updateReturnRequestService).toHaveBeenCalledWith(
+      "request-1",
+      expect.objectContaining({ status: "completed" })
     );
   });
 });

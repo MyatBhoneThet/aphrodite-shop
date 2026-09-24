@@ -27,12 +27,13 @@ const themes: Record<HomeAdTheme, { background: string; glow: string; accent: st
 
 export default function HeroSlider({ language }: { language: "en" | "my" }) {
   const [index, setIndex] = useState(0);
+  const [slides, setSlides] = useState<HomeAd[]>(homeAds);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(true);
   const [failedImages, setFailedImages] = useState<string[]>([]);
-  const count = homeAds.length;
-  const active = homeAds[index % Math.max(1, count)];
+  const count = slides.length;
+  const active = slides[index % Math.max(1, count)];
   const playing = count > 1 && !hovered && !focused && !reducedMotion;
 
   useEffect(() => {
@@ -41,6 +42,33 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
     update();
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/home-ads", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const data = await response.json() as {
+          ads?: { id: string; title: string; alt_text: string; image_url: string; href: string }[];
+        };
+        if (cancelled || !data.ads?.length) return;
+        const customSlides: HomeAd[] = data.ads.map((ad) => ({
+          id: `custom-${ad.id}`,
+          eyebrow: "Aphrodite Myanmar",
+          title: ad.title,
+          description: "",
+          href: ad.href,
+          button: "View offer",
+          theme: "crimson",
+          image: ad.image_url,
+          imageAlt: ad.alt_text,
+        }));
+        setSlides([...customSlides, ...homeAds]);
+        setIndex(0);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -68,7 +96,7 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
         <div className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(to_right,rgba(255,255,255,.04)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,.04)_1px,transparent_1px)] bg-[size:48px_48px] [mask-image:radial-gradient(ellipse_at_70%_40%,black,transparent_75%)]" />
 
         <div className="grid">
-        {homeAds.map((ad, position) => {
+        {slides.map((ad, position) => {
           const active = ad;
           const title = text(ad.title, ad.titleMy);
           const theme = themes[ad.theme];
@@ -78,13 +106,20 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
             role="group" aria-roledescription="slide" aria-label={`${position + 1} of ${count}: ${title}`}>
 
           {active.image && !failedImages.includes(active.image) ? (
-            <Link href={active.href} className="block aspect-[8/3] bg-zinc-950">
-              {/* Uploaded advertisements must remain fully visible, without cropping their text. */}
+            <Link
+              href={active.href}
+              className="block h-full min-h-[22rem] overflow-hidden md:min-h-[24rem]"
+            >
+              {/* Fill the same canvas as the designed slides, including beneath the controls. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={active.image} alt={active.imageAlt ?? title} className="h-full w-full object-contain" onError={() => failed(active.image!)} />
+              <img src={active.image} alt={active.imageAlt ?? title} className="h-full w-full object-cover" onError={() => failed(active.image!)} />
             </Link>
           ) : (
-            <div className="grid h-full min-h-[22rem] items-center gap-6 px-7 py-10 md:min-h-[24rem] md:grid-cols-[1.05fr_.95fr] md:px-12">
+            <div
+              className="relative grid h-full min-h-[22rem] items-center gap-6 bg-cover bg-center px-7 pb-20 pt-10 md:min-h-[24rem] md:grid-cols-[1.05fr_.95fr] md:px-12"
+              style={active.backgroundImage ? { backgroundImage: `url(${active.backgroundImage})` } : undefined}
+            >
+              {active.backgroundImage && <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-black/75 via-black/35 to-transparent md:from-black/55 md:via-black/10" aria-hidden="true" />}
               <div className="hero-rise relative z-10 max-w-xl">
                 <p className={`inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] ring-1 ring-white/15 backdrop-blur ${theme.accent}`}>
                   <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />{text(active.eyebrow, active.eyebrowMy)}
@@ -98,9 +133,9 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
                   <Link href={active.href} className={`rounded-full px-6 py-3 text-sm font-bold shadow-lg shadow-black/30 transition ${theme.button}`}>{text(active.button, active.buttonMy)} →</Link>
                 </div>
               </div>
-              <div className="relative mx-auto hidden h-72 w-full max-w-md md:block" aria-hidden="true">
+              {!active.backgroundImage && <div className="relative mx-auto hidden h-72 w-full max-w-md md:block" aria-hidden="true">
                 <SlideVisual ad={active} photos={photos} onFail={failed} />
-              </div>
+              </div>}
             </div>
           )}
         </div>
@@ -108,13 +143,16 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
         ;})}
         </div>
 
-        {count > 1 && <div className="relative flex items-center justify-between gap-3 border-t border-white/10 bg-black/25 px-4 py-2 backdrop-blur">
+        {count > 1 && <div
+          className="pointer-events-none z-20 flex items-center justify-between gap-3 bg-transparent px-4"
+          style={{ position: "absolute", insetInline: 0, bottom: "0.25rem" }}
+        >
           <div className="flex gap-1">
-            <button type="button" onClick={() => move(-1)} aria-label="Previous advertisement" className="h-10 w-10 rounded-full transition hover:bg-white/15">←</button>
-            <button type="button" onClick={() => move(1)} aria-label="Next advertisement" className="h-10 w-10 rounded-full transition hover:bg-white/15">→</button>
+            <button type="button" onClick={() => move(-1)} aria-label="Previous advertisement" className="pointer-events-auto h-10 w-10 rounded-full drop-shadow-[0_1px_2px_rgba(0,0,0,.9)] transition hover:bg-black/20">←</button>
+            <button type="button" onClick={() => move(1)} aria-label="Next advertisement" className="pointer-events-auto h-10 w-10 rounded-full drop-shadow-[0_1px_2px_rgba(0,0,0,.9)] transition hover:bg-black/20">→</button>
           </div>
-          <div className="flex gap-2" aria-label="Choose advertisement">
-            {homeAds.map((ad, position) => (
+          <div className="pointer-events-auto flex gap-2" aria-label="Choose advertisement">
+            {slides.map((ad, position) => (
               <button type="button" key={ad.id} aria-label={`Show slide ${position + 1}: ${ad.title}`} aria-pressed={position === index}
                 onClick={() => setIndex(position)} className="flex h-10 items-center">
                 <span className={`relative h-1.5 overflow-hidden rounded-full bg-white/25 transition-all ${position === index ? "w-12" : "w-5"}`}>

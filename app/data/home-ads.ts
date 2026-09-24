@@ -18,6 +18,8 @@ export type HomeAd = {
   photos?: { src: string; alt: string }[];
   /** Built-in illustration when a slide has no product photos. */
   illustration?: "desk" | "pc";
+  /** Decorative full-slide artwork behind the real, localised HTML copy. */
+  backgroundImage?: string;
   /** Put your own 1600 x 600 banner in public/ads and enter /ads/filename.webp.
    *  A banner replaces the whole designed slide. */
   image?: string;
@@ -30,6 +32,21 @@ const photo = (file: string) =>
 // No discount or price is claimed by these store-navigation slides. Add a real
 // offer only when it is approved and available.
 export const homeAds: HomeAd[] = [
+  {
+    id: "mid-year-clearance",
+    eyebrow: "Mid-year clearance sale",
+    eyebrowMy: "နှစ်လယ် အထူးရှင်းလင်းရောင်းချမှု",
+    title: "Save up to MMK 1,500,000 on selected laptops.",
+    titleMy: "ရွေးချယ်ထားသော Laptop များအတွက် MMK ၁,၅၀၀,၀၀၀ အထိ သက်သာခွင့်",
+    description: "Explore the eligible laptops and check the current product price before ordering.",
+    descriptionMy: "ပါဝင်သော Laptop များနှင့် လက်ရှိစျေးနှုန်းကို ကြည့်ရှုပါ။",
+    href: "/catalog/laptops",
+    button: "Shop the sale",
+    buttonMy: "အထူးစျေးဖြင့် ဝယ်ယူရန်",
+    theme: "midnight",
+    image: "/ads/mid-year-clearance.jpg",
+    imageAlt: "Aphrodite Myanmar mid-year clearance sale with selected gaming laptops and discounts up to MMK 1,500,000",
+  },
   {
     id: "laptops",
     eyebrow: "Business laptops",
@@ -78,5 +95,20 @@ export const homeAds: HomeAd[] = [
     highlights: ["CPU", "GPU", "Memory", "Storage"],
     theme: "violet",
     illustration: "pc",
+  },
+  {
+    id: "aphrodite-myanmar-tech",
+    eyebrow: "Aphrodite Myanmar",
+    eyebrowMy: "APHRODITE MYANMAR",
+    title: "Technology selected for you.",
+    titleMy: "သင့်အတွက် အကောင်းဆုံး နည်းပညာ",
+    description: "Laptops, PC parts and accessories for work, study and play.",
+    descriptionMy: "အလုပ်၊ ပညာရေးနှင့် ဖျော်ဖြေရေးအတွက် Laptop၊ PC Parts နှင့် Accessories များ",
+    href: "/catalog/laptops",
+    button: "Explore now",
+    buttonMy: "အခုပဲ လေ့လာကြည့်ပါ",
+    highlights: ["Laptop", "PC Parts", "Accessories"],
+    theme: "crimson",
+    backgroundImage: "/ads/aphrodite-myanmar-tech.png",
   },
 ];

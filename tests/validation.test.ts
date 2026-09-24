@@ -11,6 +11,7 @@ import {
   productInputSchema,
   productUpdateSchema,
   registerInputSchema,
+  returnRequestInputSchema,
   tierInputSchema,
   wholesaleAccountUpdateSchema,
 } from "../app/lib/validation";
@@ -277,5 +278,37 @@ describe("order lifecycle validation", () => {
       pickup_method: "courier_pickup",
       pickup_address: "",
     }).success).toBe(false);
+  });
+});
+
+describe("return payout and service date validation", () => {
+  const base = {
+    order_id: "3f9d8e60-1111-4111-8111-000000000000",
+    order_item_id: "4f9d8e60-1111-4111-8111-000000000000",
+    quantity: 1,
+    reason_code: "defective",
+    description: "The product does not turn on at all.",
+    collection_method: "store_dropoff",
+    unboxing_video_confirmed: false,
+  };
+
+  it("requires payout account details for a refund", () => {
+    expect(returnRequestInputSchema.safeParse({ ...base, preferred_resolution: "refund" }).success).toBe(false);
+    expect(returnRequestInputSchema.safeParse({
+      ...base,
+      preferred_resolution: "refund",
+      refund_bank_name: "KBZ",
+      refund_account_name: "Customer Name",
+      refund_account_number: "123456789",
+    }).success).toBe(true);
+  });
+
+  it("requires a preferred date for replacement or repair", () => {
+    expect(returnRequestInputSchema.safeParse({ ...base, preferred_resolution: "repair" }).success).toBe(false);
+    expect(returnRequestInputSchema.safeParse({
+      ...base,
+      preferred_resolution: "replacement",
+      preferred_service_at: "2026-09-30T03:30:00.000Z",
+    }).success).toBe(true);
   });
 });

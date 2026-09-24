@@ -95,10 +95,10 @@ export default function DeliveryLocationWelcome() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-zinc-50 px-5 py-10 text-zinc-950">
-      <section aria-labelledby="delivery-welcome-title" className="w-full max-w-lg rounded-3xl border border-zinc-200 bg-white p-7 shadow-sm sm:p-10">
+    <main className="flex min-h-screen min-h-[100svh] items-center justify-center bg-zinc-50 px-4 py-6 text-zinc-950 sm:px-5 sm:py-10">
+      <section aria-labelledby="delivery-welcome-title" className="w-full max-w-lg rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-8 lg:p-10">
         <p className="text-sm font-bold uppercase tracking-widest text-red-600">Aphrodite Myanmar</p>
-        <h1 id="delivery-welcome-title" className="mt-4 text-3xl font-bold">Where are we delivering?</h1>
+        <h1 id="delivery-welcome-title" className="mt-4 text-2xl font-bold sm:text-3xl">Where are we delivering?</h1>
 
         <p className="mt-4 leading-7 text-zinc-600">
           We deliver within Myanmar only. Allowing location does two things: it checks whether your device appears to be in Myanmar, and it shares that one position with authorised store administrators so they can review your orders.

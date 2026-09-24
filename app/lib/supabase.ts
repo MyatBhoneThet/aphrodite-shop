@@ -66,6 +66,22 @@ export type ProductRow = {
   full_specs: Product["fullSpecs"];
 };
 
+export type HomepageAdRow = {
+  id: string;
+  title: string;
+  alt_text: string;
+  image_url: string;
+  storage_path: string;
+  href: string;
+  width: number | null;
+  height: number | null;
+  is_active: boolean;
+  sort_order: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type PriceListRow = {
   id: string;
   name: string;
@@ -210,6 +226,10 @@ export type ReturnRequestRow = {
   resolution_granted: ReturnResolution | null;
   collection_method: ReturnPickupMethod;
   pickup_address: string | null;
+  refund_bank_name?: string | null;
+  refund_account_name?: string | null;
+  refund_account_number?: string | null;
+  preferred_service_at?: string | null;
   status: ReturnRequestStatus;
   unboxing_video_confirmed: boolean;
   admin_decision_note: string | null;
@@ -775,6 +795,146 @@ export async function createPaymentSlipSignedUrl(path: string) {
 }
 
 const PRODUCT_PHOTO_BUCKET = "product-photos";
+
+const HOMEPAGE_AD_BUCKET = "homepage-ads";
+const HOMEPAGE_AD_MANIFEST = "config/homepage-ads.json";
+
+async function ensureHomepageAdBucket() {
+  const { url, serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
+  const headers = { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` };
+  const existing = await fetch(`${url}/storage/v1/bucket/${HOMEPAGE_AD_BUCKET}`, {
+    headers, cache: "no-store", signal: upstreamSignal(),
+  });
+  if (existing.ok) return;
+  // Supabase Storage versions differ here: a missing bucket may be 400 or 404.
+  if (existing.status !== 400 && existing.status !== 404) throw new Error(await readError(existing));
+  const created = await fetch(`${url}/storage/v1/bucket`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: HOMEPAGE_AD_BUCKET,
+      name: HOMEPAGE_AD_BUCKET,
+      public: true,
+      file_size_limit: 8 * 1024 * 1024,
+      allowed_mime_types: ["image/jpeg", "image/png", "image/webp", "application/json"],
+    }),
+    cache: "no-store",
+    signal: upstreamSignal(),
+  });
+  if (!created.ok && created.status !== 409) throw new Error(await readError(created));
+}
+
+async function readHomepageAdManifest() {
+  await ensureHomepageAdBucket();
+  const { url } = requireSupabaseConfig({ requireServiceRole: true });
+  const response = await fetch(
+    `${url}/storage/v1/object/public/${HOMEPAGE_AD_BUCKET}/${encodeStoragePath(HOMEPAGE_AD_MANIFEST)}?v=${Date.now()}`,
+    { cache: "no-store", signal: upstreamSignal() }
+  );
+  // Storage returns 400 "Object not found" on some deployments and 404 on others.
+  if (response.status === 400 || response.status === 404) return [] as HomepageAdRow[];
+  if (!response.ok) throw new Error(await readError(response));
+  const value = await response.json();
+  return Array.isArray(value) ? value as HomepageAdRow[] : [];
+}
+
+async function writeHomepageAdManifest(ads: HomepageAdRow[]) {
+  await ensureHomepageAdBucket();
+  const { url, serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
+  const response = await fetch(
+    `${url}/storage/v1/object/${HOMEPAGE_AD_BUCKET}/${encodeStoragePath(HOMEPAGE_AD_MANIFEST)}`,
+    {
+      method: "POST",
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+        "x-upsert": "true",
+      },
+      body: JSON.stringify(ads),
+      cache: "no-store",
+      signal: upstreamSignal(),
+    }
+  );
+  if (!response.ok) throw new Error(await readError(response));
+}
+
+export async function uploadHomepageAdObject(
+  path: string,
+  bytes: ArrayBuffer,
+  contentType: string
+) {
+  await ensureHomepageAdBucket();
+  const { url, serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
+  const encoded = encodeStoragePath(path);
+  const response = await fetch(
+    `${url}/storage/v1/object/${HOMEPAGE_AD_BUCKET}/${encoded}`,
+    {
+      method: "POST",
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": contentType,
+        "Cache-Control": "max-age=31536000",
+        "x-upsert": "false",
+      },
+      body: bytes,
+      cache: "no-store",
+      signal: upstreamSignal(),
+    }
+  );
+
+  if (!response.ok) throw new Error(await readError(response));
+  return `${url}/storage/v1/object/public/${HOMEPAGE_AD_BUCKET}/${encoded}`;
+}
+
+export async function deleteHomepageAdObject(path: string) {
+  const { url, serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
+  const response = await fetch(`${url}/storage/v1/object/${HOMEPAGE_AD_BUCKET}/${encodeStoragePath(path)}`, {
+    method: "DELETE",
+    headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+    cache: "no-store",
+    signal: upstreamSignal(),
+  });
+  if (!response.ok && response.status !== 404) throw new Error(await readError(response));
+}
+
+export async function selectHomepageAds(includeInactive = false) {
+  const ads = await readHomepageAdManifest();
+  return ads
+    .filter((ad) => includeInactive || ad.is_active)
+    .sort((left, right) => left.sort_order - right.sort_order || right.created_at.localeCompare(left.created_at));
+}
+
+export async function insertHomepageAd(fields: Omit<HomepageAdRow, "id" | "created_at" | "updated_at">) {
+  const ads = await readHomepageAdManifest();
+  const now = new Date().toISOString();
+  const ad: HomepageAdRow = { ...fields, id: globalThis.crypto.randomUUID(), created_at: now, updated_at: now };
+  await writeHomepageAdManifest([...ads, ad]);
+  return ad;
+}
+
+export async function updateHomepageAd(
+  id: string,
+  fields: Partial<Pick<HomepageAdRow, "title" | "alt_text" | "href" | "is_active" | "sort_order">>
+) {
+  const ads = await readHomepageAdManifest();
+  const index = ads.findIndex((ad) => ad.id === id);
+  if (index < 0) return null;
+  const updated = { ...ads[index], ...fields, updated_at: new Date().toISOString() };
+  ads[index] = updated;
+  await writeHomepageAdManifest(ads);
+  return updated;
+}
+
+export async function deleteHomepageAd(id: string) {
+  const ads = await readHomepageAdManifest();
+  const deleted = ads.find((ad) => ad.id === id) ?? null;
+  if (!deleted) return null;
+  await writeHomepageAdManifest(ads.filter((ad) => ad.id !== id));
+  return deleted;
+}
 
 // Mirrors uploadReturnEvidenceObject, but this bucket is public, so the caller
 // gets a permanent URL back instead of having to mint a short-lived signed one.
@@ -2766,6 +2926,10 @@ export async function insertReturnRequest(fields: {
   preferred_resolution: ReturnResolution;
   collection_method: ReturnPickupMethod;
   pickup_address?: string | null;
+  refund_bank_name?: string | null;
+  refund_account_name?: string | null;
+  refund_account_number?: string | null;
+  preferred_service_at?: string | null;
   unboxing_video_confirmed: boolean;
 }) {
   const rows = await supabaseRest<ReturnRequestRow[]>("return_requests", {
@@ -2773,6 +2937,10 @@ export async function insertReturnRequest(fields: {
     body: JSON.stringify({
       ...fields,
       pickup_address: fields.pickup_address ?? null,
+      refund_bank_name: fields.refund_bank_name ?? null,
+      refund_account_name: fields.refund_account_name ?? null,
+      refund_account_number: fields.refund_account_number ?? null,
+      preferred_service_at: fields.preferred_service_at ?? null,
     }),
   });
   return rows[0];

@@ -4,9 +4,11 @@
 
 export const ADMIN_SESSION_COOKIE = "aphrodite_admin_session";
 
-// Supabase access tokens are short-lived (~1hr); the cookie should not
-// outlive the token it carries.
-export const ADMIN_SESSION_MAX_AGE_SECONDS = 60 * 60;
+// Sign-in lasts 5 days, then the person is logged out automatically. The
+// cookie carries the Supabase access token, so the Supabase project's JWT
+// expiry must be set to the same 432000 seconds (Dashboard > Project Settings >
+// JWT Keys / Auth); otherwise the token dies first and this cookie is moot.
+export const ADMIN_SESSION_MAX_AGE_SECONDS = 5 * 24 * 60 * 60;
 
 export function parseCookieHeader(header: string | null, name: string) {
   if (!header) return undefined;

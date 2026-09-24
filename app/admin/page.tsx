@@ -31,6 +31,7 @@ import CustomerLocationsPanel from "./CustomerLocationsPanel";
 import { orderTracking, trackingSteps } from "../lib/order-tracking";
 import { orderNextStep, nextStepLabels } from "../lib/next-step";
 import CodDeliveryForm from "./CodDeliveryForm";
+import AdsPanel from "./AdsPanel";
 
 type OrderStatus =
   | "pending"
@@ -378,7 +379,7 @@ export default function AdminPage() {
       : "forbidden";
 
   const [activePanel, setActivePanel] = useState<
-    "dashboard" | "products" | "orders" | "queue" | "locations" | "support" | "wholesale" | "pricing" | "sync"
+    "dashboard" | "products" | "orders" | "queue" | "locations" | "support" | "ads" | "wholesale" | "pricing" | "sync"
   >("dashboard");
 
   const [products, setProducts] = useState<Product[]>([]);
@@ -419,6 +420,7 @@ export default function AdminPage() {
         // Old deep links to the separate Help Cases panel still land somewhere.
         panel === "cases" ||
         panel === "support" ||
+        panel === "ads" ||
         panel === "wholesale" ||
         panel === "pricing" ||
         panel === "sync"
@@ -1124,6 +1126,12 @@ export default function AdminPage() {
           />
           <p className="px-3 pb-2 pt-3 text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500">{a("Business tools")}</p>
           <SidebarButton
+            active={activePanel === "ads"}
+            icon="🖼️"
+            label={a("Homepage Ads")}
+            onClick={() => setActivePanel("ads")}
+          />
+          <SidebarButton
             active={activePanel === "wholesale"}
             icon="🏢"
             label={t("admin.wholesale")}
@@ -1190,6 +1198,7 @@ export default function AdminPage() {
                 ["dashboard", "admin.overview"], ["products", "admin.products"],
                 ["orders", "admin.purchases"], ["queue", "admin.queue"],
                 ["locations", "admin.locations"], ["support", "admin.liveChat"],
+                ["ads", "admin.homepageAds"],
                 ["wholesale", "admin.wholesale"], ["pricing", "admin.priceLists"],
                 ["sync", "admin.sheetSync"],
               ] as const).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
@@ -1537,6 +1546,8 @@ export default function AdminPage() {
           {activePanel === "locations" && <CustomerLocationsPanel />}
 
           {activePanel === "support" && <SupportPanel />}
+
+          {activePanel === "ads" && <AdsPanel />}
 
           {activePanel === "wholesale" && <WholesalePanel />}
 

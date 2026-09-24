@@ -56,23 +56,24 @@ const PHOTO_TYPES = "image/jpeg,image/png,image/webp";
 const VIDEO_TYPES = "video/mp4,video/quicktime,video/webm";
 
 /**
- * Three steps: pick the item, describe the problem with evidence, then choose
- * the outcome. Only the chosen line is returned, so one faulty accessory never
- * drags the rest of the order with it.
+ * Three steps: pick one or more items, describe the problem with evidence,
+ * then choose the outcome. Each selected line becomes its own auditable return
+ * request, while the customer completes the shared details only once.
  */
 export default function ReturnWizard({
   order,
+  unavailableItemIds = [],
   onSubmitted,
 }: {
   order: WizardOrder;
+  unavailableItemIds?: string[];
   onSubmitted: () => void;
 }) {
   const { language, t } = useLanguage();
-  const items = order.order_items ?? [];
+  const items = (order.order_items ?? []).filter((item) => !unavailableItemIds.includes(item.id));
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [itemId, setItemId] = useState(items[0]?.id ?? "");
-  const [quantity, setQuantity] = useState(1);
+  const [selectedQuantities, setSelectedQuantities] = useState<Record<string, number>>({});
   const [reasonCode, setReasonCode] = useState<ReasonCode>("defective");
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -81,10 +82,14 @@ export default function ReturnWizard({
   const [resolution, setResolution] = useState<Resolution>("replacement");
   const [collection, setCollection] = useState<Collection>("courier_pickup");
   const [pickupAddress, setPickupAddress] = useState(order.shipping_address ?? "");
+  const [refundBankName, setRefundBankName] = useState("");
+  const [refundAccountName, setRefundAccountName] = useState("");
+  const [refundAccountNumber, setRefundAccountNumber] = useState("");
+  const [preferredServiceDate, setPreferredServiceDate] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
 
-  const selectedItem = items.find((item) => item.id === itemId) ?? null;
+  const selectedItems = items.filter((item) => selectedQuantities[item.id] > 0);
   const deadline = order.delivered_at
     ? new Date(new Date(order.delivered_at).getTime() + 7 * 24 * 60 * 60 * 1000)
     : null;
@@ -98,7 +103,7 @@ export default function ReturnWizard({
     setError("");
 
     if (step === 1) {
-      if (!selectedItem) {
+      if (selectedItems.length === 0) {
         setError(t("return.step1Help"));
         return;
       }
@@ -120,10 +125,22 @@ export default function ReturnWizard({
   }
 
   async function submit() {
-    if (!selectedItem || isSending) return;
+    if (selectedItems.length === 0 || isSending) return;
 
     if (collection === "courier_pickup" && pickupAddress.trim().length < 5) {
       setError(t("return.pickupAddress"));
+      return;
+    }
+    if (resolution === "refund" && (
+      refundBankName.trim().length < 2 ||
+      refundAccountName.trim().length < 2 ||
+      refundAccountNumber.trim().length < 5
+    )) {
+      setError(t("return.refundAccountRequired"));
+      return;
+    }
+    if (resolution !== "refund" && !preferredServiceDate) {
+      setError(t("return.serviceDateRequired"));
       return;
     }
 
@@ -131,56 +148,67 @@ export default function ReturnWizard({
     setError("");
 
     try {
-      const response = await fetch("/api/returns", {
-        method: "POST",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          order_id: order.id,
-          order_item_id: selectedItem.id,
-          quantity,
-          reason_code: reasonCode,
-          description: description.trim(),
-          preferred_resolution: resolution,
-          collection_method: collection,
-          pickup_address:
-            collection === "courier_pickup" ? pickupAddress.trim() : null,
-          unboxing_video_confirmed: videoConfirmed,
-          evidence_url: evidenceUrl.trim() || null,
-        }),
-      });
-      const data = (await response.json().catch(() => null)) as
-        | { request?: { id: string }; error?: string }
-        | null;
+      const requestIds: string[] = [];
+      for (const selectedItem of selectedItems) {
+        const response = await fetch("/api/returns", {
+          method: "POST",
+          headers: { ...authHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({
+            order_id: order.id,
+            order_item_id: selectedItem.id,
+            quantity: selectedQuantities[selectedItem.id],
+            reason_code: reasonCode,
+            description: description.trim(),
+            preferred_resolution: resolution,
+            collection_method: collection,
+            pickup_address: collection === "courier_pickup" ? pickupAddress.trim() : null,
+            unboxing_video_confirmed: videoConfirmed,
+            evidence_url: evidenceUrl.trim() || null,
+            refund_bank_name: resolution === "refund" ? refundBankName.trim() : null,
+            refund_account_name: resolution === "refund" ? refundAccountName.trim() : null,
+            refund_account_number: resolution === "refund" ? refundAccountNumber.trim() : null,
+            preferred_service_at: resolution === "refund"
+              ? null
+              : new Date(preferredServiceDate).toISOString(),
+          }),
+        });
+        const data = (await response.json().catch(() => null)) as
+          | { request?: { id: string }; error?: string }
+          | null;
 
-      if (!response.ok || !data?.request) {
-        throw new Error(data?.error ?? "Unable to send your return request.");
+        if (!response.ok || !data?.request) {
+          throw new Error(data?.error ?? "Unable to send your return request.");
+        }
+        requestIds.push(data.request.id);
       }
 
       // Files go up one at a time against the saved request, so a rejected
       // file never loses the request the customer already filled in.
-      for (const file of files) {
-        const upload = new FormData();
-        upload.set("file", file);
-        upload.set(
-          "evidence_kind",
-          file.type.startsWith("video/")
-            ? "unboxing_video"
-            : reasonCode === "damaged_in_transit"
-              ? "shipping_damage_photo"
-              : "product_photo"
-        );
+      for (const requestId of requestIds) {
+        for (const file of files) {
+          const upload = new FormData();
+          upload.set("file", file);
+          upload.set(
+            "evidence_kind",
+            file.type.startsWith("video/")
+              ? "unboxing_video"
+              : reasonCode === "damaged_in_transit"
+                ? "shipping_damage_photo"
+                : "product_photo"
+          );
 
-        const uploaded = await fetch(`/api/returns/${data.request.id}/evidence`, {
-          method: "POST",
-          headers: authHeaders(),
-          body: upload,
-        });
+          const uploaded = await fetch(`/api/returns/${requestId}/evidence`, {
+            method: "POST",
+            headers: authHeaders(),
+            body: upload,
+          });
 
-        if (!uploaded.ok) {
-          const uploadError = (await uploaded.json().catch(() => null)) as
-            | { error?: string }
-            | null;
-          throw new Error(uploadError?.error ?? "Unable to upload your evidence.");
+          if (!uploaded.ok) {
+            const uploadError = (await uploaded.json().catch(() => null)) as
+              | { error?: string }
+              | null;
+            throw new Error(uploadError?.error ?? "Unable to upload your evidence.");
+          }
         }
       }
 
@@ -222,20 +250,21 @@ export default function ReturnWizard({
           <p className="text-xs leading-5 text-zinc-600">{t("return.step1Help")}</p>
           <div className="mt-3 space-y-2">
             {items.map((item) => (
-              <label
+              <div
                 key={item.id}
                 className={`flex cursor-pointer items-center gap-3 rounded-xl border bg-white p-3 text-sm ${
-                  itemId === item.id ? "border-red-500" : "border-zinc-200"
+                  selectedQuantities[item.id] ? "border-red-500" : "border-zinc-200"
                 }`}
               >
                 <input
-                  type="radio"
-                  name="return-item"
-                  checked={itemId === item.id}
-                  onChange={() => {
-                    setItemId(item.id);
-                    setQuantity(1);
-                  }}
+                  type="checkbox"
+                  checked={Boolean(selectedQuantities[item.id])}
+                  onChange={(event) => setSelectedQuantities((current) => {
+                    const next = { ...current };
+                    if (event.target.checked) next[item.id] = 1;
+                    else delete next[item.id];
+                    return next;
+                  })}
                 />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-semibold">
@@ -245,30 +274,26 @@ export default function ReturnWizard({
                     × {item.quantity} · {formatCurrency(item.unit_price)}
                   </span>
                 </span>
-              </label>
+                {selectedQuantities[item.id] && item.quantity > 1 && (
+                  <label className="flex shrink-0 items-center gap-2 text-xs font-semibold">
+                    {t("return.quantity")}
+                    <input
+                      type="number"
+                      min={1}
+                      max={item.quantity}
+                      value={selectedQuantities[item.id]}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => setSelectedQuantities((current) => ({
+                        ...current,
+                        [item.id]: Math.min(Math.max(1, Number(event.target.value) || 1), item.quantity),
+                      }))}
+                      className="w-20 rounded-lg border px-2 py-1.5 font-normal"
+                    />
+                  </label>
+                )}
+              </div>
             ))}
           </div>
-
-          {selectedItem && selectedItem.quantity > 1 && (
-            <label className="mt-3 block text-sm font-semibold">
-              {t("return.quantity")}
-              <input
-                type="number"
-                min={1}
-                max={selectedItem.quantity}
-                value={quantity}
-                onChange={(event) =>
-                  setQuantity(
-                    Math.min(
-                      Math.max(1, Number(event.target.value) || 1),
-                      selectedItem.quantity
-                    )
-                  )
-                }
-                className="mt-2 w-full rounded-xl border px-4 py-3 font-normal outline-none focus:border-red-500"
-              />
-            </label>
-          )}
         </div>
       )}
 
@@ -302,20 +327,23 @@ export default function ReturnWizard({
           </label>
 
           <div className="rounded-xl bg-white p-4">
-            <p className="text-sm font-semibold">{t("return.evidence")}</p>
-            <p className="mt-1 text-xs leading-5 text-zinc-600">
+            <p className="text-sm font-bold text-red-600">{t("return.evidence")}</p>
+            <p className="mt-1 text-xs font-semibold leading-5 text-red-600">
               {t("return.evidenceHelp")}
             </p>
             <p className="mt-2 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">
               {t("return.videoRule")}
             </p>
-            <input
-              type="file"
-              multiple
-              accept={`${PHOTO_TYPES},${VIDEO_TYPES}`}
-              onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
-              className="mt-3 block w-full rounded-xl border bg-white px-4 py-3 text-sm"
-            />
+            <label className="mt-3 block text-sm font-bold text-red-600">
+              {t("return.uploadEvidence")}
+              <input
+                type="file"
+                multiple
+                accept={`${PHOTO_TYPES},${VIDEO_TYPES}`}
+                onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
+                className="mt-2 block w-full rounded-xl border border-red-300 bg-white px-4 py-3 text-sm text-zinc-900"
+              />
+            </label>
             <p className="mt-2 text-xs text-zinc-500">{t("return.fileLimit")}</p>
 
             <label className="mt-3 block text-sm font-semibold">
@@ -342,6 +370,7 @@ export default function ReturnWizard({
               </span>
             </label>
           </div>
+
         </div>
       )}
 
@@ -370,6 +399,19 @@ export default function ReturnWizard({
               {t("return.resolutionHelp")}
             </p>
           </div>
+
+          {resolution === "refund" ? (
+            <div className="grid gap-3 rounded-xl border border-red-200 bg-white p-4 md:grid-cols-3">
+              <label className="text-sm font-semibold">{t("return.bankName")}<input value={refundBankName} onChange={(event) => setRefundBankName(event.target.value)} maxLength={120} className="mt-2 w-full rounded-xl border px-3 py-2 font-normal" /></label>
+              <label className="text-sm font-semibold">{t("return.accountName")}<input value={refundAccountName} onChange={(event) => setRefundAccountName(event.target.value)} maxLength={160} className="mt-2 w-full rounded-xl border px-3 py-2 font-normal" /></label>
+              <label className="text-sm font-semibold">{t("return.accountNumber")}<input value={refundAccountNumber} onChange={(event) => setRefundAccountNumber(event.target.value)} maxLength={80} inputMode="numeric" autoComplete="off" className="mt-2 w-full rounded-xl border px-3 py-2 font-normal" /></label>
+            </div>
+          ) : (
+            <label className="block text-sm font-semibold">
+              {resolution === "replacement" ? t("return.replacementDate") : t("return.repairDate")}
+              <input type="datetime-local" value={preferredServiceDate} onChange={(event) => setPreferredServiceDate(event.target.value)} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal" />
+            </label>
+          )}
 
           <div>
             <p className="text-sm font-semibold">{t("return.collection")}</p>

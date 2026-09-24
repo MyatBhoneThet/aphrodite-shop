@@ -73,6 +73,10 @@ type ReturnRequest = {
   resolution_granted: "replacement" | "refund" | "repair" | null;
   collection_method: string;
   pickup_address: string | null;
+  refund_bank_name?: string | null;
+  refund_account_name?: string | null;
+  refund_account_number?: string | null;
+  preferred_service_at?: string | null;
   status: string;
   unboxing_video_confirmed: boolean;
   admin_decision_note: string | null;
@@ -162,7 +166,7 @@ export default function QueuePanel() {
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
   const [planDrafts, setPlanDrafts] = useState<
-    Record<string, { date: string; amount: string; reason: string }>
+    Record<string, { date: string; amount: string; reason: string; method: "cash" | "bank_transfer" | "mobile_wallet" | "store_credit"; reference: string }>
   >({});
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -421,6 +425,12 @@ export default function QueuePanel() {
     stage: "collected" | "inspected" | "refund_approved" | "completed"
   ) {
     const draft = planDrafts[requestId];
+    const request = requests.find((candidate) => candidate.id === requestId);
+    const resolution = request?.resolution_granted ?? request?.preferred_resolution;
+    if (stage === "completed" && resolution === "refund" && !draft?.reference.trim()) {
+      setError("Enter the transfer or payment reference before marking the money sent.");
+      return;
+    }
     setBusyRequestId(requestId);
     setError("");
 
@@ -434,6 +444,8 @@ export default function QueuePanel() {
           // Authorising the refund is where the agreed amount is recorded.
           refund_amount:
             stage === "refund_approved" && draft?.amount ? Number(draft.amount) : null,
+          refund_method: draft?.method ?? (request?.refund_bank_name ? "bank_transfer" : null),
+          refund_reference: stage === "completed" ? draft?.reference.trim() || null : null,
         }),
       });
 
@@ -488,6 +500,23 @@ export default function QueuePanel() {
     });
   }
 
+  function updatePlanDraft(
+    requestId: string,
+    update: Partial<{ date: string; amount: string; reason: string; method: "cash" | "bank_transfer" | "mobile_wallet" | "store_credit"; reference: string }>
+  ) {
+    setPlanDrafts((current) => ({
+      ...current,
+      [requestId]: {
+        date: current[requestId]?.date ?? "",
+        amount: current[requestId]?.amount ?? "",
+        reason: current[requestId]?.reason ?? "",
+        method: current[requestId]?.method ?? "bank_transfer",
+        reference: current[requestId]?.reference ?? "",
+        ...update,
+      },
+    }));
+  }
+
   function renderRequest(request: ReturnRequest) {
     const isBusy = busyRequestId === request.id;
     const decided = [
@@ -518,8 +547,16 @@ export default function QueuePanel() {
 
         <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-700">{request.description}</p>
 
-        {/* Exactly what the customer sees on their own orders page. */}
-        <RefundTracker request={request} />
+        {(request.resolution_granted ?? request.preferred_resolution) === "refund" ? (
+          <RefundTracker request={request} />
+        ) : (
+          <div className="mt-3 rounded-2xl border p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">
+              {a((request.resolution_granted ?? request.preferred_resolution) === "repair" ? "Repair progress" : "Replacement progress")}
+            </p>
+            <p className="mt-2 text-lg font-black capitalize">{humanize(request.status)}</p>
+          </div>
+        )}
 
         <p className="mt-2 text-xs font-semibold">
           {request.unboxing_video_confirmed ? (
@@ -531,6 +568,19 @@ export default function QueuePanel() {
 
         {request.pickup_address && (
           <p className="mt-1 text-xs text-zinc-500">{a("Pickup:")} {request.pickup_address}</p>
+        )}
+
+        {request.preferred_resolution === "refund" && request.refund_account_number && (
+          <div className="mt-2 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-950">
+            <p className="font-bold">{a("Customer refund account")}</p>
+            <p className="mt-1">{request.refund_bank_name} · {request.refund_account_name}</p>
+            <p className="mt-1 font-mono font-bold">{request.refund_account_number}</p>
+          </div>
+        )}
+        {request.preferred_resolution !== "refund" && request.preferred_service_at && (
+          <p className="mt-2 rounded-xl bg-blue-50 p-3 text-xs font-semibold text-blue-900">
+            {a("Customer preferred date:")} {formatDateTime(request.preferred_service_at)}
+          </p>
         )}
 
         {(request.return_evidence ?? []).length > 0 && (
@@ -628,7 +678,7 @@ export default function QueuePanel() {
                     >
                        {a("Mark inspected")} </button>
                   )}
-                  {request.status === "inspected" && (
+                  {request.status === "inspected" && (request.resolution_granted ?? request.preferred_resolution) === "refund" && (
                     <button
                       type="button"
                       disabled={isBusy}
@@ -638,14 +688,24 @@ export default function QueuePanel() {
                       {t("refund.approveRefund")}
                     </button>
                   )}
-                  {request.status === "refund_approved" && (
+                  {request.status === "inspected" && (request.resolution_granted ?? request.preferred_resolution) !== "refund" && (
                     <button
                       type="button"
                       disabled={isBusy}
                       onClick={() => advance(request.id, "completed")}
-                      className="rounded-full bg-zinc-900 px-4 py-2 text-xs font-bold text-white disabled:opacity-50"
+                      className="rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-50"
                     >
-                      {t("refund.markSent")}
+                      {a((request.resolution_granted ?? request.preferred_resolution) === "repair" ? "Mark repair completed" : "Mark replacement completed")}
+                    </button>
+                  )}
+                  {request.status === "refund_approved" && (request.resolution_granted ?? request.preferred_resolution) !== "refund" && (
+                    <button
+                      type="button"
+                      disabled={isBusy}
+                      onClick={() => advance(request.id, "completed")}
+                      className="rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-50"
+                    >
+                      {a((request.resolution_granted ?? request.preferred_resolution) === "repair" ? "Mark repair completed" : "Mark replacement completed")}
                     </button>
                   )}
                 </div>
@@ -658,16 +718,7 @@ export default function QueuePanel() {
                     <input
                       type="datetime-local"
                       value={planDrafts[request.id]?.date ?? ""}
-                      onChange={(event) =>
-                        setPlanDrafts((current) => ({
-                          ...current,
-                          [request.id]: {
-                            date: event.target.value,
-                            amount: current[request.id]?.amount ?? "",
-                            reason: current[request.id]?.reason ?? "",
-                          },
-                        }))
-                      }
+                      onChange={(event) => updatePlanDraft(request.id, { date: event.target.value })}
                       className="mt-1 w-full rounded-lg border px-2 py-1.5 text-xs font-normal"
                     />
                   </label>
@@ -677,16 +728,7 @@ export default function QueuePanel() {
                       type="number"
                       min={0}
                       value={planDrafts[request.id]?.amount ?? ""}
-                      onChange={(event) =>
-                        setPlanDrafts((current) => ({
-                          ...current,
-                          [request.id]: {
-                            date: current[request.id]?.date ?? "",
-                            amount: event.target.value,
-                            reason: current[request.id]?.reason ?? "",
-                          },
-                        }))
-                      }
+                      onChange={(event) => updatePlanDraft(request.id, { amount: event.target.value })}
                       className="mt-1 w-full rounded-lg border px-2 py-1.5 text-xs font-normal"
                     />
                   </label>
@@ -695,20 +737,37 @@ export default function QueuePanel() {
                     <input
                       value={planDrafts[request.id]?.reason ?? ""}
                       maxLength={500}
-                      onChange={(event) =>
-                        setPlanDrafts((current) => ({
-                          ...current,
-                          [request.id]: {
-                            date: current[request.id]?.date ?? "",
-                            amount: current[request.id]?.amount ?? "",
-                            reason: event.target.value,
-                          },
-                        }))
-                      }
+                      onChange={(event) => updatePlanDraft(request.id, { reason: event.target.value })}
                       className="mt-1 w-full rounded-lg border px-2 py-1.5 text-xs font-normal"
                     />
                   </label>
                 </div>
+
+                {(request.resolution_granted ?? request.preferred_resolution) === "refund" && request.status === "refund_approved" && (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <label className="text-xs font-semibold">
+                      {a("Refund method")}
+                      <select value={planDrafts[request.id]?.method ?? "bank_transfer"} onChange={(event) => updatePlanDraft(request.id, { method: event.target.value as "cash" | "bank_transfer" | "mobile_wallet" | "store_credit" })} className="mt-1 w-full rounded-lg border bg-white px-2 py-1.5 text-xs font-normal">
+                        <option value="bank_transfer">{a("Bank transfer")}</option>
+                        <option value="mobile_wallet">{a("Mobile wallet")}</option>
+                        <option value="cash">{a("Cash")}</option>
+                        <option value="store_credit">{a("Store credit")}</option>
+                      </select>
+                    </label>
+                    <label className="text-xs font-semibold">
+                      {a("Transfer / payment reference")}
+                      <input value={planDrafts[request.id]?.reference ?? ""} onChange={(event) => updatePlanDraft(request.id, { reference: event.target.value })} maxLength={200} placeholder={a("Required before Money sent")} className="mt-1 w-full rounded-lg border px-2 py-1.5 text-xs font-normal" />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={isBusy || !(planDrafts[request.id]?.reference ?? "").trim()}
+                      onClick={() => advance(request.id, "completed")}
+                      className="mt-1 rounded-full bg-zinc-900 px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40 sm:col-span-2 sm:justify-self-start"
+                    >
+                      {t("refund.markSent")}
+                    </button>
+                  </div>
+                )}
 
                 <button
                   type="button"

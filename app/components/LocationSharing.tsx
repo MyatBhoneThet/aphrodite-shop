@@ -89,7 +89,8 @@ export default function LocationSharing({ expanded = false }: { expanded?: boole
 
   if (status === "checking" || user?.role === "admin") return null;
   if (!user) return expanded ? <p className="rounded-2xl bg-zinc-50 p-6"><Link href="/login" className="font-semibold text-red-700 underline">{text("Sign in")}</Link> {text("to share your location with the store.")}</p> : null;
-  if (!expanded && (!open || pathname.startsWith("/admin") || ["/login", "/register", "/location"].includes(pathname))) return null;
+  const standaloneLocationFlow = pathname === "/delivery-area" || pathname.startsWith("/delivery-area/");
+  if (!expanded && (!open || pathname.startsWith("/admin") || standaloneLocationFlow || ["/login", "/register", "/location"].includes(pathname))) return null;
 
   const visibleLocation = locationOwner === user.id ? location : null;
 

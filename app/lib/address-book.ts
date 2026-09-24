@@ -22,7 +22,7 @@ export const savedAddressInputSchema = z.object({
   label: z.string().trim().min(1, "Give this address a label, such as Home or Office.").max(40),
   recipient_name: z.string().trim().min(2, "Recipient name is required.").max(200),
   phone: z.string().trim().min(7).max(30).regex(/^[0-9+\-()\s]+$/, "Enter a valid phone number."),
-  address_line1: z.string().trim().min(2, "Enter the house number or building details.").max(300),
+  address_line1: z.string().trim().min(1, "Enter the house number or building details.").max(300),
   address_line2: z.string().trim().max(300).optional().nullable(),
   township: z.string().trim().transform((value, context) => {
     const township = normalizeYangonTownship(value);
