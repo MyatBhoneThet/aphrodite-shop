@@ -25,6 +25,9 @@ export const nextStepKeys = [
   "on_the_way",
   "delivered_window",
   "delivered_done",
+  "refund_details",
+  "refund_pending",
+  "refund_sent",
   "cancelled",
   "returned",
 ] as const;
@@ -48,6 +51,9 @@ export const nextStepLabels: Record<NextStepKey, string> = {
   on_the_way: "Your order is on the way",
   delivered_window: "Delivered — you can still return an item",
   delivered_done: "Delivered and closed",
+  refund_details: "Add your refund bank information",
+  refund_pending: "Your refund is being prepared",
+  refund_sent: "Your refund has been sent",
   cancelled: "This order was cancelled",
   returned: "This order was returned",
 };
@@ -61,6 +67,7 @@ export type NextStepOrder = {
   payment_amount_received?: number | null;
   payment_slips?: { id: string }[];
   delivered_at?: string | null;
+  cancellation_refund_status?: string | null;
 };
 
 export type NextStep = {
@@ -97,7 +104,18 @@ export function orderNextStep(order: NextStepOrder, now = Date.now()): NextStep 
     label: nextStepLabels[key],
   });
 
-  if (order.status === "cancelled") return step("cancelled", "stopped");
+  if (order.status === "cancelled") {
+    if (order.cancellation_refund_status === "details_required") {
+      return step("refund_details", "action", total);
+    }
+    if (order.cancellation_refund_status === "pending") {
+      return step("refund_pending", "waiting", total);
+    }
+    if (order.cancellation_refund_status === "sent") {
+      return step("refund_sent", "done", total);
+    }
+    return step("cancelled", "stopped");
+  }
   if (order.status === "returned") return step("returned", "stopped");
 
   // A payment that needs fixing comes before anything about delivery.

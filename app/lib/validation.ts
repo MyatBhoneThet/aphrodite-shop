@@ -494,6 +494,26 @@ export const adminOrderCancellationSchema = z.object({
   admin_note: z.string().trim().max(500).optional().nullable(),
 });
 
+export const cancellationRefundDetailsSchema = z.object({
+  action: z.literal("submit_cancellation_refund_details"),
+  bank_name: z.string().trim().min(2, "Enter the bank or wallet name.").max(120),
+  account_name: z.string().trim().min(2, "Enter the account holder name.").max(160),
+  account_number: z
+    .string()
+    .trim()
+    .min(5, "Enter the bank account or wallet number.")
+    .max(120)
+    .regex(/^[0-9A-Za-z+ .()/-]+$/, "Enter a valid bank account or wallet number."),
+});
+
+export const completeCancellationRefundSchema = z.object({
+  action: z.literal("complete_cancellation_refund"),
+  refund_method: z.enum(["bank_transfer", "mobile_wallet"]),
+  refund_reference: z.string().trim().min(3, "Enter the transfer reference.").max(200),
+  refund_amount: z.number().int().positive(),
+  admin_note: z.string().trim().max(500).optional().nullable(),
+});
+
 const optionalAdminText = z.string().trim().max(500).optional().nullable();
 
 /** Admin decision on an uploaded transfer slip. */
@@ -665,6 +685,8 @@ export const orderMutationSchema = z.union([
   adminDeliveryProgressSchema,
   adminDeliveryAttemptSchema,
   adminPaymentVerificationSchema,
+  cancellationRefundDetailsSchema,
+  completeCancellationRefundSchema,
 ]);
 
 // Instant-help assistant. Shorter cap than live support: these go to an

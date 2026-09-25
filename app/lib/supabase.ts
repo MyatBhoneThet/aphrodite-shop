@@ -147,6 +147,11 @@ export type ReturnReasonCode =
 
 export type ReturnPickupMethod = "courier_pickup" | "store_dropoff";
 export type RefundMethod = "cash" | "bank_transfer" | "mobile_wallet" | "store_credit";
+export type CancellationRefundStatus =
+  | "none"
+  | "details_required"
+  | "pending"
+  | "sent";
 export type CodVerificationStatus =
   | "pending"
   | "phone_verified"
@@ -348,6 +353,11 @@ export type OrderRow = {
   refund_reference?: string | null;
   refund_amount?: number | null;
   refund_completed_at?: string | null;
+  cancellation_refund_status?: CancellationRefundStatus;
+  cancellation_refund_bank_name?: string | null;
+  cancellation_refund_account_name?: string | null;
+  cancellation_refund_account_number?: string | null;
+  cancellation_refund_details_submitted_at?: string | null;
   confirmed_at?: string | null;
   delivered_at?: string | null;
   receipt_number?: string | null;
@@ -3055,6 +3065,15 @@ export async function updateOrderPaymentService(
     payment_correction_reason?: PaymentCorrectionReason | null;
     payment_correction_requested_at?: string | null;
     payment_status?: OrderRow["payment_status"];
+    cancellation_refund_status?: CancellationRefundStatus;
+    cancellation_refund_bank_name?: string | null;
+    cancellation_refund_account_name?: string | null;
+    cancellation_refund_account_number?: string | null;
+    cancellation_refund_details_submitted_at?: string | null;
+    refund_method?: RefundMethod | null;
+    refund_reference?: string | null;
+    refund_amount?: number | null;
+    refund_completed_at?: string | null;
   }
 ) {
   const rows = await supabaseRest<OrderRow[]>(
@@ -3472,6 +3491,18 @@ export async function selectProfileByIdService(userId: string) {
   );
 
   return rows[0] ?? null;
+}
+
+/** Batch profile lookup for admin order screens when the RLS embed is null. */
+export async function selectProfilesByIdsService(userIds: string[]) {
+  const ids = [...new Set(userIds.filter(Boolean))];
+  if (ids.length === 0) return [];
+
+  return supabaseRest<Profile[]>(
+    `profiles?select=id,email,full_name,role,phone&id=in.(${ids
+      .map((id) => encodeURIComponent(id))
+      .join(",")})`
+  );
 }
 
 export async function updateProfileWholesaleService(

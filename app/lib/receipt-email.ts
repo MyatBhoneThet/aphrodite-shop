@@ -23,7 +23,13 @@ import { translate } from "./translations";
  * must never fail, block, or undo an order.
  */
 
-export type OrderEmailKind = "placed" | "delivered" | "attempt_failed" | "progress";
+export type OrderEmailKind =
+  | "placed"
+  | "delivered"
+  | "attempt_failed"
+  | "progress"
+  | "cancelled"
+  | "cancellation_refund_sent";
 
 export type OrderProgressEmailStage =
   | "verified"
@@ -135,6 +141,143 @@ function detailSectionText(title: string, rows: [string, string][]) {
 
 export type OrderEmailContent = MailContent;
 
+const CANCELLATION_REASON_LABELS: Record<string, string> = {
+  out_of_stock: "One or more items are out of stock",
+  pricing_error: "A product price could not be honoured",
+  customer_request: "Cancelled at the customer's request",
+  other: "The store could not complete this order",
+};
+
+function orderCancellationContent(
+  order: OrderRow,
+  base: string,
+  customerName: string
+): OrderEmailContent {
+  const items = order.order_items ?? [];
+  const reason =
+    order.cancellation_reason?.trim() ||
+    CANCELLATION_REASON_LABELS[order.cancellation_reason_code ?? ""] ||
+    "The store could not complete this order.";
+  const itemText = items.length
+    ? items
+        .map((item) => `${item.products?.name ?? `Product #${item.product_id}`} × ${item.quantity}`)
+        .join(", ")
+    : "Your order";
+  const orderUrl = `${base}/orders`;
+  const paymentMessage =
+    order.cancellation_refund_status === "details_required"
+      ? "Your advance payment was confirmed. Please open this order and provide the bank or wallet account where we should return the money."
+      : order.payment_status === "unpaid"
+      ? "No payment was collected for this order. You do not need to pay anything."
+      : "If you already paid, our team will contact you and arrange the refund using your saved payment details.";
+  const burmesePayment =
+    order.cancellation_refund_status === "details_required"
+      ? "သင့်ကြိုတင်ငွေပေးချေမှုကို အတည်ပြုပြီးပါပြီ။ ငွေပြန်လည်လက်ခံလိုသော ဘဏ် သို့မဟုတ် ပိုက်ဆံအိတ်အကောင့်ကို ဤအော်ဒါတွင် ဖြည့်ပေးပါ။"
+      : order.payment_status === "unpaid"
+      ? "ဤအော်ဒါအတွက် ငွေလက်ခံထားခြင်းမရှိသဖြင့် ငွေပေးချေရန် မလိုအပ်ပါ။"
+      : "ငွေပေးချေပြီးပါက သိမ်းဆည်းထားသော ငွေပေးချေမှုအချက်အလက်အတိုင်း ငွေပြန်အမ်းရန် ကျွန်ုပ်တို့အဖွဲ့မှ ဆက်သွယ်ပါမည်။";
+
+  const html = `<!doctype html>
+  <html><body style="margin:0;background:#f4f4f5;font-family:Arial,sans-serif;color:#18181b">
+    <div style="max-width:640px;margin:24px auto;background:white;border-radius:20px;overflow:hidden">
+      <div style="background:#18181b;color:white;padding:24px">
+        <div style="font-size:24px;font-weight:800">APHRODITE MYANMAR</div>
+        <div style="margin-top:6px;color:#fca5a5;font-weight:700">Order cancelled</div>
+      </div>
+      <div style="padding:24px">
+        <p>Hello ${escapeHtml(customerName)},</p>
+        <p>We are sorry, but your order has been cancelled by the store.</p>
+        <div style="margin:20px 0;padding:16px;background:#fff1f2;border:1px solid #fecdd3;border-radius:14px;line-height:1.7">
+          <strong>Order:</strong> #${escapeHtml(shortOrderCode(order.id).toUpperCase())}<br>
+          <strong>Items:</strong> ${escapeHtml(itemText)}<br>
+          <strong>Reason:</strong> ${escapeHtml(reason)}
+        </div>
+        <p style="font-weight:700">${escapeHtml(paymentMessage)}</p>
+        <hr style="border:none;border-top:1px solid #e4e4e7;margin:24px 0">
+        <p style="font-size:18px;font-weight:800">အော်ဒါကို ပယ်ဖျက်လိုက်ပါသည်</p>
+        <p>ဝမ်းနည်းပါသည်။ ဆိုင်ဘက်မှ သင့်အော်ဒါကို ပယ်ဖျက်လိုက်ပါသည်။</p>
+        <p><strong>အကြောင်းရင်း:</strong> ${escapeHtml(reason)}</p>
+        <p style="font-weight:700">${escapeHtml(burmesePayment)}</p>
+        <a href="${escapeHtml(orderUrl)}" style="display:inline-block;margin-top:20px;padding:12px 20px;background:#dc2626;color:white;text-decoration:none;border-radius:999px;font-weight:700">View your order</a>
+      </div>
+      ${emailFooterHtml()}
+    </div>
+  </body></html>`;
+
+  const text = [
+    "APHRODITE MYANMAR — Order cancelled",
+    "",
+    `Hello ${customerName},`,
+    "We are sorry, but your order has been cancelled by the store.",
+    `Order: #${shortOrderCode(order.id).toUpperCase()}`,
+    `Items: ${itemText}`,
+    `Reason: ${reason}`,
+    paymentMessage,
+    "",
+    "အော်ဒါကို ပယ်ဖျက်လိုက်ပါသည်",
+    "ဝမ်းနည်းပါသည်။ ဆိုင်ဘက်မှ သင့်အော်ဒါကို ပယ်ဖျက်လိုက်ပါသည်။",
+    `အကြောင်းရင်း: ${reason}`,
+    burmesePayment,
+    "",
+    `View your order: ${orderUrl}`,
+  ].join("\n");
+
+  return {
+    subject: `Order cancelled #${shortOrderCode(order.id).toUpperCase()} — Aphrodite Myanmar`,
+    html,
+    text,
+  };
+}
+
+function cancellationRefundSentContent(
+  order: OrderRow,
+  base: string,
+  customerName: string
+): OrderEmailContent {
+  const orderUrl = `${base}/orders`;
+  const amount = formatMoney(order.refund_amount ?? order.total_amount);
+  const method = (order.refund_method ?? "bank_transfer").replaceAll("_", " ");
+  const reference = order.refund_reference ?? "Recorded by the store";
+  const html = `<!doctype html><html><body style="margin:0;background:#f4f4f5;font-family:Arial,sans-serif;color:#18181b">
+    <div style="max-width:640px;margin:24px auto;background:white;border-radius:20px;overflow:hidden">
+      <div style="background:#18181b;color:white;padding:24px"><div style="font-size:24px;font-weight:800">APHRODITE MYANMAR</div><div style="margin-top:6px;color:#86efac;font-weight:700">Refund sent</div></div>
+      <div style="padding:24px">
+        <p>Hello ${escapeHtml(customerName)},</p>
+        <p>We sent the refund for your cancelled order.</p>
+        <div style="margin:20px 0;padding:16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;line-height:1.8">
+          <strong>Order:</strong> #${escapeHtml(shortOrderCode(order.id).toUpperCase())}<br>
+          <strong>Amount:</strong> ${escapeHtml(amount)}<br>
+          <strong>Method:</strong> ${escapeHtml(method)}<br>
+          <strong>Transfer reference:</strong> ${escapeHtml(reference)}
+        </div>
+        <p>Bank and wallet processing times can vary. Keep the transfer reference until the money appears in your account.</p>
+        <hr style="border:none;border-top:1px solid #e4e4e7;margin:24px 0">
+        <p style="font-size:18px;font-weight:800">ငွေပြန်အမ်းပြီးပါပြီ</p>
+        <p>ပယ်ဖျက်ထားသော အော်ဒါအတွက် ငွေပြန်လည်ပေးပို့ပြီးပါပြီ။ ငွေဝင်လာသည်အထိ ငွေလွှဲအမှတ်ကို သိမ်းထားပါ။</p>
+        <a href="${escapeHtml(orderUrl)}" style="display:inline-block;margin-top:20px;padding:12px 20px;background:#15803d;color:white;text-decoration:none;border-radius:999px;font-weight:700">View refund status</a>
+      </div>${emailFooterHtml()}
+    </div></body></html>`;
+  const text = [
+    "APHRODITE MYANMAR — Refund sent",
+    "",
+    `Hello ${customerName},`,
+    "We sent the refund for your cancelled order.",
+    `Order: #${shortOrderCode(order.id).toUpperCase()}`,
+    `Amount: ${amount}`,
+    `Method: ${method}`,
+    `Transfer reference: ${reference}`,
+    "",
+    "ငွေပြန်အမ်းပြီးပါပြီ။ ငွေဝင်လာသည်အထိ ငွေလွှဲအမှတ်ကို သိမ်းထားပါ။",
+    "",
+    `View refund status: ${orderUrl}`,
+  ].join("\n");
+  return {
+    subject: `Refund sent for order #${shortOrderCode(order.id).toUpperCase()} — Aphrodite Myanmar`,
+    html,
+    text,
+  };
+}
+
 /** Subject, HTML and plain-text body for one order email. */
 export function orderEmailContent(
   order: OrderRow,
@@ -156,6 +299,12 @@ export function orderEmailContent(
   }
   if (kind === "progress") {
     return orderProgressContent(order, base, customerName, progressStage ?? "verified");
+  }
+  if (kind === "cancelled") {
+    return orderCancellationContent(order, base, customerName);
+  }
+  if (kind === "cancellation_refund_sent") {
+    return cancellationRefundSentContent(order, base, customerName);
   }
 
   const heading = isReceipt ? "Receipt — paid" : "Order received";

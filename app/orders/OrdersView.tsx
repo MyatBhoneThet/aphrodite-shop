@@ -95,6 +95,10 @@ type Order = {
   refund_reference?: string | null;
   refund_amount?: number | null;
   refund_completed_at?: string | null;
+  cancellation_refund_status?: "none" | "details_required" | "pending" | "sent";
+  cancellation_refund_bank_name?: string | null;
+  cancellation_refund_account_name?: string | null;
+  cancellation_refund_account_number?: string | null;
   delivered_at?: string | null;
   receipt_number?: string | null;
   admin_order_note: string | null;
@@ -144,6 +148,9 @@ export default function OrdersView({ orderId }: { orderId?: string }) {
   // Which order currently has the three-step return wizard open.
   const [returnOrderId, setReturnOrderId] = useState<string | null>(null);
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const [refundDetails, setRefundDetails] = useState<
+    Record<string, { bankName: string; accountName: string; accountNumber: string }>
+  >({});
 
   const refreshOrders = useCallback(async () => {
     const response = await fetch("/api/orders", { headers: authHeaders(), cache: "no-store" });
@@ -247,6 +254,57 @@ export default function OrdersView({ orderId }: { orderId?: string }) {
     } finally { setProcessingOrderId(null); }
   }
 
+  async function submitCancellationRefundDetails(order: Order) {
+    const details = refundDetails[order.id] ?? {
+      bankName: "",
+      accountName: "",
+      accountNumber: "",
+    };
+    if (
+      details.bankName.trim().length < 2 ||
+      details.accountName.trim().length < 2 ||
+      details.accountNumber.trim().length < 5
+    ) {
+      setError("Enter the bank or wallet name, account holder, and account number.");
+      return;
+    }
+
+    setError("");
+    setMessage("");
+    setProcessingOrderId(order.id);
+    try {
+      const response = await fetch(`/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "submit_cancellation_refund_details",
+          bank_name: details.bankName.trim(),
+          account_name: details.accountName.trim(),
+          account_number: details.accountNumber.trim(),
+        }),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        order?: Order;
+        error?: string;
+      } | null;
+      if (!response.ok || !data?.order) {
+        throw new Error(data?.error ?? "Unable to save refund bank information.");
+      }
+      setOrders((current) =>
+        current.map((item) => (item.id === order.id ? data.order! : item))
+      );
+      setMessage("Refund bank information saved. The store will process your refund.");
+    } catch (refundError) {
+      setError(
+        refundError instanceof Error
+          ? refundError.message
+          : "Unable to save refund bank information."
+      );
+    } finally {
+      setProcessingOrderId(null);
+    }
+  }
+
   async function submitCancellation(order: Order) {
     const reason = cancellationReasons[order.id]?.trim() ?? "";
     if (reason.length < 3) { setError("Please enter a short reason for the cancellation."); return; }
@@ -299,7 +357,20 @@ export default function OrdersView({ orderId }: { orderId?: string }) {
             const count = lines.reduce((sum, line) => sum + line.quantity, 0);
             return <li key={order.id}><Link href={`/orders/${order.id}`} className="flex flex-wrap items-center gap-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-red-300 hover:shadow-md">
               <div className="flex -space-x-3">{lines.slice(0, 3).map((line) => line.product?.image ? <img key={line.id} src={line.product.image} alt="" loading="lazy" className="h-14 w-14 rounded-xl border-2 border-white bg-white object-contain" /> : <span key={line.id} className="h-14 w-14 rounded-xl border-2 border-white bg-zinc-100" />)}{lines.length > 3 && <span className="flex h-14 w-14 items-center justify-center rounded-xl border-2 border-white bg-zinc-100 text-xs font-bold text-zinc-600">+{lines.length - 3}</span>}</div>
-              <div className="min-w-0 flex-1"><p className="font-black">Order #{order.id.slice(0, 8).toUpperCase()}</p><p className="text-sm text-zinc-500">{formatDateTime(order.created_at)} · {count} item{count === 1 ? "" : "s"}</p></div>
+              <div className="min-w-0 flex-1">
+                <p className="font-black">Order #{order.id.slice(0, 8).toUpperCase()}</p>
+                <p className="text-sm text-zinc-500">{formatDateTime(order.created_at)} · {count} item{count === 1 ? "" : "s"}</p>
+                {order.cancellation_refund_status === "details_required" && (
+                  <p className="mt-2 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-900">
+                    Action required: add your refund bank information →
+                  </p>
+                )}
+                {order.cancellation_refund_status === "pending" && (
+                  <p className="mt-2 inline-flex rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-900">
+                    Refund pending
+                  </p>
+                )}
+              </div>
               <span className={`rounded-full px-3 py-1.5 text-xs font-bold capitalize ${statusStyles[order.status]}`}>{order.status}</span>
               <p className="text-lg font-black">{formatCurrency(order.total_amount)}</p>
               <span aria-hidden className="text-zinc-400">›</span>
@@ -363,6 +434,32 @@ export default function OrdersView({ orderId }: { orderId?: string }) {
                   {(order.delivery_events ?? []).length > 0 && <ol className="mt-4 space-y-3 border-l-2 border-blue-200 pl-4">{(order.delivery_events ?? []).map((event) => <li key={event.id}><p className="font-bold">{event.stage === "delivery_failed" ? t("delivery.attempt.heading") : event.title}</p><p className="text-xs text-blue-700">{formatDateTime(event.happened_at)}{event.description ? ` · ${event.description}` : ""}</p></li>)}</ol>}
                 </div>
                 {order.cancellation_request_status !== "none" && <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm text-red-950"><p className="font-bold capitalize">Cancellation: {humanize(order.cancellation_request_status)}</p>{order.cancellation_reason && <p className="mt-1">{order.cancellation_reason}</p>}</div>}
+                {order.cancellation_refund_status === "details_required" && (
+                  <div className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-950">
+                    <p className="text-lg font-black">Where should we send your refund?</p>
+                    <p className="mt-1">Your payment was verified. Enter an account belonging to you so the store can return {formatCurrency(order.refund_amount ?? order.total_amount)}.</p>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <label className="font-semibold">Bank or wallet name<input value={refundDetails[order.id]?.bankName ?? ""} onChange={(event) => setRefundDetails((current) => ({ ...current, [order.id]: { bankName: event.target.value, accountName: current[order.id]?.accountName ?? "", accountNumber: current[order.id]?.accountNumber ?? "" } }))} maxLength={120} autoComplete="organization" className="mt-1 block w-full rounded-xl border bg-white px-4 py-3 font-normal outline-none focus:border-red-500" /></label>
+                      <label className="font-semibold">Account holder name<input value={refundDetails[order.id]?.accountName ?? ""} onChange={(event) => setRefundDetails((current) => ({ ...current, [order.id]: { bankName: current[order.id]?.bankName ?? "", accountName: event.target.value, accountNumber: current[order.id]?.accountNumber ?? "" } }))} maxLength={160} autoComplete="name" className="mt-1 block w-full rounded-xl border bg-white px-4 py-3 font-normal outline-none focus:border-red-500" /></label>
+                    </div>
+                    <label className="mt-3 block font-semibold">Account or wallet number<input value={refundDetails[order.id]?.accountNumber ?? ""} onChange={(event) => setRefundDetails((current) => ({ ...current, [order.id]: { bankName: current[order.id]?.bankName ?? "", accountName: current[order.id]?.accountName ?? "", accountNumber: event.target.value } }))} maxLength={120} inputMode="numeric" autoComplete="off" className="mt-1 block w-full rounded-xl border bg-white px-4 py-3 font-normal outline-none focus:border-red-500" /></label>
+                    <p className="mt-3 text-xs">Check every digit before saving. These details are shown only to you and authorised store administrators.</p>
+                    <button type="button" disabled={processingOrderId === order.id} onClick={() => submitCancellationRefundDetails(order)} className="mt-4 rounded-full bg-red-600 px-6 py-3 font-bold text-white disabled:bg-zinc-400">{processingOrderId === order.id ? "Saving..." : "Save refund information"}</button>
+                  </div>
+                )}
+                {order.cancellation_refund_status === "pending" && (
+                  <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-5 text-sm text-blue-950">
+                    <p className="text-lg font-black">Refund pending</p>
+                    <p className="mt-1">We received your {order.cancellation_refund_bank_name} account information. The store will send {formatCurrency(order.refund_amount ?? order.total_amount)} and record the transfer reference here.</p>
+                  </div>
+                )}
+                {order.cancellation_refund_status === "sent" && (
+                  <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-950">
+                    <p className="text-lg font-black">Refund sent</p>
+                    <p className="mt-1">{formatCurrency(order.refund_amount ?? order.total_amount)} was sent by {humanize(order.refund_method ?? "bank_transfer")}.</p>
+                    {order.refund_reference && <p className="mt-2 font-mono font-bold">Reference: {order.refund_reference}</p>}
+                  </div>
+                )}
                 {order.return_request_status !== "none" && <div className="mt-4 rounded-2xl bg-orange-50 p-5 text-sm text-orange-950"><p className="font-bold capitalize">Return: {humanize(order.return_request_status)}</p>{order.return_reason_code && <p className="mt-1">Problem: {returnLabels[order.return_reason_code]}</p>}{order.return_reason && <p className="mt-1">Details: {order.return_reason}</p>}{order.return_pickup_method && <p className="mt-1">Method: {humanize(order.return_pickup_method)}</p>}{order.return_pickup_scheduled_for && <p className="mt-1">Scheduled: {formatDateTime(order.return_pickup_scheduled_for)}</p>}{order.return_pickup_instructions && <p className="mt-1">Instructions: {order.return_pickup_instructions}</p>}{order.return_pickup_tracking_number && <p className="mt-1">Tracking: {order.return_pickup_tracking_number}</p>}{order.return_received_at && <p className="mt-1">Received by store: {formatDateTime(order.return_received_at)}</p>}{order.refund_completed_at && <p className="mt-1 font-semibold">Refund recorded: {formatCurrency(order.refund_amount ?? 0)} by {humanize(order.refund_method ?? "selected method")}{order.refund_reference ? ` (${order.refund_reference})` : ""}</p>}</div>}
                 {(order.return_evidence ?? []).length > 0 && <div className="mt-3 flex flex-wrap gap-2">{(order.return_evidence ?? []).map((evidence) => <a key={evidence.id} href={`/api/orders/${order.id}/return-evidence/${evidence.id}`} target="_blank" rel="noreferrer" className="rounded-full border px-3 py-2 text-xs font-bold hover:border-red-500">Open {humanize(evidence.evidence_kind)}</a>)}</div>}
                 {order.payment_method && order.payment_method !== "cash_on_delivery" && (

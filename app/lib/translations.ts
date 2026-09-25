@@ -580,6 +580,31 @@ export const translations = {
     my: "၇ ရက် ပြန်အမ်းကာလ ကုန်ဆုံးပါပြီ။ စက်တွင် ချွတ်ယွင်းမှု ဖြစ်ပါက အာမခံ ကိစ္စဖွင့်ပါ။",
   },
 
+  "next.refund_details": {
+    en: "Add your refund bank information",
+    my: "ငွေပြန်လည်လက်ခံရန် ဘဏ်အချက်အလက် ဖြည့်ပါ",
+  },
+  "next.refund_details.detail": {
+    en: "Your advance payment was confirmed. Enter the bank or wallet account where we should return the amount below.",
+    my: "သင့်ကြိုတင်ငွေပေးချေမှု အတည်ပြုပြီးပါပြီ။ အောက်ပါပမာဏကို ပြန်လည်လက်ခံလိုသော ဘဏ် သို့မဟုတ် ပိုက်ဆံအိတ်အကောင့်ကို ဖြည့်ပါ။",
+  },
+  "next.refund_pending": {
+    en: "Your refund is being prepared",
+    my: "သင့်ငွေပြန်အမ်းမှုကို ပြင်ဆင်နေပါသည်",
+  },
+  "next.refund_pending.detail": {
+    en: "We received your bank information. The store will send the refund and record the transfer reference here.",
+    my: "သင့်ဘဏ်အချက်အလက်ကို လက်ခံရရှိပါပြီ။ ဆိုင်မှ ငွေပြန်ပို့ပြီး ငွေလွှဲအမှတ်ကို ဤနေရာတွင် မှတ်တမ်းတင်ပါမည်။",
+  },
+  "next.refund_sent": {
+    en: "Your refund has been sent",
+    my: "သင့်ငွေကို ပြန်လည်ပေးပို့ပြီးပါပြီ",
+  },
+  "next.refund_sent.detail": {
+    en: "Check your bank or wallet account. Keep the transfer reference until the money appears.",
+    my: "သင့်ဘဏ် သို့မဟုတ် ပိုက်ဆံအိတ်အကောင့်ကို စစ်ဆေးပါ။ ငွေဝင်လာသည်အထိ ငွေလွှဲအမှတ်ကို သိမ်းထားပါ။",
+  },
+
   "next.cancelled": { en: "This order was cancelled", my: "ဤအော်ဒါကို ပယ်ဖျက်ပြီးပါပြီ" },
   "next.cancelled.detail": { en: "Nothing more to do.", my: "ထပ်မံလုပ်ဆောင်စရာ မရှိပါ။" },
 

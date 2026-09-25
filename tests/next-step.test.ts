@@ -215,6 +215,34 @@ describe("what happens next: after delivery and closed orders", () => {
     expect(step.amount).toBeNull();
   });
 
+  it("asks for refund details after a collected prepaid order is cancelled", () => {
+    const step = orderNextStep(
+      order({ status: "cancelled", payment_status: "collected", cancellation_refund_status: "details_required" })
+    );
+
+    expect(step.key).toBe("refund_details");
+    expect(step.tone).toBe("action");
+    expect(step.amount).toBe(TOTAL);
+  });
+
+  it("shows refund pending after the customer provides bank information", () => {
+    const step = orderNextStep(
+      order({ status: "cancelled", payment_status: "collected", cancellation_refund_status: "pending" })
+    );
+
+    expect(step.key).toBe("refund_pending");
+    expect(step.tone).toBe("waiting");
+  });
+
+  it("shows the cancellation refund as complete after money is sent", () => {
+    const step = orderNextStep(
+      order({ status: "cancelled", payment_status: "refunded", cancellation_refund_status: "sent" })
+    );
+
+    expect(step.key).toBe("refund_sent");
+    expect(step.tone).toBe("done");
+  });
+
   it("reports a returned order as stopped", () => {
     expect(orderNextStep(order({ status: "returned" })).key).toBe("returned");
   });

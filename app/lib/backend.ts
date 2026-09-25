@@ -93,6 +93,7 @@ import {
   selectProductsByIdsService,
   selectProductsService,
   selectProfileByIdService,
+  selectProfilesByIdsService,
   selectRecentlyViewedRows,
   selectSupportConversationByCustomer,
   selectSupportConversationById,
@@ -1188,7 +1189,43 @@ export async function getOrders(
   user: CurrentUser,
   pagination: { limit?: number | null; offset?: number | null } = {}
 ) {
-  return (await selectOrders(user, pagination)).map(orderResponse);
+  const orders = await selectOrders(user, pagination);
+
+  if (user.role !== "admin") return orders.map(orderResponse);
+
+  // Some older Supabase installations allow admins to read orders but do not
+  // allow the nested profiles embed. The order then arrives with `profiles:
+  // null`, even though the customer's login profile has an email. Hydrate only
+  // those missing profiles through the service-role helper after the caller
+  // has already been authenticated as an administrator.
+  const missingProfileIds = orders
+    .filter((order) => !order.profiles?.email)
+    .map((order) => order.user_id);
+  const [profiles, itemReturns] = await Promise.all([
+    selectProfilesByIdsService(missingProfileIds),
+    selectReturnRequests(),
+  ]);
+  const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+  const returnsByOrder = new Map<string, ReturnRequestRow[]>();
+
+  for (const request of itemReturns) {
+    const requests = returnsByOrder.get(request.order_id) ?? [];
+    requests.push(request);
+    returnsByOrder.set(request.order_id, requests);
+  }
+
+  return orders.map((order) => ({
+    ...orderResponse({
+      ...order,
+      profiles: order.profiles?.email
+        ? order.profiles
+        : profileById.get(order.user_id) ?? order.profiles,
+    }),
+    // Modern per-item returns do not change the legacy order-level
+    // return_request_status column. Include them explicitly so the admin table
+    // never says "None" while a real customer request is waiting in the queue.
+    item_return_requests: returnsByOrder.get(order.id) ?? [],
+  }));
 }
 
 export async function getOrder(user: CurrentUser, id: string) {
@@ -2529,6 +2566,64 @@ export async function notifyOrderPlaced(user: CurrentUser, orderId: string) {
   }
 }
 
+/** Customer notice after an administrator cancels an order. */
+export async function notifyOrderCancelled(user: CurrentUser, orderId: string) {
+  try {
+    const order = await selectOrderById(user, orderId);
+    if (!order || order.status !== "cancelled") return;
+    if (!(await wantsOrderUpdates(order.user_id))) return;
+
+    const result = await sendOrderEmail(await withCustomerContact(order), {
+      kind: "cancelled",
+      idempotencySuffix: order.cancellation_reason_code ?? "admin",
+    });
+
+    if (result.status === "failed") {
+      console.error("[orders] cancellation email failed", {
+        order_id: orderId,
+        error: result.error,
+      });
+    }
+  } catch (error) {
+    console.error("[orders] cancellation email could not run", {
+      order_id: orderId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/** Confirmation after staff records the actual prepaid cancellation refund. */
+export async function notifyCancellationRefundSent(
+  user: CurrentUser,
+  orderId: string
+) {
+  try {
+    const order = await selectOrderById(user, orderId);
+    if (
+      !order ||
+      order.cancellation_refund_status !== "sent" ||
+      order.payment_status !== "refunded"
+    ) return;
+    if (!(await wantsOrderUpdates(order.user_id))) return;
+
+    const result = await sendOrderEmail(await withCustomerContact(order), {
+      kind: "cancellation_refund_sent",
+      idempotencySuffix: order.refund_reference ?? "sent",
+    });
+    if (result.status === "failed") {
+      console.error("[orders] cancellation refund email failed", {
+        order_id: orderId,
+        error: result.error,
+      });
+    }
+  } catch (error) {
+    console.error("[orders] cancellation refund email could not run", {
+      order_id: orderId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 /**
  * Customer-facing delivery progress email, scheduled by the order route after
  * an admin saves one of the visible tracking milestones.
@@ -3116,6 +3211,19 @@ export async function adminCancelOrder(
   const existing = await selectOrderById(user, id);
   if (!existing) return null;
 
+  const isPrepaid = isPrepaidMethod(existing.payment_method);
+  const paymentReviewFinished = ["verified", "rejected"].includes(
+    existing.payment_verification_status ?? "pending"
+  );
+  const verifiedPaymentIsCollected =
+    existing.payment_verification_status !== "verified" ||
+    existing.payment_status === "collected";
+  if (isPrepaid && (!paymentReviewFinished || !verifiedPaymentIsCollected)) {
+    throw conflict(
+      "Finish checking the customer's payment before cancelling a prepaid order."
+    );
+  }
+
   try {
     await adminCancelOrderRpc({
       actor_id: user.id,
@@ -3133,6 +3241,106 @@ export async function adminCancelOrder(
 
   const updated = await selectOrderById(user, id);
   return updated ? orderResponse(updated) : null;
+}
+
+/** Customer supplies the destination for a verified prepaid cancellation. */
+export async function submitCancellationRefundDetails(
+  user: CurrentUser,
+  id: string,
+  input: { bank_name: string; account_name: string; account_number: string }
+) {
+  if (user.role === "admin") {
+    throw forbidden("Administrators cannot submit customer refund details.");
+  }
+
+  const order = await selectOrderById(user, id);
+  if (!order) return null;
+  if (
+    order.status !== "cancelled" ||
+    !isPrepaidMethod(order.payment_method) ||
+    order.payment_status !== "collected" ||
+    !["details_required", "pending"].includes(
+      order.cancellation_refund_status ?? "none"
+    )
+  ) {
+    throw conflict("This order is not waiting for refund bank information.");
+  }
+
+  await updateOrderPaymentService(id, {
+    cancellation_refund_status: "pending",
+    cancellation_refund_bank_name: input.bank_name.trim(),
+    cancellation_refund_account_name: input.account_name.trim(),
+    cancellation_refund_account_number: input.account_number.trim(),
+    cancellation_refund_details_submitted_at: new Date().toISOString(),
+    refund_amount: order.total_amount,
+  });
+
+  await insertAuditLog({
+    actor_id: user.id,
+    action: "order.cancellation_refund.details_submitted",
+    target_type: "order",
+    target_id: id,
+    previous_data: { refund_status: order.cancellation_refund_status ?? "none" },
+    // Never place bank details in the audit trail.
+    new_data: { refund_status: "pending", bank_details_provided: true },
+  });
+
+  const refreshed = await selectOrderById(user, id);
+  return refreshed ? orderResponse(refreshed) : null;
+}
+
+/** Admin records the real transfer only after sending the money. */
+export async function completeCancellationRefund(
+  user: CurrentUser,
+  id: string,
+  input: {
+    refund_method: "bank_transfer" | "mobile_wallet";
+    refund_reference: string;
+    refund_amount: number;
+    admin_note?: string | null;
+  }
+) {
+  requireAdmin(user);
+  const order = await selectOrderById(user, id);
+  if (!order) return null;
+  if (
+    order.status !== "cancelled" ||
+    order.cancellation_refund_status !== "pending" ||
+    order.payment_status !== "collected"
+  ) {
+    throw conflict("Wait for the customer to provide refund bank information first.");
+  }
+  if (input.refund_amount > order.total_amount) {
+    throw badRequest("Refund amount cannot be greater than the order total.");
+  }
+
+  const now = new Date().toISOString();
+  await updateOrderPaymentService(id, {
+    cancellation_refund_status: "sent",
+    payment_status: "refunded",
+    refund_method: input.refund_method,
+    refund_reference: input.refund_reference.trim(),
+    refund_amount: input.refund_amount,
+    refund_completed_at: now,
+  });
+
+  await insertAuditLog({
+    actor_id: user.id,
+    action: "order.cancellation_refund.sent",
+    target_type: "order",
+    target_id: id,
+    previous_data: { refund_status: order.cancellation_refund_status },
+    new_data: {
+      refund_status: "sent",
+      refund_method: input.refund_method,
+      refund_amount: input.refund_amount,
+      refund_reference: input.refund_reference.trim(),
+      admin_note: input.admin_note?.trim() || null,
+    },
+  });
+
+  const refreshed = await selectOrderById(user, id);
+  return refreshed ? orderResponse(refreshed) : null;
 }
 
 export async function advanceReturnWorkflow(
@@ -4124,6 +4332,9 @@ function mapOrderLifecycleError(error: unknown) {
   }
   if (message.includes("ADMIN_CANCELLATION_NOT_ALLOWED")) {
     return conflict("Only pending or confirmed orders can be cancelled by an administrator.");
+  }
+  if (message.includes("PAYMENT_REVIEW_REQUIRED")) {
+    return conflict("Check and verify the customer's payment before cancelling a prepaid order.");
   }
   if (message.includes("RETURN_NOT_APPROVED")) {
     return conflict("Approve the return before scheduling pickup.");

@@ -1,16 +1,20 @@
 import { NextResponse, after, type NextRequest } from "next/server";
 import {
   adminCancelOrder,
+  completeCancellationRefund,
   advanceOrderDeliveryProgress,
   advanceReturnWorkflow,
   authenticate,
   getOrder,
   notifyDeliveryAttemptFailed,
+  notifyCancellationRefundSent,
+  notifyOrderCancelled,
   notifyOrderDelivered,
   notifyOrderProgress,
   recordFailedDeliveryAttempt,
   patchOrderStatus,
   requestOrderAction,
+  submitCancellationRefundDetails,
   resendOrderReceipt,
   resolveOrderRequest,
   verifyOrderPayment,
@@ -123,6 +127,10 @@ export async function PATCH(
           ? await resolveOrderRequest(user, id, parsed.data)
           : parsed.data.action === "admin_cancel"
             ? await adminCancelOrder(user, id, parsed.data)
+            : parsed.data.action === "submit_cancellation_refund_details"
+              ? await submitCancellationRefundDetails(user, id, parsed.data)
+              : parsed.data.action === "complete_cancellation_refund"
+                ? await completeCancellationRefund(user, id, parsed.data)
             : parsed.data.action === "advance_return"
               ? await advanceReturnWorkflow(user, id, parsed.data)
               : parsed.data.action === "update_delivery"
@@ -137,6 +145,18 @@ export async function PATCH(
     // delivered never waits on, or fails because of, the mail server.
     if ("status" in parsed.data && parsed.data.status === "delivered") {
       after(() => notifyOrderDelivered(user, id));
+    }
+
+    // Admin cancellation (including "out of stock") is saved first, then the
+    // customer is notified without making the admin wait on the mail server.
+    if ("action" in parsed.data && parsed.data.action === "admin_cancel") {
+      after(() => notifyOrderCancelled(user, id));
+    }
+    if (
+      "action" in parsed.data &&
+      parsed.data.action === "complete_cancellation_refund"
+    ) {
+      after(() => notifyCancellationRefundSent(user, id));
     }
 
     // Saving a customer-visible delivery milestone sends a bilingual update.

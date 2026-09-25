@@ -148,6 +148,60 @@ describe("recording what checkout deducted", () => {
 });
 
 describe("restocking the Google Sheet when an order is cancelled", () => {
+  it("allows COD cancellation without a payment review", async () => {
+    vi.mocked(selectOrderById).mockResolvedValue(
+      order({
+        payment_method: "cash_on_delivery",
+        payment_status: "unpaid",
+        payment_verification_status: "not_required",
+      })
+    );
+
+    await expect(adminCancelOrder(admin(), "order-1", CANCEL)).resolves.not.toBeNull();
+    expect(adminCancelOrderRpc).toHaveBeenCalledOnce();
+  });
+
+  it("blocks an unreviewed bank payment before cancellation", async () => {
+    vi.mocked(selectOrderById).mockResolvedValue(
+      order({
+        payment_method: "bank_transfer",
+        payment_status: "unpaid",
+        payment_verification_status: "pending",
+      })
+    );
+
+    await expect(adminCancelOrder(admin(), "order-1", CANCEL)).rejects.toThrow(
+      "Finish checking"
+    );
+    expect(adminCancelOrderRpc).not.toHaveBeenCalled();
+  });
+
+  it("allows a reviewed rejected bank payment to cancel without a refund", async () => {
+    vi.mocked(selectOrderById).mockResolvedValue(
+      order({
+        payment_method: "bank_transfer",
+        payment_status: "unpaid",
+        payment_verification_status: "rejected",
+      })
+    );
+
+    await expect(adminCancelOrder(admin(), "order-1", CANCEL)).resolves.not.toBeNull();
+    expect(adminCancelOrderRpc).toHaveBeenCalledOnce();
+  });
+
+  it("allows a verified collected bank payment into the cancellation refund flow", async () => {
+    vi.mocked(selectOrderById).mockResolvedValue(
+      order({
+        payment_method: "bank_transfer",
+        payment_status: "collected",
+        payment_verification_status: "verified",
+      })
+    );
+
+    await expect(adminCancelOrder(admin(), "order-1", CANCEL)).resolves.not.toBeNull();
+    expect(adminCancelOrderRpc).toHaveBeenCalledOnce();
+  });
+
   it("admin cancel puts back exactly what checkout deducted, and moves the baseline by that amount", async () => {
     await adminCancelOrder(admin(), "order-1", CANCEL);
 

@@ -51,7 +51,7 @@ type OrderResolutionDraft = {
   adminNote: string;
 };
 
-type OrderWorkflowAction = "admin_cancel" | "schedule_pickup" | "mark_received" | "complete_refund" | "delivery_attempt" | "payment_review";
+type OrderWorkflowAction = "admin_cancel" | "schedule_pickup" | "mark_received" | "complete_refund" | "complete_cancellation_refund" | "delivery_attempt" | "payment_review";
 const paymentMethodLabels: Record<string, string> = {
   cash_on_delivery: "Cash on delivery",
   bank_transfer: "Bank transfer",
@@ -105,6 +105,9 @@ type OrderWorkflowDraft = {
   refundMethod: "cash" | "bank_transfer" | "mobile_wallet" | "store_credit";
   refundReference: string;
   refundAmount: string;
+  refundBankName: string;
+  refundAccountName: string;
+  refundAccountNumber: string;
   adminNote: string;
 };
 
@@ -150,6 +153,10 @@ type AdminOrder = {
   refund_reference?: string | null;
   refund_amount?: number | null;
   refund_completed_at?: string | null;
+  cancellation_refund_status?: "none" | "details_required" | "pending" | "sent";
+  cancellation_refund_bank_name?: string | null;
+  cancellation_refund_account_name?: string | null;
+  cancellation_refund_account_number?: string | null;
   receipt_number?: string | null;
   payment_account?: "kbz" | "aya" | "mmqr" | null;
   payment_verification_status?:
@@ -186,6 +193,14 @@ type AdminOrder = {
     full_name?: string | null;
     role?: UserRole | null;
   } | null;
+  item_return_requests?: {
+    id: string;
+    status: string;
+    quantity: number;
+    preferred_resolution: string;
+    created_at: string;
+    order_items?: { products?: { name?: string | null } | null } | null;
+  }[];
   order_items?: AdminOrderItem[];
 };
 
@@ -806,6 +821,9 @@ export default function AdminPage() {
       refundMethod: "bank_transfer",
       refundReference: "",
       refundAmount: String(order.total_amount),
+      refundBankName: order.cancellation_refund_bank_name ?? "",
+      refundAccountName: order.cancellation_refund_account_name ?? "",
+      refundAccountNumber: order.cancellation_refund_account_number ?? "",
       adminNote: "",
     });
   }
@@ -905,6 +923,23 @@ export default function AdminPage() {
         next_attempt_at: nextAttempt ? nextAttempt.toISOString() : null,
         admin_note: orderWorkflow.adminNote.trim() || null,
       };
+    } else if (orderWorkflow.action === "complete_cancellation_refund") {
+      const amount = Number(orderWorkflow.refundAmount);
+      if (!Number.isInteger(amount) || amount <= 0 || amount > orderWorkflow.totalAmount) {
+        setError("Refund amount must be a whole number between 1 and the order total.");
+        return;
+      }
+      if (orderWorkflow.refundReference.trim().length < 3) {
+        setError("Enter the real transfer reference before marking the refund sent.");
+        return;
+      }
+      payload = {
+        action: "complete_cancellation_refund",
+        refund_method: orderWorkflow.refundMethod === "mobile_wallet" ? "mobile_wallet" : "bank_transfer",
+        refund_reference: orderWorkflow.refundReference.trim(),
+        refund_amount: amount,
+        admin_note: orderWorkflow.adminNote.trim() || null,
+      };
     } else {
       const amount = Number(orderWorkflow.refundAmount);
       if (!Number.isInteger(amount) || amount < 0 || amount > orderWorkflow.totalAmount) {
@@ -936,7 +971,9 @@ export default function AdminPage() {
       await loadDashboardData();
       setMessage(
         completedAction === "admin_cancel"
-          ? "Order cancelled and reserved inventory restored."
+          ? "Order cancelled and reserved inventory restored. Prepaid orders now wait for customer refund details."
+          : completedAction === "complete_cancellation_refund"
+            ? "Refund marked sent and the customer was notified."
           : completedAction === "schedule_pickup"
             ? "Return pickup or drop-off scheduled."
             : completedAction === "mark_received"
@@ -1939,9 +1976,14 @@ function OrdersTable({
                   <button
                     type="button"
                     onClick={() => onWorkflow(order, "admin_cancel")}
-                    className="mt-2 block rounded-full bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100"
+                    disabled={order.payment_method !== "cash_on_delivery" && !["verified", "rejected"].includes(order.payment_verification_status ?? "pending")}
+                    title={order.payment_method !== "cash_on_delivery" && !["verified", "rejected"].includes(order.payment_verification_status ?? "pending") ? a("Finish checking payment before cancelling") : undefined}
+                    className="mt-2 block rounded-full bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
                   >
                      {a("Cancel / out of stock")} </button>
+                )}
+                {(order.status === "pending" || order.status === "confirmed") && order.payment_method !== "cash_on_delivery" && !["verified", "rejected"].includes(order.payment_verification_status ?? "pending") && (
+                  <p className="mt-1 max-w-[11rem] text-[10px] font-semibold text-amber-700">{a("Finish checking payment before cancelling")}</p>
                 )}
                 {order.status === "shipped" && (
                   <button
@@ -2035,11 +2077,42 @@ function OrdersTable({
                         : a("Send receipt email")}
                   </button>
                 )}
+                {order.cancellation_refund_status === "details_required" && (
+                  <p className="mt-2 max-w-[12rem] rounded-xl bg-amber-50 p-2 text-[10px] font-semibold text-amber-800">{a("Waiting for customer refund bank information")}</p>
+                )}
+                {order.cancellation_refund_status === "pending" && (
+                  <div className="mt-2 max-w-[13rem] rounded-xl bg-blue-50 p-2 text-[10px] text-blue-950">
+                    <p className="font-bold">{a("Refund pending")}</p>
+                    <p>{order.cancellation_refund_bank_name} · {order.cancellation_refund_account_name}</p>
+                    <p className="break-all font-mono font-bold">{order.cancellation_refund_account_number}</p>
+                    <button type="button" onClick={() => onWorkflow(order, "complete_cancellation_refund")} className="mt-2 rounded-full bg-zinc-900 px-3 py-1.5 font-bold text-white">{a("Mark refund sent")}</button>
+                  </div>
+                )}
+                {order.cancellation_refund_status === "sent" && (
+                  <p className="mt-2 max-w-[12rem] rounded-xl bg-emerald-50 p-2 text-[10px] font-semibold text-emerald-800">{a("Refund sent")} {order.refund_reference ? `· ${order.refund_reference}` : ""}</p>
+                )}
                 <p className="mt-2 text-[10px] font-bold uppercase text-zinc-500">{a("Verification:")} {a((order.cod_verification_status ?? "pending").replaceAll("_", " "))}</p>
               </td>
 
               <td className="p-4">
-                {order.cancellation_request_status === "requested" ? (
+                {(order.item_return_requests?.length ?? 0) > 0 ? (
+                  <div className="space-y-2 text-xs">
+                    {order.item_return_requests
+                      ?.slice()
+                      .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))
+                      .map((request) => (
+                        <div key={request.id} className="rounded-xl bg-amber-50 p-2 text-amber-950">
+                          <p className="font-bold capitalize">
+                            {a("Item return:")} {a(request.status.replaceAll("_", " "))}
+                          </p>
+                          <p className="mt-1 text-[10px] text-amber-800">
+                            {request.order_items?.products?.name ?? a("Product")} × {request.quantity}
+                            {` · ${a(request.preferred_resolution)}`}
+                          </p>
+                        </div>
+                      ))}
+                  </div>
+                ) : order.cancellation_request_status === "requested" ? (
                   <OrderRequestControls label="Cancellation"
                     reason={order.cancellation_reason}
                     onApprove={() => onResolveRequest(order.id, "cancellation", "approve")}
@@ -2074,7 +2147,7 @@ function OrdersTable({
                   <div className="text-xs text-zinc-500">
                     {order.cancellation_request_status !== "none" && <p className="capitalize">{a("Cancellation:")} {order.cancellation_request_status}</p>}
                     {order.return_request_status !== "none" && <p className="capitalize">{a("Return:")} {order.return_request_status}</p>}
-                    {order.cancellation_request_status === "none" && order.return_request_status === "none" && <p>{a("None")}</p>}
+                    {order.cancellation_request_status === "none" && order.return_request_status === "none" && <p>{a("No customer request")}</p>}
                   </div>
                 )}
               </td>
@@ -2267,6 +2340,7 @@ function OrderWorkflowDialog({
     schedule_pickup: "Schedule return handover",
     mark_received: "Receive and inspect item",
     complete_refund: "Record completed refund",
+    complete_cancellation_refund: "Send cancellation refund",
     delivery_attempt: "Delivery attempt failed",
     payment_review: "Check the transfer slip",
   };
@@ -2316,8 +2390,9 @@ function OrderWorkflowDialog({
             </p>
           </>}
 
-          {draft.action === "complete_refund" && <>
-            <label className="block text-sm font-semibold">{a("Refund method")}<select value={draft.refundMethod} onChange={(event) => onChange({ refundMethod: event.target.value as OrderWorkflowDraft["refundMethod"] })} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal"><option value="bank_transfer">{a("Bank transfer")}</option><option value="mobile_wallet">{a("Mobile wallet")}</option><option value="cash">{a("Cash")}</option><option value="store_credit">{a("Store credit")}</option></select></label>
+          {(draft.action === "complete_refund" || draft.action === "complete_cancellation_refund") && <>
+            {draft.action === "complete_cancellation_refund" && <div className="rounded-xl bg-blue-50 p-3 text-sm text-blue-950"><p className="font-bold">{a("Customer refund destination")}</p><p className="mt-1">{draft.refundBankName} · {draft.refundAccountName}</p><p className="mt-1 break-all font-mono font-bold">{draft.refundAccountNumber}</p></div>}
+            <label className="block text-sm font-semibold">{a("Refund method")}<select value={draft.refundMethod} onChange={(event) => onChange({ refundMethod: event.target.value as OrderWorkflowDraft["refundMethod"] })} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal"><option value="bank_transfer">{a("Bank transfer")}</option><option value="mobile_wallet">{a("Mobile wallet")}</option>{draft.action === "complete_refund" && <><option value="cash">{a("Cash")}</option><option value="store_credit">{a("Store credit")}</option></>}</select></label>
             <label className="block text-sm font-semibold">{a("Refund amount")}<input type="number" min={0} max={draft.totalAmount} step={1} value={draft.refundAmount} onChange={(event) => onChange({ refundAmount: event.target.value })} className="mt-2 w-full rounded-xl border px-4 py-3 font-normal" /></label>
             <label className="block text-sm font-semibold">{a("Payment reference (recommended)")}<input value={draft.refundReference} onChange={(event) => onChange({ refundReference: event.target.value })} maxLength={200} placeholder={a("Transfer ID, wallet reference, or cash voucher")} className="mt-2 w-full rounded-xl border px-4 py-3 font-normal" /></label>
             <p className="rounded-xl bg-blue-50 p-3 text-xs leading-5 text-blue-900">{a("Complete the real cash, bank, or wallet payment first. This button records the completed refund; it does not move money by itself.")}</p>

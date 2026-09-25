@@ -219,6 +219,27 @@ describe("email content", () => {
     expect(text).not.toContain("proof of payment");
   });
 
+  it("sends an out-of-stock cancellation email with payment guidance", async () => {
+    const cancelled = {
+      ...order,
+      status: "cancelled",
+      payment_status: "unpaid",
+      cancellation_source: "admin",
+      cancellation_reason_code: "out_of_stock",
+      cancellation_reason: "The selected laptop is no longer available.",
+    } as unknown as OrderRow;
+
+    const result = await sendOrderEmail(cancelled, { kind: "cancelled" }, GMAIL_ENV);
+
+    expect(result.status).toBe("sent");
+    const message = mail.sendMail.mock.calls[0][0];
+    expect(message.subject).toContain("Order cancelled #12345678");
+    expect(message.html).toContain("The selected laptop is no longer available.");
+    expect(message.text).toContain("ASUS ExpertBook P2 × 1");
+    expect(message.text).toContain("No payment was collected");
+    expect(message.html).toContain("အော်ဒါကို ပယ်ဖျက်လိုက်ပါသည်");
+  });
+
   it("only shows the 7-day return note on the delivery receipt", () => {
     expect(orderEmailContent(order, "delivered", "APH-1", GMAIL_ENV).html).toContain("7 days after delivery");
     expect(orderEmailContent(order, "placed", undefined, GMAIL_ENV).html).not.toContain("7 days after delivery");
