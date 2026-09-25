@@ -21,8 +21,11 @@ export type OrderLine = {
 
 const VISIBLE_LINES = 4;
 
-const label = (key: string) =>
-  key.replace(/([A-Z])/g, " $1").replace(/[_-]/g, " ").replace(/^./, (c) => c.toUpperCase());
+const ACRONYMS = new Set(["cpu", "gpu", "ram", "ssd", "os"]);
+const label = (key: string) => {
+  const text = key.replace(/([A-Z])/g, " $1").replace(/[_-]/g, " ").trim().toLowerCase();
+  return ACRONYMS.has(text) ? text.toUpperCase() : text.replace(/^./, (c) => c.toUpperCase());
+};
 
 /** Short grey line under the name: the spec text, e.g. "16GB · 512GB · i7". */
 function summary(product: OrderLine["product"]) {
@@ -84,7 +87,7 @@ export default function OrderItemsList({ items }: { items: OrderLine[] }) {
                     )}
                     <div className="min-w-0 flex-1">
                       <h4 className="text-lg font-bold text-zinc-900">{name}</h4>
-                      <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+                      <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-sm lg:grid-cols-4">
                         {product?.brand && <div><dt className="text-xs uppercase text-zinc-400">Brand</dt><dd className="font-semibold">{product.brand}</dd></div>}
                         {product?.category && <div><dt className="text-xs uppercase text-zinc-400">Category</dt><dd className="font-semibold">{product.category}</dd></div>}
                         <div><dt className="text-xs uppercase text-zinc-400">Unit price</dt><dd className="font-semibold">{formatCurrency(item.unit_price)}</dd></div>
@@ -92,9 +95,9 @@ export default function OrderItemsList({ items }: { items: OrderLine[] }) {
                         <div><dt className="text-xs uppercase text-zinc-400">Line total</dt><dd className="font-bold text-red-600">{formatCurrency(item.unit_price * item.quantity)}</dd></div>
                       </dl>
                       {detailRows(product).length > 0 && (
-                        <dl className="mt-4 grid gap-x-6 gap-y-2 border-t border-zinc-200 pt-4 text-sm sm:grid-cols-2">
+                        <dl className="mt-4 grid gap-x-6 gap-y-2 border-t border-zinc-200 pt-4 text-sm lg:grid-cols-2">
                           {detailRows(product).map(([key, value]) => (
-                            <div key={key} className="flex gap-2"><dt className="w-28 shrink-0 text-zinc-400">{label(key)}</dt><dd className="min-w-0 break-words text-zinc-800">{value}</dd></div>
+                            <div key={key} className="flex gap-2"><dt className="w-32 shrink-0 text-zinc-400">{label(key)}</dt><dd className="min-w-0 flex-1 break-words text-zinc-800">{value}</dd></div>
                           ))}
                         </dl>
                       )}

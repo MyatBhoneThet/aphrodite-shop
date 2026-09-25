@@ -165,17 +165,17 @@ export default function LastOrderStatusBar({ enabled }: { enabled: boolean }) {
         aria-label={`${t("refund.title")}: ${productName}. ${statusLabel}`}
       >
         <div className="relative z-10 mx-auto max-w-[92rem] px-4 py-3 lg:px-6">
-          <div className="flex items-center gap-3 lg:gap-6">
+          <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 lg:grid-cols-[auto_18rem_minmax(0,1fr)] lg:gap-x-6 lg:gap-y-0">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-emerald-300/50 bg-emerald-400/15 text-xl shadow-[0_0_24px_rgba(52,211,153,0.35)] motion-safe:animate-pulse" aria-hidden="true">↩</span>
-            <div className="min-w-0 shrink lg:w-72">
+            <div className="min-w-0">
               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">{t("refund.title")}</p>
-              <p className="truncate text-sm font-black sm:text-base">{productName}{firstItem && firstItem.quantity > 1 ? ` × ${firstItem.quantity}` : ""}</p>
+              <p className="line-clamp-2 text-sm font-black sm:text-base lg:line-clamp-1">{productName}{firstItem && firstItem.quantity > 1 ? ` × ${firstItem.quantity}` : ""}</p>
               {extraItems > 0 && <p className="text-[11px] text-emerald-200">{language === "my" ? `နောက်ထပ် ${extraItems} မျိုး` : `+${extraItems} more product${extraItems === 1 ? "" : "s"}`}</p>}
             </div>
-            <div className="min-w-0 flex-1">
+            <div className="col-span-2 min-w-0 lg:col-span-1">
               <div className="flex items-center justify-between gap-3">
-                <p className="truncate text-sm font-bold text-emerald-100" role="status" aria-live="polite">{statusLabel}</p>
-                <span className="shrink-0 text-xs font-bold text-emerald-200 transition group-hover:translate-x-1">{t("refund.view")} →</span>
+                <p className="min-w-0 text-xs font-bold text-emerald-100 sm:truncate sm:text-sm" role="status" aria-live="polite">{statusLabel}</p>
+                <span className="shrink-0 text-[11px] font-bold text-emerald-200 transition group-hover:translate-x-1 sm:text-xs">{t("refund.view")} →</span>
               </div>
               {returnStep >= 0 && (
                 <>
@@ -210,16 +210,16 @@ export default function LastOrderStatusBar({ enabled }: { enabled: boolean }) {
       aria-label={`${text("Last order process")}: ${productName}. ${statusLabel}`}
     >
       <div className="relative z-10 mx-auto max-w-[92rem] px-4 py-3 lg:px-6">
-        <div className="flex items-center gap-3 lg:gap-6">
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 lg:grid-cols-[auto_18rem_minmax(0,1fr)] lg:gap-x-6 lg:gap-y-0">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-emerald-300/50 bg-emerald-400/15 text-xl shadow-[0_0_24px_rgba(52,211,153,0.35)] motion-safe:animate-pulse" aria-hidden="true">
             🚚
           </span>
 
-          <div className="min-w-0 shrink lg:w-72">
+          <div className="min-w-0">
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">
               {text("Last order process")}
             </p>
-            <p className="truncate text-sm font-black sm:text-base">
+            <p className="line-clamp-2 text-sm font-black sm:text-base lg:line-clamp-1">
               {productName}{firstItem && firstItem.quantity > 1 ? ` × ${firstItem.quantity}` : ""}
             </p>
             {extraItems > 0 && (
@@ -229,12 +229,12 @@ export default function LastOrderStatusBar({ enabled }: { enabled: boolean }) {
             )}
           </div>
 
-          <div className="min-w-0 flex-1">
+          <div className="col-span-2 min-w-0 lg:col-span-1">
             <div className="flex items-center justify-between gap-3">
-              <p className="truncate text-sm font-bold text-emerald-100" role="status" aria-live="polite">
+              <p className="min-w-0 text-xs font-bold text-emerald-100 sm:truncate sm:text-sm" role="status" aria-live="polite">
                 {statusLabel}
               </p>
-              <span className="shrink-0 text-xs font-bold text-emerald-200 transition group-hover:translate-x-1">
+              <span className="shrink-0 text-[11px] font-bold text-emerald-200 transition group-hover:translate-x-1 sm:text-xs">
                 {text("View tracking")} →
               </span>
             </div>

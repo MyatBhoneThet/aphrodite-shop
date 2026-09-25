@@ -13,6 +13,7 @@ import DeliveryPinPicker, { type DeliveryPin } from "../components/DeliveryPinPi
 import DeliveryEstimateBadge from "../components/DeliveryEstimateBadge";
 import { estimateDelivery } from "../lib/delivery-estimate";
 import { PaymentLogo, PaymentQr } from "../components/PaymentLogo";
+import OrderPlacedView from "../components/OrderPlacedView";
 import { useLanguage } from "../lib/language";
 import {
   paymentAccountsFor,
@@ -395,30 +396,7 @@ export default function CartPage() {
   }
 
   if (placedOrderId) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-white px-5 text-center text-zinc-950">
-        <div>
-          <p className="text-5xl">🎉</p>
-          <h1 className="mt-4 text-3xl font-bold">{t("cart.orderPlaced")}</h1>
-          <p className="mt-3 text-zinc-500">
-            Order #{placedOrderId.slice(0, 8)} has been received and is now
-            pending COD verification. Keep your phone available; the store may
-            call before approving and shipping the order.
-          </p>
-          <div className="mt-6 flex justify-center gap-3">
-            <Link
-              href="/orders"
-              className="rounded-full bg-red-600 px-6 py-3 font-semibold text-white"
-            >
-              View my orders
-            </Link>
-            <Link href="/" className="rounded-full border px-6 py-3 font-semibold">
-              Continue shopping
-            </Link>
-          </div>
-        </div>
-      </main>
-    );
+    return <OrderPlacedView orderId={placedOrderId} prepaid={paymentMethod !== "cash_on_delivery"} title={t("cart.orderPlaced")} />;
   }
 
   return (

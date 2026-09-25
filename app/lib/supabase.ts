@@ -8,6 +8,7 @@ import { forbidden, notFound, unauthorized } from "./errors";
 import { conflict, serviceUnavailable } from "./errors";
 import type { SupabaseSocialProvider } from "./oauth";
 import type { SavedAddress, SavedAddressInput } from "./address-book";
+import type { FeedbackInput } from "./feedback";
 
 export type { PriceTierRow } from "./pricing";
 
@@ -3923,4 +3924,28 @@ export function getCodReviewContext(actorId: string, orderId: string) {
 
 export function syncSheetWholesale(rows: { source_key: string; unit_price: number | null; min_quantity: number | null }[]) {
   return codRpc<{ synced: number; price_list_id: string }>("sync_sheet_b2b", { p_rows: rows });
+}
+
+/** One feedback per customer per order; sending again edits the earlier one.
+ *  Returns null when the order is not this customer's. */
+export async function upsertSiteFeedback(userId: string, input: FeedbackInput) {
+  const owned = await supabaseRest<{ id: string }[]>(
+    `orders?select=id&id=eq.${encodeURIComponent(input.order_id)}&user_id=eq.${encodeURIComponent(userId)}&limit=1`
+  );
+  if (!owned[0]) return null;
+  const rows = await supabaseRest<{ id: string; rating: number; note: string | null }[]>(
+    "site_feedback?on_conflict=user_id,order_id",
+    {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify({
+        user_id: userId,
+        order_id: input.order_id,
+        rating: input.rating,
+        note: input.note?.trim() || null,
+        updated_at: new Date().toISOString(),
+      }),
+    }
+  );
+  return rows[0] ?? null;
 }

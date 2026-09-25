@@ -355,8 +355,8 @@ export default function OrdersView({ orderId }: { orderId?: string }) {
           <ul className="mt-8 space-y-3">{orders.map((order) => {
             const lines = order.order_items ?? [];
             const count = lines.reduce((sum, line) => sum + line.quantity, 0);
-            return <li key={order.id}><Link href={`/orders/${order.id}`} className="flex flex-wrap items-center gap-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-red-300 hover:shadow-md">
-              <div className="flex -space-x-3">{lines.slice(0, 3).map((line) => line.product?.image ? <img key={line.id} src={line.product.image} alt="" loading="lazy" className="h-14 w-14 rounded-xl border-2 border-white bg-white object-contain" /> : <span key={line.id} className="h-14 w-14 rounded-xl border-2 border-white bg-zinc-100" />)}{lines.length > 3 && <span className="flex h-14 w-14 items-center justify-center rounded-xl border-2 border-white bg-zinc-100 text-xs font-bold text-zinc-600">+{lines.length - 3}</span>}</div>
+            return <li key={order.id}><Link href={`/orders/${order.id}`} className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-red-300 hover:shadow-md">
+              <div className="flex -space-x-3">{lines.slice(0, 3).map((line) => line.product?.image ? <img key={line.id} src={line.product.image} alt="" loading="lazy" className="h-12 w-12 rounded-xl border-2 sm:h-14 sm:w-14 border-white bg-white object-contain" /> : <span key={line.id} className="h-12 w-12 rounded-xl border-2 sm:h-14 sm:w-14 border-white bg-zinc-100" />)}{lines.length > 3 && <span className="flex h-14 w-14 items-center justify-center rounded-xl border-2 border-white bg-zinc-100 text-xs font-bold text-zinc-600">+{lines.length - 3}</span>}</div>
               <div className="min-w-0 flex-1">
                 <p className="font-black">Order #{order.id.slice(0, 8).toUpperCase()}</p>
                 <p className="text-sm text-zinc-500">{formatDateTime(order.created_at)} · {count} item{count === 1 ? "" : "s"}</p>
@@ -372,8 +372,8 @@ export default function OrdersView({ orderId }: { orderId?: string }) {
                 )}
               </div>
               <span className={`rounded-full px-3 py-1.5 text-xs font-bold capitalize ${statusStyles[order.status]}`}>{order.status}</span>
-              <p className="text-lg font-black">{formatCurrency(order.total_amount)}</p>
-              <span aria-hidden className="text-zinc-400">›</span>
+              <p className="ml-auto text-lg font-black sm:ml-0">{formatCurrency(order.total_amount)}</p>
+              <span aria-hidden className="hidden text-zinc-400 sm:inline">›</span>
             </Link></li>;
           })}</ul>
         ) : orders.length === 0 || (orderId && !orders.some((order) => order.id === orderId)) ? <p className="mt-8 rounded-3xl bg-white p-10 text-center text-zinc-500 shadow-sm">{orderId ? "We couldn't find that order." : "You haven't placed any orders yet."}</p> : (
@@ -402,7 +402,7 @@ export default function OrdersView({ orderId }: { orderId?: string }) {
                     than stored — see lib/next-step.ts. */}
                 <NextStep order={order} note={order.payment_rejected_reason} />
                 <OrderTracking order={order} />
-                <div className="grid gap-6 md:grid-cols-[1fr_auto]"><OrderItemsList items={order.order_items ?? []} /><p className="text-2xl font-black">{formatCurrency(order.total_amount)}</p></div>
+                <div className="grid gap-6 lg:grid-cols-[1fr_auto]"><OrderItemsList items={order.order_items ?? []} /><p className="text-2xl font-black">{formatCurrency(order.total_amount)}</p></div>
                 <div className="mt-5 grid gap-3 rounded-2xl bg-zinc-50 p-4 text-sm sm:grid-cols-3"><div><p className="text-xs uppercase text-zinc-400">Payment</p><p className="font-semibold">{t(`payment.method.${order.payment_method ?? "cash_on_delivery"}`)}{order.payment_account ? ` · ${order.payment_account.toUpperCase()}` : ""}</p></div><div><p className="text-xs uppercase text-zinc-400">Payment status</p><p className="font-semibold capitalize">{order.payment_status}</p></div><div><p className="text-xs uppercase text-zinc-400">Delivery address</p><p className="font-semibold">{order.shipping_address}</p></div></div>
                 <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-5 text-sm text-blue-950">
                   <div className="grid gap-3 sm:grid-cols-3">
