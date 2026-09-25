@@ -1,8 +1,9 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, after, type NextRequest } from "next/server";
 import {
   authenticate,
   createItemReturnRequest,
   listCustomerReturnRequests,
+  notifyReturnProgress,
 } from "@/app/lib/backend";
 import { handleRouteError } from "@/app/lib/errors";
 import { readJsonBody } from "@/app/lib/request";
@@ -31,10 +32,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json(
-      { request: await createItemReturnRequest(user, parsed.data) },
-      { status: 201 }
-    );
+    const created = await createItemReturnRequest(user, parsed.data);
+    if (created) {
+      after(() => notifyReturnProgress(created.id, "requested"));
+    }
+
+    return NextResponse.json({ request: created }, { status: 201 });
   } catch (error) {
     return handleRouteError("returns.create", error);
   }

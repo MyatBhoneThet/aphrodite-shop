@@ -148,6 +148,10 @@ import {
   type ReceiptEmailResult,
 } from "./receipt-email";
 import {
+  sendReturnStatusEmail,
+  type ReturnEmailEvent,
+} from "./return-email";
+import {
   alertBaseline,
   evaluateAlert,
   type AlertKind,
@@ -3588,6 +3592,56 @@ export async function addReturnRequestEvidence(
 
 export async function listCustomerReturnRequests(user: CurrentUser) {
   return selectReturnRequestsForCustomer(user.id);
+}
+
+/**
+ * Sends the customer a transactional update for every visible return/refund
+ * transition. Route handlers call this from next/server after(), so an email
+ * provider problem can never delay or roll back the status change.
+ */
+export async function notifyReturnProgress(
+  requestId: string,
+  event: ReturnEmailEvent,
+  idempotencySuffix?: string
+) {
+  try {
+    const request = await selectReturnRequestById(requestId);
+    if (!request || !(await wantsOrderUpdates(request.customer_id))) return;
+
+    // Some databases do not expose the joined profile to the service query.
+    // Resolve it separately, just as order emails do for admin-triggered mail.
+    let withContact = request;
+    if (!request.profiles?.email) {
+      const profile = await selectProfileByIdService(request.customer_id);
+      if (profile?.email) {
+        withContact = {
+          ...request,
+          profiles: {
+            email: profile.email,
+            full_name: profile.full_name,
+            role: profile.role,
+          },
+        };
+      }
+    }
+
+    const result = await sendReturnStatusEmail(withContact, event, {
+      idempotencySuffix,
+    });
+    if (result.status === "failed") {
+      console.error("[returns] status email failed", {
+        return_request_id: requestId,
+        event,
+        error: result.error,
+      });
+    }
+  } catch (error) {
+    console.error("[returns] status email could not run", {
+      return_request_id: requestId,
+      event,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 export async function listAdminReturnRequests(user: CurrentUser) {

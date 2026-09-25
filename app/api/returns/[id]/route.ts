@@ -1,5 +1,9 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { authenticate, requestReturnReview } from "@/app/lib/backend";
+import { NextResponse, after, type NextRequest } from "next/server";
+import {
+  authenticate,
+  notifyReturnProgress,
+  requestReturnReview,
+} from "@/app/lib/backend";
 import { handleRouteError } from "@/app/lib/errors";
 import { readJsonBody } from "@/app/lib/request";
 import { firstIssueMessage, returnReviewRequestSchema } from "@/app/lib/validation";
@@ -22,9 +26,12 @@ export async function PATCH(
       );
     }
 
-    return NextResponse.json({
-      request: await requestReturnReview(user, id, parsed.data.note),
-    });
+    const updated = await requestReturnReview(user, id, parsed.data.note);
+    if (updated) {
+      after(() => notifyReturnProgress(id, "requested", "review-requested"));
+    }
+
+    return NextResponse.json({ request: updated });
   } catch (error) {
     return handleRouteError("returns.review", error);
   }

@@ -1,8 +1,9 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, after, type NextRequest } from "next/server";
 import {
   advanceItemReturn,
   authenticate,
   decideReturnRequest,
+  notifyReturnProgress,
   updateRefundPlan,
 } from "@/app/lib/backend";
 import { handleRouteError } from "@/app/lib/errors";
@@ -38,6 +39,12 @@ export async function PATCH(
         : parsed.data.action === "advance"
           ? await advanceItemReturn(user, id, parsed.data)
           : await updateRefundPlan(user, id, parsed.data);
+
+    if (updated) {
+      const event =
+        parsed.data.action === "refund_plan" ? "refund_plan_updated" : updated.status;
+      after(() => notifyReturnProgress(id, event, updated.updated_at));
+    }
 
     return NextResponse.json({ request: updated });
   } catch (error) {

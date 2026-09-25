@@ -12,6 +12,7 @@ type HeaderOrder = {
   id: string;
   status: string;
   created_at: string;
+  delivered_at?: string | null;
   return_request_status?: "none" | "requested" | "approved" | "pickup_scheduled" | "received" | "refunded" | "rejected";
   delivery_events?: { stage: string; happened_at: string }[];
   order_items?: {
@@ -100,7 +101,17 @@ export default function LastOrderStatusBar({ enabled }: { enabled: boolean }) {
         const displayedOrder = latestReturn
           ? recentOrders.find((candidate) => candidate.id === latestReturn.order_id) ?? latestOrder
           : latestOrder;
-        if (active) {
+        // A delivered order's bar is only useful for a day; after that it just
+        // confuses people, so it disappears (returns stay until they finish).
+        const deliveredAt = displayedOrder?.status === "delivered" && !latestReturn
+          ? displayedOrder.delivered_at ??
+            displayedOrder.delivery_events?.findLast((event) => event.stage === "delivered")?.happened_at
+          : null;
+        const expired = Boolean(deliveredAt) && Date.now() - Date.parse(deliveredAt!) > 24 * 60 * 60 * 1000;
+        if (active && expired) {
+          setOrder(null);
+          setItemReturn(null);
+        } else if (active) {
           setOrder(displayedOrder);
           setItemReturn(latestReturn?.order_id === displayedOrder?.id ? latestReturn : null);
         }
