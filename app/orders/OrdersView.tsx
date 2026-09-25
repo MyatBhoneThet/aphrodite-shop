@@ -355,10 +355,10 @@ export default function OrdersView({ orderId }: { orderId?: string }) {
           <ul className="mt-8 space-y-3">{orders.map((order) => {
             const lines = order.order_items ?? [];
             const count = lines.reduce((sum, line) => sum + line.quantity, 0);
-            return <li key={order.id}><Link href={`/orders/${order.id}`} className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-red-300 hover:shadow-md">
-              <div className="flex shrink-0 -space-x-3">{lines.slice(0, 3).map((line) => line.product?.image ? <img key={line.id} src={line.product.image} alt="" loading="lazy" className="h-12 w-12 rounded-xl border-2 sm:h-14 sm:w-14 border-white bg-white object-contain" /> : <span key={line.id} className="h-12 w-12 rounded-xl border-2 sm:h-14 sm:w-14 border-white bg-zinc-100" />)}{lines.length > 3 && <span className="flex h-14 w-14 items-center justify-center rounded-xl border-2 border-white bg-zinc-100 text-xs font-bold text-zinc-600">+{lines.length - 3}</span>}</div>
-              <div className="min-w-0 flex-1">
-                <p className="font-black">Order #{order.id.slice(0, 8).toUpperCase()}</p>
+            return <li key={order.id}><Link href={`/orders/${order.id}`} className="grid min-w-0 gap-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-red-300 hover:shadow-md md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-center">
+              <div className="flex min-w-0 max-w-full shrink-0 -space-x-3 overflow-hidden">{lines.slice(0, 3).map((line) => line.product?.image ? <img key={line.id} src={line.product.image} alt="" loading="lazy" className="h-12 w-12 shrink-0 rounded-xl border-2 border-white bg-white object-contain sm:h-14 sm:w-14" /> : <span key={line.id} className="h-12 w-12 shrink-0 rounded-xl border-2 border-white bg-zinc-100 sm:h-14 sm:w-14" />)}{lines.length > 3 && <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border-2 border-white bg-zinc-100 text-xs font-bold text-zinc-600 sm:h-14 sm:w-14">+{lines.length - 3}</span>}</div>
+              <div className="min-w-0">
+                <p className="break-normal font-black">Order #{order.id.slice(0, 8).toUpperCase()}</p>
                 <p className="text-sm text-zinc-500">{formatDateTime(order.created_at)} · {count} item{count === 1 ? "" : "s"}</p>
                 {order.cancellation_refund_status === "details_required" && (
                   <p className="mt-2 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-900">
@@ -371,9 +371,11 @@ export default function OrdersView({ orderId }: { orderId?: string }) {
                   </p>
                 )}
               </div>
-              <span className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-bold capitalize ${statusStyles[order.status]}`}>{order.status}</span>
-              <p className="ml-auto text-lg font-black sm:ml-0">{formatCurrency(order.total_amount)}</p>
-              <span aria-hidden className="hidden text-zinc-400 sm:inline">›</span>
+              <div className="flex min-w-0 items-center justify-between gap-3 md:flex-col md:items-end">
+                <span className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-bold capitalize ${statusStyles[order.status]}`}>{order.status}</span>
+                <p className="min-w-0 text-right text-base font-black tabular-nums sm:text-lg">{formatCurrency(order.total_amount)}</p>
+                <span aria-hidden className="hidden text-zinc-400 md:block">›</span>
+              </div>
             </Link></li>;
           })}</ul>
         ) : orders.length === 0 || (orderId && !orders.some((order) => order.id === orderId)) ? <p className="mt-8 rounded-3xl bg-white p-10 text-center text-zinc-500 shadow-sm">{orderId ? "We couldn't find that order." : "You haven't placed any orders yet."}</p> : (

@@ -91,7 +91,7 @@ export default function Navbar({ search, setSearch, searchSuggestions, language,
         </div>
       </div>
       <div className="px-4 pb-3 md:hidden"><SearchBox search={search} setSearch={setSearch} suggestions={searchSuggestions} /></div>
-      <nav aria-label={text("Product categories")} className="flex gap-5 overflow-x-auto [&>a]:shrink-0 border-t border-zinc-100 px-5 py-3 text-sm font-semibold 2xl:hidden"><Link href="/catalog/laptops" className="whitespace-nowrap">{text("Laptops")}</Link><Link href="/catalog/accessories" className="whitespace-nowrap">{text("Accessories")}</Link><Link href="/catalog/pc-parts" className="whitespace-nowrap">{text("PC Parts")}</Link><Link href="/find-my-laptop" className="whitespace-nowrap text-red-600">{text("Find my laptop")} →</Link><Link href="/pc-builder" className="whitespace-nowrap text-red-600">{text("Build a PC")} →</Link></nav>
+      <nav aria-label={text("Product categories")} className="grid grid-cols-3 gap-x-3 gap-y-2 border-t border-zinc-100 px-4 py-3 text-center text-xs font-semibold sm:flex sm:gap-5 sm:overflow-x-auto sm:px-5 sm:text-left sm:text-sm [&>a]:min-w-0 sm:[&>a]:shrink-0"><Link href="/catalog/laptops" className="sm:whitespace-nowrap">{text("Laptops")}</Link><Link href="/catalog/accessories" className="sm:whitespace-nowrap">{text("Accessories")}</Link><Link href="/catalog/pc-parts" className="sm:whitespace-nowrap">{text("PC Parts")}</Link><Link href="/find-my-laptop" className="col-span-2 text-red-600 sm:col-auto sm:whitespace-nowrap">{text("Find my laptop")} →</Link><Link href="/pc-builder" className="text-red-600 sm:whitespace-nowrap">{text("Build a PC")} →</Link></nav>
       <LastOrderStatusBar enabled={Boolean(currentUser && currentUser.role !== "admin")} />
     </header>
   );

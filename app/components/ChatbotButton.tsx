@@ -214,7 +214,7 @@ export default function ChatbotButton({ currentUser, products }: { language?: "e
     ? products.filter((item) => `${item.name} ${item.brand}`.toLowerCase().includes(productQuery.trim().toLowerCase())).slice(0, 6)
     : [];
 
-  return <div className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-5 z-[60]">
+  return <div className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 z-[60] sm:bottom-[max(1.25rem,env(safe-area-inset-bottom))] sm:left-5">
     {isOpen && <section aria-label="Shopping and customer support chat" className="mb-3 flex h-[min(38rem,calc(100dvh-7rem-env(safe-area-inset-bottom)))] w-[min(25rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-3xl border bg-white shadow-2xl">
       <div className="bg-zinc-950 p-4 text-white"><div className="flex items-center justify-between"><div><p className="font-black">{t("chat.title")}</p><p className="mt-0.5 text-xs text-zinc-300">{t("chat.subtitle")}</p></div><button type="button" onClick={() => setIsOpen(false)} className="rounded-full border border-zinc-600 px-3 py-1 text-xs">Close</button></div>
         <div className="mt-4 grid grid-cols-2 rounded-xl bg-zinc-800 p-1 text-xs font-bold"><button type="button" onClick={() => { setMode("assistant"); setError(""); }} className={`rounded-lg px-3 py-2 ${mode === "assistant" ? "bg-white text-zinc-950" : "text-zinc-300"}`}>✨ Instant help</button><button type="button" onClick={() => { setMode("live"); setError(""); }} className={`rounded-lg px-3 py-2 ${mode === "live" ? "bg-white text-zinc-950" : "text-zinc-300"}`}>● Live support</button></div>
@@ -286,6 +286,6 @@ export default function ChatbotButton({ currentUser, products }: { language?: "e
           </form>
         </div></>}
     </section>}
-    <button type="button" onClick={() => setIsOpen((open) => !open)} className="rounded-full bg-red-600 px-5 py-4 font-bold text-white shadow-xl" aria-expanded={isOpen}>{t("chat.button")}</button>
+    <button type="button" onClick={() => setIsOpen((open) => !open)} className="flex h-12 min-w-12 items-center justify-center rounded-full bg-red-600 px-3 font-bold text-white shadow-xl sm:h-auto sm:px-5 sm:py-4" aria-label={t("chat.button")} aria-expanded={isOpen}><span aria-hidden="true" className="sm:hidden">💬</span><span className="hidden sm:inline">{t("chat.button")}</span></button>
   </div>;
 }
