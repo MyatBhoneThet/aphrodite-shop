@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
 import { useLanguage } from "../lib/language";
 import { orderTracking, trackingSteps } from "../lib/order-tracking";
+import { deliveredBannerHasExpired } from "../lib/order-status-visibility";
 import { refundSteps, refundTracking, type RefundStep } from "../lib/refund-tracking";
 import type { TranslationKey } from "../lib/translations";
 
@@ -12,7 +13,9 @@ type HeaderOrder = {
   id: string;
   status: string;
   created_at: string;
+  updated_at?: string | null;
   delivered_at?: string | null;
+  delivery_last_event_at?: string | null;
   return_request_status?: "none" | "requested" | "approved" | "pickup_scheduled" | "received" | "refunded" | "rejected";
   delivery_events?: { stage: string; happened_at: string }[];
   order_items?: {
@@ -103,11 +106,7 @@ export default function LastOrderStatusBar({ enabled }: { enabled: boolean }) {
           : latestOrder;
         // A delivered order's bar is only useful for a day; after that it just
         // confuses people, so it disappears (returns stay until they finish).
-        const deliveredAt = displayedOrder?.status === "delivered" && !latestReturn
-          ? displayedOrder.delivered_at ??
-            displayedOrder.delivery_events?.findLast((event) => event.stage === "delivered")?.happened_at
-          : null;
-        const expired = Boolean(deliveredAt) && Date.now() - Date.parse(deliveredAt!) > 24 * 60 * 60 * 1000;
+        const expired = !latestReturn && deliveredBannerHasExpired(displayedOrder);
         if (active && expired) {
           setOrder(null);
           setItemReturn(null);
