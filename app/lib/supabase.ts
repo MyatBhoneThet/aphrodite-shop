@@ -108,6 +108,8 @@ export type CartItemRow = {
   user_id: string;
   product_id: number;
   quantity: number;
+  build_group_id?: string | null;
+  build_name?: string | null;
   created_at: string;
   updated_at: string;
   products?: ProductRow | null;
@@ -1635,6 +1637,17 @@ export function requireAdmin(user: CurrentUser) {
   }
 }
 
+/** Staff share the operational dashboard, but never inherit admin-only powers. */
+export function requireBackoffice(user: CurrentUser) {
+  if (user.role !== "admin" && user.role !== "staff") {
+    throw forbidden();
+  }
+}
+
+export function isBackofficeRole(role: UserRole | null | undefined) {
+  return role === "admin" || role === "staff";
+}
+
 const DEFAULT_PAGE_SIZE = 24;
 const MAX_PAGE_SIZE = 100;
 
@@ -2259,7 +2272,7 @@ export async function deleteProduct(id: number) {
 export async function selectCart(userId: string, accessToken: string) {
   const { anonKey } = requireSupabaseConfig();
   return supabaseRest<CartItemRow[]>(
-    `cart_items?select=id,user_id,product_id,quantity,created_at,updated_at,products(${PUBLIC_PRODUCT_COLUMNS})&user_id=eq.${encodeURIComponent(
+    `cart_items?select=id,user_id,product_id,quantity,build_group_id,build_name,created_at,updated_at,products(${PUBLIC_PRODUCT_COLUMNS})&user_id=eq.${encodeURIComponent(
       userId
     )}&order=created_at.asc`,
     {},
@@ -2268,31 +2281,62 @@ export async function selectCart(userId: string, accessToken: string) {
   );
 }
 
-export async function upsertCartItem(
+export async function insertCartItem(
   userId: string,
   productId: number,
   quantity: number,
-  accessToken: string
+  accessToken: string,
+  build?: { id: string; name: string } | null
 ) {
   const { anonKey } = requireSupabaseConfig();
   const rows = await supabaseRest<CartItemRow[]>(
     "cart_items",
     {
       method: "POST",
-      headers: {
-        Prefer: "resolution=merge-duplicates,return=representation",
-      },
+      headers: { Prefer: "return=representation" },
       body: JSON.stringify({
         user_id: userId,
         product_id: productId,
         quantity,
+        build_group_id: build?.id ?? null,
+        build_name: build?.name ?? null,
       }),
     },
     accessToken,
     anonKey
   );
-
   return rows[0];
+}
+
+/** Insert every component of a PC build in one PostgREST request. PostgREST
+ * executes a bulk insert in a single database transaction, so a build cannot
+ * be left half-added if one component row fails. */
+export async function insertCartBuildItems(
+  userId: string,
+  productIds: number[],
+  quantity: number,
+  accessToken: string,
+  build: { id: string; name: string }
+) {
+  const { anonKey } = requireSupabaseConfig();
+  return supabaseRest<CartItemRow[]>(
+    "cart_items",
+    {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(
+        productIds.map((productId) => ({
+          user_id: userId,
+          product_id: productId,
+          quantity,
+          build_group_id: build.id,
+          build_name: build.name,
+        }))
+      ),
+    },
+    accessToken,
+    anonKey
+  );
 }
 
 export async function updateCartItem(
@@ -2519,44 +2563,39 @@ async function withOptionalPaymentSlips<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-// Orders run under the caller's own access token, not the service role key.
-// The "Owners or admins read/update orders" RLS policies re-derive the same
-// ownership/admin check from auth.uid() server-side, so this is real
-// defense-in-depth rather than just the `user_id=eq.` filter below.
+// Customers and admins run under their own access token. Staff deliberately
+// use the server service key because they have no direct order-table RLS; the
+// backend redacts contact/location fields before any staff response is sent.
 export async function selectOrders(
   user: CurrentUser,
   pagination: { limit?: number | null; offset?: number | null } = {}
 ) {
   const { anonKey } = requireSupabaseConfig();
   const ownerFilter =
-    user.role === "admin" ? "" : `&user_id=eq.${encodeURIComponent(user.id)}`;
+    isBackofficeRole(user.role) ? "" : `&user_id=eq.${encodeURIComponent(user.id)}`;
   const { limit, offset } = sanitizePagination(
     pagination.limit,
     pagination.offset
   );
 
-  return withOptionalPaymentSlips(() =>
-    supabaseRest<OrderRow[]>(
-      `orders?select=${orderSelect()}${ownerFilter}&order=created_at.desc&limit=${limit}&offset=${offset}`,
-      {},
-      user.accessToken,
-      anonKey
-    )
-  );
+  return withOptionalPaymentSlips(() => {
+    const path = `orders?select=${orderSelect()}${ownerFilter}&order=created_at.desc&limit=${limit}&offset=${offset}`;
+    return user.role === "staff"
+      ? supabaseRest<OrderRow[]>(path)
+      : supabaseRest<OrderRow[]>(path, {}, user.accessToken, anonKey);
+  });
 }
 
 export async function selectOrderById(user: CurrentUser, id: string) {
   const { anonKey } = requireSupabaseConfig();
   const ownerFilter =
-    user.role === "admin" ? "" : `&user_id=eq.${encodeURIComponent(user.id)}`;
-  const rows = await withOptionalPaymentSlips(() =>
-    supabaseRest<OrderRow[]>(
-      `orders?select=${orderSelect()}&id=eq.${encodeURIComponent(id)}${ownerFilter}&limit=1`,
-      {},
-      user.accessToken,
-      anonKey
-    )
-  );
+    isBackofficeRole(user.role) ? "" : `&user_id=eq.${encodeURIComponent(user.id)}`;
+  const rows = await withOptionalPaymentSlips(() => {
+    const path = `orders?select=${orderSelect()}&id=eq.${encodeURIComponent(id)}${ownerFilter}&limit=1`;
+    return user.role === "staff"
+      ? supabaseRest<OrderRow[]>(path)
+      : supabaseRest<OrderRow[]>(path, {}, user.accessToken, anonKey);
+  });
 
   return rows[0] ?? null;
 }
@@ -2588,7 +2627,7 @@ export async function selectOrdersByPhoneTailService(tail: string) {
 }
 
 export async function countOrders(
-  accessToken: string,
+  accessToken?: string,
   status?: OrderRow["status"]
 ) {
   const { anonKey } = requireSupabaseConfig();
@@ -2596,7 +2635,9 @@ export async function countOrders(
 
   if (status) params.set("status", `eq.${status}`);
 
-  return supabaseCount(`orders?${params.toString()}`, accessToken, anonKey);
+  return accessToken
+    ? supabaseCount(`orders?${params.toString()}`, accessToken, anonKey)
+    : supabaseCount(`orders?${params.toString()}`);
 }
 
 // Slim projection for dashboard aggregates (revenue, monthly trend, status
@@ -2604,33 +2645,52 @@ export async function countOrders(
 // management table needs, since only these three columns are used here.
 export type OrderStatsRow = Pick<OrderRow, "total_amount" | "status" | "created_at">;
 
-export async function selectOrderStats(accessToken: string) {
+export async function selectOrderStats(accessToken?: string) {
   const { anonKey } = requireSupabaseConfig();
-  return supabaseRest<OrderStatsRow[]>(
-    "orders?select=total_amount,status,created_at",
-    {},
-    accessToken,
-    anonKey
-  );
+  return accessToken
+    ? supabaseRest<OrderStatsRow[]>("orders?select=total_amount,status,created_at", {}, accessToken, anonKey)
+    : supabaseRest<OrderStatsRow[]>("orders?select=total_amount,status,created_at");
 }
 
 export type TopProductRow = {
   product_id: number;
   quantity: number;
   products: Pick<ProductRow, "name" | "image"> | null;
+  orders?: Pick<OrderRow, "created_at" | "status"> | null;
 };
 
 // Slim projection over order_items for a "best sellers" aggregate -- summed
 // client-side in app/lib/backend.ts since PostgREST (without a custom SQL
 // view) doesn't expose a GROUP BY/SUM endpoint.
-export async function selectOrderItemStats(accessToken: string) {
+export async function selectOrderItemStats(accessToken?: string) {
   const { anonKey } = requireSupabaseConfig();
-  return supabaseRest<TopProductRow[]>(
-    "order_items?select=product_id,quantity,products(name,image)",
-    {},
-    accessToken,
-    anonKey
-  );
+  const path = "order_items?select=product_id,quantity,products(name,image),orders!inner(created_at,status)";
+  return accessToken
+    ? supabaseRest<TopProductRow[]>(path, {}, accessToken, anonKey)
+    : supabaseRest<TopProductRow[]>(path);
+}
+
+export type SalesReportOrderRow = Pick<
+  OrderRow,
+  "id" | "status" | "total_amount" | "payment_method" | "payment_status" | "created_at"
+> & {
+  order_items?: Array<
+    Pick<OrderItemRow, "quantity" | "unit_price"> & {
+      products?: Pick<ProductRow, "name" | "brand" | "category"> | null;
+    }
+  >;
+};
+
+/** PII-free report projection. This is service-only and is never called directly by a client. */
+export async function selectSalesReportOrders(start: string, end: string) {
+  const params = new URLSearchParams({
+    select: "id,status,total_amount,payment_method,payment_status,created_at,order_items(quantity,unit_price,products(name,brand,category))",
+    created_at: `gte.${start}`,
+    order: "created_at.asc",
+    limit: "5000",
+  });
+  params.append("created_at", `lt.${end}`);
+  return supabaseRest<SalesReportOrderRow[]>(`orders?${params.toString()}`);
 }
 
 export async function updateOrderStatus(
@@ -3448,7 +3508,7 @@ export async function selectCustomerProfiles(
 ) {
   const params = new URLSearchParams({
     select: "id,email,full_name,role,wholesale_status,price_list_id,business_name,business_verified_at,created_at",
-    role: "neq.admin",
+    role: "in.(normal,wholesale)",
     order: "created_at.desc",
     limit: "200",
   });
@@ -3482,8 +3542,28 @@ export async function selectCustomerProfiles(
  *  administrators OUT, so it cannot answer this. */
 export async function selectAdminProfiles() {
   return supabaseRest<Profile[]>(
-    "profiles?select=id,email,full_name,role&role=eq.admin&order=email.asc&limit=50"
+    "profiles?select=id,email,full_name,role&role=in.(admin,staff)&order=email.asc&limit=100"
   );
+}
+
+export async function selectStaffProfiles() {
+  return supabaseRest<Profile[]>(
+    "profiles?select=id,email,full_name,role,created_at&role=eq.staff&order=created_at.desc&limit=200"
+  );
+}
+
+export async function setProfileRoleService(userId: string, role: UserRole) {
+  const rows = await supabaseRest<Profile[]>(
+    `profiles?id=eq.${encodeURIComponent(userId)}`,
+    { method: "PATCH", body: JSON.stringify({ role }) }
+  );
+  return rows[0] ?? null;
+}
+
+export async function deleteAuthUserService(userId: string) {
+  await supabaseAuth<unknown>(`admin/users/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+  });
 }
 
 export async function selectProfileByIdService(userId: string) {
@@ -3609,6 +3689,7 @@ export async function checkoutOrderRpc(payload: {
   shipping_country: string;
   payment_method: "cash_on_delivery" | "bank_transfer" | "mmqr";
   notes: string | null;
+  cart_item_ids: string[];
   lines: CheckoutLine[];
 }) {
   return supabaseRest<{ order_id: string; total_amount: number }>(
@@ -3628,6 +3709,7 @@ export async function checkoutOrderRpc(payload: {
         p_shipping_country: payload.shipping_country,
         p_payment_method: payload.payment_method,
         p_notes: payload.notes,
+        p_cart_item_ids: payload.cart_item_ids,
         p_lines: payload.lines,
       }),
     }

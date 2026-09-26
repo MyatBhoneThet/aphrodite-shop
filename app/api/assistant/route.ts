@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
 
     const [products, orders] = await Promise.all([
       getProducts({ inStock: true, limit: 300 }),
-      viewer && viewer.role !== "admin"
+      viewer && viewer.role !== "admin" && viewer.role !== "staff"
         ? getOrders(viewer, { limit: 5 }).catch(() => [])
         : Promise.resolve([]),
     ]);

@@ -39,12 +39,12 @@ export async function POST(request: NextRequest) {
 
     const profile = await getProfile(session.user.id, session.access_token);
 
-    if (!profile || profile.role !== "admin") {
+    if (!profile || (profile.role !== "admin" && profile.role !== "staff")) {
       // Valid Supabase credentials, but not an admin account -- do NOT set
       // the admin session cookie. They still have an ordinary Supabase
       // session (usable for the regular storefront), just not this one.
       return NextResponse.json(
-        { error: "This account does not have admin access." },
+        { error: "This account does not have staff dashboard access." },
         { status: 403 }
       );
     }

@@ -23,7 +23,7 @@ export default function LocationSharing({ expanded = false }: { expanded?: boole
 
   useEffect(() => {
     let cancelled = false;
-    if (!user?.id || user.role === "admin") {
+    if (!user?.id || user.role === "admin" || user.role === "staff") {
       loadedUser.current = null;
       return;
     }
@@ -87,7 +87,7 @@ export default function LocationSharing({ expanded = false }: { expanded?: boole
     finally { setBusy(false); }
   }
 
-  if (status === "checking" || user?.role === "admin") return null;
+  if (status === "checking" || user?.role === "admin" || user?.role === "staff") return null;
   if (!user) return expanded ? <p className="rounded-2xl bg-zinc-50 p-6"><Link href="/login" className="font-semibold text-red-700 underline">{text("Sign in")}</Link> {text("to share your location with the store.")}</p> : null;
   const standaloneLocationFlow = pathname === "/delivery-area" || pathname.startsWith("/delivery-area/");
   if (!expanded && (!open || pathname.startsWith("/admin") || standaloneLocationFlow || ["/login", "/register", "/location"].includes(pathname))) return null;

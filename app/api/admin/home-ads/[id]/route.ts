@@ -6,6 +6,7 @@ import {
   deleteHomepageAd,
   deleteHomepageAdObject,
   requireAdmin,
+  requireBackoffice,
   selectHomepageAds,
   updateHomepageAd,
 } from "@/app/lib/supabase";
@@ -42,7 +43,7 @@ function safeFields(body: unknown) {
 export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const user = await authenticate(request);
-    requireAdmin(user);
+    requireBackoffice(user);
     const { id } = await context.params;
     const ad = await updateHomepageAd(id, safeFields(await readJsonBody(request)));
     if (!ad) throw notFound("Advertisement not found.");

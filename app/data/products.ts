@@ -1,4 +1,4 @@
-export type UserRole = "normal" | "wholesale" | "admin";
+export type UserRole = "normal" | "wholesale" | "staff" | "admin";
 
 export type ProductType = "laptop" | "accessory";
 

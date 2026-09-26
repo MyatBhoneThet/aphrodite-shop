@@ -5,7 +5,7 @@ import { badRequest, handleRouteError } from "@/app/lib/errors";
 import {
   deleteHomepageAdObject,
   insertHomepageAd,
-  requireAdmin,
+  requireBackoffice,
   selectHomepageAds,
   uploadHomepageAdObject,
 } from "@/app/lib/supabase";
@@ -26,7 +26,7 @@ function safeHref(value: FormDataEntryValue | null) {
 export async function GET(request: NextRequest) {
   try {
     const user = await authenticate(request);
-    requireAdmin(user);
+    requireBackoffice(user);
     return NextResponse.json({ ads: await selectHomepageAds(true) });
   } catch (error) {
     return handleRouteError("admin.home-ads.list", error);
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
   let uploadedPath: string | null = null;
   try {
     const user = await authenticate(request);
-    requireAdmin(user);
+    requireBackoffice(user);
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof File)) throw badRequest("Choose an advertisement image.");

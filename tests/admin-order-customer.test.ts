@@ -39,6 +39,14 @@ const admin: CurrentUser = {
   accessToken: "token",
 };
 
+const staff: CurrentUser = {
+  ...admin,
+  id: "staff-1",
+  email: "staff@example.com",
+  role: "staff",
+  profile: { ...adminProfile, id: "staff-1", email: "staff@example.com", role: "staff" },
+};
+
 const order = {
   id: "order-1",
   user_id: "customer-1",
@@ -88,6 +96,18 @@ beforeEach(() => {
 });
 
 describe("admin order customer details", () => {
+  it("redacts customer contact and location details from staff", async () => {
+    const [result] = await getOrders(staff);
+
+    expect(result.profiles?.email ?? "").toBe("");
+    expect(result.shipping_phone).toBe("");
+    expect(result.shipping_address).toBe("");
+    expect(result.delivery_latitude).toBeNull();
+    expect(result.return_pickup_address).toBeNull();
+    expect(result.cancellation_refund_account_number).toBeNull();
+    expect(selectProfilesByIdsService).not.toHaveBeenCalled();
+  });
+
   it("fills a missing order profile with the customer's login email", async () => {
     const [result] = await getOrders(admin);
 

@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     return setSessionCookies(
       NextResponse.json({ profile, user: profile }),
       session.access_token,
-      { isAdmin: profile?.role === "admin" }
+      { isBackoffice: profile?.role === "admin" || profile?.role === "staff" }
     );
   } catch (error) {
     console.error("[auth.login] failed", error);

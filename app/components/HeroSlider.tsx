@@ -108,7 +108,7 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
           {active.image && !failedImages.includes(active.image) ? (
             <Link
               href={active.href}
-              className="block aspect-[5/2] w-full overflow-hidden md:aspect-auto md:h-full md:min-h-[24rem]"
+              className="block h-full min-h-[22rem] w-full overflow-hidden md:min-h-[24rem]"
             >
               {/* Fill the same canvas as the designed slides, including beneath the controls. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Product } from "../app/data/products";
 import { generatePcBuilds } from "../app/lib/pc-builder";
+import {
+  isCompatiblePcPart,
+  normalizePcBuildSelection,
+  pcBuildCompatibilityIssues,
+} from "../app/lib/pc-compatibility";
+import { extractSocket } from "../app/lib/product-specifications";
 
 function part(id: number, category: string, name: string, price: number): Product {
   return {
@@ -100,5 +106,55 @@ describe("PC Build Planner", () => {
 
     expect(plans[0].missing).toContain("Memory");
     expect(plans[0].parts.some((item) => item.product.id === 60)).toBe(false);
+  });
+});
+
+describe("custom PC compatibility", () => {
+  const ryzen8700f = part(100, "CPU", "AMD Ryzen 7 8700F (Next)", 10_000);
+  const am5Board = part(101, "Mobo", "Gigabyte B650M DDR5", 8_000);
+  const intelBoard = part(102, "Mobo", "ASUS PRIME B860M-A WIFI DDR5", 8_000);
+
+  it("infers sockets from CPU generations and motherboard chipsets", () => {
+    expect(extractSocket(ryzen8700f)).toBe("AM5");
+    expect(extractSocket(am5Board)).toBe("AM5");
+    expect(extractSocket(intelBoard)).toBe("LGA1851");
+    expect(extractSocket(part(103, "CPU", "Intel Core i5-14400F", 10_000))).toBe("LGA1700");
+  });
+
+  it("only offers motherboards matching the selected processor socket", () => {
+    const selected = { cpu: ryzen8700f };
+    expect(isCompatiblePcPart("motherboard", am5Board, selected)).toBe(true);
+    expect(isCompatiblePcPart("motherboard", intelBoard, selected)).toBe(false);
+  });
+
+  it("filters memory by the selected motherboard generation", () => {
+    const selected = { cpu: ryzen8700f, motherboard: am5Board };
+    expect(
+      isCompatiblePcPart("memory", part(104, "RAM", "32GB DDR5 5600MHz", 4_000), selected)
+    ).toBe(true);
+    expect(
+      isCompatiblePcPart("memory", part(105, "RAM", "32GB DDR4 3600MHz", 3_000), selected)
+    ).toBe(false);
+  });
+
+  it("drops an incompatible preset motherboard and its dependent parts", () => {
+    const memory = part(106, "RAM", "32GB DDR5 5600MHz", 4_000);
+    expect(
+      normalizePcBuildSelection({
+        cpu: ryzen8700f,
+        motherboard: intelBoard,
+        memory,
+      })
+    ).toEqual({ cpu: ryzen8700f });
+  });
+
+  it("requires exactly one processor and motherboard before adding a build", () => {
+    expect(pcBuildCompatibilityIssues([ryzen8700f])).toContain(
+      "A motherboard is required for every PC build."
+    );
+    expect(pcBuildCompatibilityIssues([ryzen8700f, am5Board])).toEqual([]);
+    expect(pcBuildCompatibilityIssues([ryzen8700f, intelBoard])[0]).toContain(
+      "not compatible"
+    );
   });
 });

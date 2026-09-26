@@ -340,13 +340,13 @@ export default function OrdersView({ orderId }: { orderId?: string }) {
 
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
-      <header className="border-b bg-white"><div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4">
-        <Link href="/" aria-label="Aphrodite Myanmar home"><Image src="/brand/aphrodite-myanmar.png" alt="Aphrodite Myanmar" width={218} height={77} className="h-12 w-auto" priority /></Link>
-        <div className="flex gap-2"><Link href="/returns" className="rounded-full border px-4 py-2 text-sm font-semibold">{t("nav.returnPolicy")}</Link><Link href="/" className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">Store</Link></div>
+      <header className="border-b bg-white"><div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 sm:px-5">
+        <Link href="/" aria-label="Aphrodite Myanmar home" className="w-28 shrink-0 sm:w-auto"><Image src="/brand/aphrodite-myanmar.png" alt="Aphrodite Myanmar" width={218} height={77} className="h-9 w-auto sm:h-12" priority /></Link>
+        <div className="flex shrink-0 gap-2"><Link href="/returns" className="rounded-full border px-3 py-2 text-xs font-semibold sm:px-4 sm:text-sm">{t("nav.returnPolicy")}</Link><Link href="/" className="rounded-full bg-zinc-900 px-3 py-2 text-xs font-semibold text-white sm:px-4 sm:text-sm">Store</Link></div>
       </div></header>
 
       <section className="mx-auto max-w-5xl px-5 py-10">
-        <div className="rounded-3xl bg-zinc-950 p-8 text-white"><p className="text-sm font-bold uppercase tracking-[0.25em] text-red-400">Customer care</p><h1 className="mt-2 text-4xl font-black">Orders, receipts and returns</h1><p className="mt-3 max-w-2xl text-zinc-300">Tracking refreshes every 30 seconds. Track delivery, print your receipt, and request an eligible return within 7 days after delivery.</p></div>
+        <div className="rounded-3xl bg-zinc-950 p-6 text-white sm:p-8"><p className="text-xs font-bold uppercase tracking-[0.2em] text-red-400 sm:text-sm sm:tracking-[0.25em]">Customer care</p><h1 className="mt-2 text-3xl font-black sm:text-4xl">Orders, receipts and returns</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300 sm:text-base">Tracking refreshes every 30 seconds. Track delivery, print your receipt, and request an eligible return within 7 days after delivery.</p></div>
         {error && <p role="alert" className="mt-5 rounded-2xl bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</p>}
         {message && <p role="status" className="mt-5 rounded-2xl bg-green-50 p-4 text-sm font-semibold text-green-700">{message}</p>}
 

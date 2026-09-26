@@ -46,7 +46,7 @@ export default function AddressesPage() {
 
   useEffect(() => {
     if (status !== "ready") return;
-    if (!user || user.role === "admin") { queueMicrotask(() => setLoading(false)); return; }
+    if (!user || user.role === "admin" || user.role === "staff") { queueMicrotask(() => setLoading(false)); return; }
     const timeout = window.setTimeout(() => {
       void loadAddresses().catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load your addresses.")).finally(() => setLoading(false));
     }, 0);
@@ -148,10 +148,10 @@ export default function AddressesPage() {
   }
 
   if (status === "checking" || loading) return <main className="flex min-h-screen items-center justify-center">Loading your addresses…</main>;
-  if (!user || user.role === "admin") return <main className="flex min-h-screen items-center justify-center px-5 text-center"><div><h1 className="text-3xl font-bold">Sign in with a customer account to manage addresses</h1><Link href="/login" className="mt-5 inline-block rounded-full bg-red-600 px-6 py-3 font-bold text-white">Login</Link></div></main>;
+  if (!user || user.role === "admin" || user.role === "staff") return <main className="flex min-h-screen items-center justify-center px-5 text-center"><div><h1 className="text-3xl font-bold">Sign in with a customer account to manage addresses</h1><Link href="/login" className="mt-5 inline-block rounded-full bg-red-600 px-6 py-3 font-bold text-white">Login</Link></div></main>;
 
   return <main className="min-h-screen bg-zinc-50 text-zinc-950">
-    <header className="border-b bg-white"><div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-5"><Link href="/" className="text-2xl font-bold text-red-600">Aphrodite</Link><Link href="/cart" className="rounded-full border px-5 py-2 text-sm font-semibold">Back to cart</Link></div></header>
+    <header className="border-b bg-white"><div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-4 sm:px-5 sm:py-5"><Link href="/" className="text-xl font-bold text-red-600 sm:text-2xl">Aphrodite</Link><Link href="/cart" className="shrink-0 rounded-full border px-3 py-2 text-xs font-semibold sm:px-5 sm:text-sm">Back to cart</Link></div></header>
     <section className="mx-auto grid max-w-5xl gap-8 px-5 py-10 lg:grid-cols-[1fr_0.9fr]">
       <div>
         <p className="text-sm font-bold uppercase tracking-widest text-red-600">Account</p>

@@ -87,7 +87,7 @@ export default function OrderItemsList({ items }: { items: OrderLine[] }) {
                     )}
                     <div className="min-w-0 flex-1">
                       <h4 className="text-lg font-bold text-zinc-900">{name}</h4>
-                      <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-sm lg:grid-cols-4">
+                      <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
                         {product?.brand && <div><dt className="text-xs uppercase text-zinc-400">Brand</dt><dd className="font-semibold">{product.brand}</dd></div>}
                         {product?.category && <div><dt className="text-xs uppercase text-zinc-400">Category</dt><dd className="font-semibold">{product.category}</dd></div>}
                         <div><dt className="text-xs uppercase text-zinc-400">Unit price</dt><dd className="font-semibold">{formatCurrency(item.unit_price)}</dd></div>
@@ -97,7 +97,7 @@ export default function OrderItemsList({ items }: { items: OrderLine[] }) {
                       {detailRows(product).length > 0 && (
                         <dl className="mt-4 grid gap-x-6 gap-y-2 border-t border-zinc-200 pt-4 text-sm lg:grid-cols-2">
                           {detailRows(product).map(([key, value]) => (
-                            <div key={key} className="flex gap-2"><dt className="w-32 shrink-0 text-zinc-400">{label(key)}</dt><dd className="min-w-0 flex-1 break-words text-zinc-800">{value}</dd></div>
+                            <div key={key} className="flex gap-2"><dt className="w-24 shrink-0 text-zinc-400 sm:w-32">{label(key)}</dt><dd className="min-w-0 flex-1 break-words text-zinc-800">{value}</dd></div>
                           ))}
                         </dl>
                       )}

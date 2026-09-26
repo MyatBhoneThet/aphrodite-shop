@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 import type { CurrentUser } from "../lib/useCurrentUser";
-import type { SocialProvider } from "../lib/oauth";
+import { safeNextPath, type SocialProvider } from "../lib/oauth";
 import { useLanguage } from "../lib/language";
 import DeliveryLocationWelcome from "../components/DeliveryLocationWelcome";
 import SocialSignInButtons from "../components/SocialSignIn";
@@ -40,7 +40,10 @@ export default function LoginForm({
   providers: SocialProvider[];
 }) {
   const { t } = useLanguage();
+  const router = useRouter();
   const searchParams = useSearchParams();
+  const requestedNext = searchParams.get("next");
+  const next = safeNextPath(requestedNext, "/");
   // Set by the social sign-in routes when they bounce back here, and by
   // /reset-password after a successful change.
   const redirectError = searchParams.get("error");
@@ -91,7 +94,8 @@ export default function LoginForm({
       // nothing to persist client-side. Admins land on their dashboard
       // (the login route also set the admin session cookie for them);
       // Customers see a consent explanation before any browser GPS request.
-      if (user.role === "admin") window.location.assign("/admin/dashboard");
+      if (user.role === "admin" || user.role === "staff") router.push("/admin/dashboard");
+      else if (requestedNext) router.push(next);
       else setShowDeliveryWelcome(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to login.");
@@ -130,7 +134,7 @@ export default function LoginForm({
         </p>
       )}
 
-      <SocialSignInButtons providers={providers} />
+      <SocialSignInButtons providers={providers} next={requestedNext ? next : undefined} />
 
       <form
         onSubmit={handleLogin}

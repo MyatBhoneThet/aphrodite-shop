@@ -15,7 +15,12 @@ export async function POST(request: NextRequest) {
       );
     }
     return NextResponse.json(
-      await addPcBuildToCart(user, parsed.data.product_ids, parsed.data.quantity)
+      await addPcBuildToCart(
+        user,
+        parsed.data.product_ids,
+        parsed.data.quantity,
+        parsed.data.build_name
+      )
     );
   } catch (error) {
     return handleRouteError("cart.build.add", error);

@@ -6,11 +6,11 @@ import { reviewOrderDeliveryRpc } from "./supabase";
 import { isApproximatelyInYangon, isMyanmarCountry, normalizeMyanmarRegion, normalizeYangonTownship } from "./delivery-country";
 import type { Product } from "../data/products";
 import { isSameVariantGroup, productVariant, variantOptions } from "./product-variants";
+import { pcBuildCompatibilityIssues } from "./pc-compatibility";
 import {
   checkoutOrderRpc,
   clearCart,
   countCustomers,
-  countOrders,
   countProducts,
   deleteCartItem,
   deleteProduct,
@@ -43,6 +43,7 @@ import {
   insertReturnEvidence,
   insertOrderHelpCase,
   selectAdminProfiles,
+  selectStaffProfiles,
   selectWorkQueueItems,
   upsertWorkQueueItem,
   selectStaffNotes,
@@ -68,11 +69,14 @@ import {
   selectOrderAuditEvents,
   insertTier,
   insertWishlistItem,
+  insertCartItem,
+  insertCartBuildItems,
   loginUser,
   mapProductRow,
   adminCancelOrderRpc,
   advanceReturnWorkflowRpc,
   requireAdmin,
+  requireBackoffice,
   requireUserFromRequest,
   requestOrderActionRpc,
   resolveOrderActionRpc,
@@ -93,12 +97,14 @@ import {
   selectProductsByIdsService,
   selectProductsService,
   selectProfileByIdService,
+  selectProfileByEmailService,
   selectProfilesByIdsService,
   selectRecentlyViewedRows,
   selectSupportConversationByCustomer,
   selectSupportConversationById,
   selectSupportConversations,
   selectSupportMessages,
+  selectSalesReportOrders,
   selectTiersAdmin,
   selectTiersForProducts,
   selectWishlist,
@@ -109,10 +115,11 @@ import {
   updateProduct,
   updateCustomerSettingsService,
   updateProfileWholesaleService,
+  setProfileRoleService,
+  deleteAuthUserService,
   updateSupportConversation,
   updateTier,
   updateUserPassword,
-  upsertCartItem,
   upsertRecentlyViewedProduct,
   uploadReturnEvidenceObject,
   createReturnEvidenceSignedUrl,
@@ -191,6 +198,8 @@ export type CartLine = {
   product: PublicProduct;
   product_id: number;
   quantity: number;
+  build_group_id: string | null;
+  build_name: string | null;
   lineTotal: number;
   pricing: PricingResult;
 };
@@ -245,6 +254,10 @@ export function productDTO(
 
   if (viewer?.role === "admin") {
     return { ...publicFields, wholesalePrice, stockQuantity };
+  }
+
+  if (viewer?.role === "staff") {
+    return { ...publicFields, stockQuantity };
   }
 
   const now = new Date();
@@ -346,6 +359,8 @@ function cartResponse(
         product: productDTO(product, user.role === "admin" ? user : null, ladder),
         product_id: row.product_id,
         quantity: row.quantity,
+        build_group_id: row.build_group_id ?? null,
+        build_name: row.build_name ?? null,
         lineTotal: pricing.lineTotal,
         pricing,
       },
@@ -403,6 +418,51 @@ function orderResponse(order: OrderRow) {
   };
 }
 
+/** Operational order view with all customer contact and location data removed. */
+function staffOrderResponse(order: OrderRow) {
+  const response = orderResponse(order);
+  return {
+    ...response,
+    shipping_phone: "",
+    shipping_address: "",
+    shipping_address_line1: null,
+    shipping_address_line2: null,
+    shipping_city: null,
+    shipping_state: null,
+    shipping_postal_code: null,
+    shipping_country: null,
+    delivery_latitude: null,
+    delivery_longitude: null,
+    delivery_accuracy_m: null,
+    delivery_location_captured_at: null,
+    return_pickup_address: null,
+    cancellation_refund_bank_name: null,
+    cancellation_refund_account_name: null,
+    cancellation_refund_account_number: null,
+    notes: null,
+    delivery_events: response.delivery_events.map((event) => ({
+      ...event,
+      location_label: null,
+    })),
+    profiles: response.profiles
+      ? { ...response.profiles, email: "" }
+      : null,
+  };
+}
+
+function staffReturnRequestResponse(request: ReturnRequestRow) {
+  return {
+    ...request,
+    pickup_address: null,
+    refund_bank_name: null,
+    refund_account_name: null,
+    refund_account_number: null,
+    profiles: request.profiles
+      ? { ...request.profiles, email: "" }
+      : null,
+  };
+}
+
 export async function authenticate(request: Request) {
   return requireUserFromRequest(request);
 }
@@ -457,8 +517,8 @@ async function customerPriceListName(user: CurrentUser) {
 }
 
 function requireCustomerAccount(user: CurrentUser) {
-  if (user.role === "admin") {
-    throw forbidden("Customer settings are not available for administrators.");
+  if (user.role === "admin" || user.role === "staff") {
+    throw forbidden("Customer features are not available for back-office accounts.");
   }
 }
 
@@ -602,7 +662,7 @@ export async function getProductsForViewer(
   viewer: CurrentUser | null,
   filters: Parameters<typeof getProducts>[0] = {}
 ) {
-  const products = (viewer?.role === "admin"
+  const products = (viewer?.role === "admin" || viewer?.role === "staff"
     ? await selectProductsService({
         search: filters.search ?? filters.query,
         type: filters.type,
@@ -627,7 +687,7 @@ export async function getProductsForViewer(
   );
 
   return products.map((product) =>
-    viewer?.role === "admin"
+    viewer?.role === "admin" || viewer?.role === "staff"
       ? productDTO(product, viewer)
       : productDTO(product, null, context?.tiersByProduct.get(product.id))
   );
@@ -639,7 +699,7 @@ export async function getProductForViewer(
   quantity = 1
 ) {
   const product =
-    viewer?.role === "admin"
+    viewer?.role === "admin" || viewer?.role === "staff"
       ? await getProductByIdService(id)
       : await getProductById(id);
 
@@ -674,7 +734,7 @@ export async function getProductForViewer(
 
   return {
     product:
-      viewer?.role === "admin"
+      viewer?.role === "admin" || viewer?.role === "staff"
         ? productDTO(product, viewer)
         : productDTO(product, null, ladder),
     pricing,
@@ -830,13 +890,15 @@ export async function patchProduct(
   id: number,
   product: Partial<Product>
 ) {
-  requireAdmin(user);
+  requireBackoffice(user);
+  const editableProduct = { ...product };
+  if (user.role === "staff") delete editableProduct.wholesalePrice;
 
   // A stock change for a sheet product writes the sheet, the product and the
   // sync baseline, so it takes turns with the product sync (sheet-stock-lock.ts).
-  return typeof product.stockQuantity === "number" && hasGoogleSheetsConfig()
-    ? withSheetStockLock(() => saveProduct(user, id, product))
-    : saveProduct(user, id, product);
+  return typeof editableProduct.stockQuantity === "number" && hasGoogleSheetsConfig()
+    ? withSheetStockLock(() => saveProduct(user, id, editableProduct))
+    : saveProduct(user, id, editableProduct);
 }
 
 async function saveProduct(user: CurrentUser, id: number, product: Partial<Product>) {
@@ -975,17 +1037,26 @@ export async function addCartItem(
   }
 
   const rows = await selectCart(user.id, user.accessToken);
-  const existingQuantity =
-    rows.find((row) => row.product_id === productId)?.quantity ?? 0;
-  const requestedQuantity = existingQuantity + cleanQuantity(quantity);
+  const regularRow = rows.find(
+    (row) => row.product_id === productId && !row.build_group_id
+  );
+  const addedQuantity = cleanQuantity(quantity);
+  const requestedQuantity = (regularRow?.quantity ?? 0) + addedQuantity;
+  const totalRequestedQuantity = rows
+    .filter((row) => row.product_id === productId)
+    .reduce((sum, row) => sum + row.quantity, 0) + addedQuantity;
 
-  if (requestedQuantity > available) {
+  if (totalRequestedQuantity > available) {
     throw badRequest(
       `Only ${available} unit(s) of ${productRow.name} available.`
     );
   }
 
-  await upsertCartItem(user.id, productId, requestedQuantity, user.accessToken);
+  if (regularRow) {
+    await updateCartItem(user.id, regularRow.id, requestedQuantity, user.accessToken);
+  } else {
+    await insertCartItem(user.id, productId, requestedQuantity, user.accessToken);
+  }
 
   return getCart(user);
 }
@@ -996,7 +1067,8 @@ export async function addCartItem(
 export async function addPcBuildToCart(
   user: CurrentUser,
   productIds: number[],
-  quantity: number
+  quantity: number,
+  buildName: string
 ) {
   const uniqueProductIds = [...new Set(productIds)];
   const requestedBuilds = cleanQuantity(quantity);
@@ -1005,9 +1077,13 @@ export async function addPcBuildToCart(
     selectCart(user.id, user.accessToken),
   ]);
   const productById = new Map(products.map((product) => [product.id, product]));
-  const cartQuantityByProduct = new Map(
-    cartRows.map((row) => [row.product_id, row.quantity])
-  );
+  const cartQuantityByProduct = new Map<number, number>();
+  for (const row of cartRows) {
+    cartQuantityByProduct.set(
+      row.product_id,
+      (cartQuantityByProduct.get(row.product_id) ?? 0) + row.quantity
+    );
+  }
 
   for (const productId of uniqueProductIds) {
     const product = productById.get(productId);
@@ -1024,14 +1100,19 @@ export async function addPcBuildToCart(
     }
   }
 
-  await Promise.all(uniqueProductIds.map((productId) =>
-    upsertCartItem(
-      user.id,
-      productId,
-      (cartQuantityByProduct.get(productId) ?? 0) + requestedBuilds,
-      user.accessToken
-    )
-  ));
+  const compatibilityIssues = pcBuildCompatibilityIssues(products.map(mapProductRow));
+  if (compatibilityIssues.length > 0) {
+    throw badRequest(compatibilityIssues[0]);
+  }
+
+  const build = { id: randomUUID(), name: buildName.trim() || "My custom PC build" };
+  await insertCartBuildItems(
+    user.id,
+    uniqueProductIds,
+    requestedBuilds,
+    user.accessToken,
+    build
+  );
 
   return getCart(user);
 }
@@ -1055,13 +1136,53 @@ export async function changeCartItem(
     throw notFound("Product not found.");
   }
 
-  if (requestedQuantity > availableStock(product)) {
+  const otherQuantity = rows
+    .filter((item) => item.product_id === row.product_id && item.id !== row.id)
+    .reduce((sum, item) => sum + item.quantity, 0);
+  if (requestedQuantity + otherQuantity > availableStock(product)) {
     throw badRequest(
       `Only ${availableStock(product)} unit(s) of ${product.name} available.`
     );
   }
 
   await updateCartItem(user.id, id, requestedQuantity, user.accessToken);
+  return getCart(user);
+}
+
+export async function changeCartBuild(
+  user: CurrentUser,
+  buildGroupId: string,
+  quantity: unknown
+) {
+  const requestedQuantity = cleanQuantity(quantity);
+  const rows = await selectCart(user.id, user.accessToken);
+  const buildRows = rows.filter((row) => row.build_group_id === buildGroupId);
+  if (buildRows.length === 0) throw notFound("PC build not found in cart.");
+
+  const products = await selectProductsByIdsService(buildRows.map((row) => row.product_id));
+  const productById = new Map(products.map((product) => [product.id, product]));
+  for (const row of buildRows) {
+    const product = productById.get(row.product_id);
+    if (!product) throw notFound("A PC build component is no longer available.");
+    const outsideBuild = rows
+      .filter((item) => item.product_id === row.product_id && item.build_group_id !== buildGroupId)
+      .reduce((sum, item) => sum + item.quantity, 0);
+    if (requestedQuantity + outsideBuild > availableStock(product)) {
+      throw badRequest(`Only ${availableStock(product)} unit(s) of ${product.name} available.`);
+    }
+  }
+
+  await Promise.all(buildRows.map((row) =>
+    updateCartItem(user.id, row.id, requestedQuantity, user.accessToken)
+  ));
+  return getCart(user);
+}
+
+export async function removeCartBuild(user: CurrentUser, buildGroupId: string) {
+  const rows = await selectCart(user.id, user.accessToken);
+  const buildRows = rows.filter((row) => row.build_group_id === buildGroupId);
+  if (buildRows.length === 0) throw notFound("PC build not found in cart.");
+  await Promise.all(buildRows.map((row) => deleteCartItem(user.id, row.id, user.accessToken)));
   return getCart(user);
 }
 
@@ -1191,6 +1312,7 @@ export async function getOrders(
 ) {
   const orders = await selectOrders(user, pagination);
 
+  if (user.role === "staff") return orders.map(staffOrderResponse);
   if (user.role !== "admin") return orders.map(orderResponse);
 
   // Some older Supabase installations allow admins to read orders but do not
@@ -1230,7 +1352,11 @@ export async function getOrders(
 
 export async function getOrder(user: CurrentUser, id: string) {
   const order = await selectOrderById(user, id);
-  return order ? orderResponse(order) : null;
+  return order
+    ? user.role === "staff"
+      ? staffOrderResponse(order)
+      : orderResponse(order)
+    : null;
 }
 
 // Checkout is authoritative: the user's profile, wholesale entitlement,
@@ -1265,6 +1391,7 @@ export async function createOrder(
     /** The total the client last saw. Used ONLY to detect price drift
      *  between the cart view and checkout; never to set prices. */
     expected_total?: number;
+    selected_cart_item_ids?: string[];
   }
 ) {
   const shippingAddressLine1 =
@@ -1304,18 +1431,28 @@ export async function createOrder(
     throw badRequest("Cart is empty.");
   }
 
-  const productRows = await selectProductsByIdsService(
-    cart.map((row) => row.product_id)
-  );
+  const selectedIds = new Set(body.selected_cart_item_ids ?? cart.map((row) => row.id));
+  const selectedCart = cart.filter((row) => selectedIds.has(row.id));
+  if (selectedCart.length !== selectedIds.size || selectedCart.length === 0) {
+    throw conflict("Your cart selection changed. Return to your cart and select the items again.");
+  }
+
+  const quantityByProduct = new Map<number, number>();
+  for (const row of selectedCart) {
+    quantityByProduct.set(
+      row.product_id,
+      (quantityByProduct.get(row.product_id) ?? 0) + row.quantity
+    );
+  }
+  const selectedProducts = [...quantityByProduct.keys()];
+  const productRows = await selectProductsByIdsService(selectedProducts);
   const productsById = new Map(productRows.map((row) => [row.id, row]));
 
-  const context = await wholesaleContext(
-    user,
-    cart.map((row) => row.product_id)
-  );
+  const context = await wholesaleContext(user, selectedProducts);
 
-  const lines = cart.map((item) => {
-    const product = productsById.get(item.product_id);
+  const lines = selectedProducts.map((productId) => {
+    const quantity = quantityByProduct.get(productId) ?? 0;
+    const product = productsById.get(productId);
 
     if (!product) {
       throw badRequest("Cart contains an unavailable product.");
@@ -1327,7 +1464,7 @@ export async function createOrder(
 
     const available = availableStock(product);
 
-    if (available < item.quantity) {
+    if (available < quantity) {
       throw badRequest(
         available <= 0
           ? `${product.name} is currently out of stock.`
@@ -1338,15 +1475,15 @@ export async function createOrder(
     const pricing = priceLine({
       retailPrice: product.price,
       promotion: product.full_specs?.promotion,
-      quantity: item.quantity,
-      tiers: context?.tiersByProduct.get(item.product_id) ?? [],
+      quantity,
+      tiers: context?.tiersByProduct.get(productId) ?? [],
       percentBands: context?.percentBands ?? [],
-      productId: item.product_id,
+      productId,
     });
 
     return {
-      product_id: item.product_id,
-      quantity: item.quantity,
+      product_id: productId,
+      quantity,
       unit_price: pricing.unitPrice,
       retail_unit_price: pricing.retailUnitPrice,
       price_list_id: pricing.priceListId,
@@ -1389,10 +1526,11 @@ export async function createOrder(
       shipping_country: shippingCountry,
       payment_method: paymentMethod,
       notes: body.notes ?? null,
+      cart_item_ids: [...selectedIds],
       lines,
     });
   } catch (error) {
-    throw mapCheckoutError(error, cart);
+    throw mapCheckoutError(error, selectedCart);
   }
 
   // Geolocation is optional and collected only after an explicit checkout
@@ -1818,6 +1956,48 @@ export async function adminListWholesaleAccounts(
 ) {
   requireAdmin(user);
   return selectCustomerProfiles(filters);
+}
+
+export async function adminListStaff(user: CurrentUser) {
+  requireAdmin(user);
+  return selectStaffProfiles();
+}
+
+export async function adminGrantStaff(user: CurrentUser, email: string) {
+  requireAdmin(user);
+  const normalizedEmail = email.trim().toLowerCase();
+  const profile = await selectProfileByEmailService(normalizedEmail);
+  if (!profile) throw notFound("No account exists with that email address.");
+  if (profile.role === "admin") throw conflict("Administrators already have full access.");
+
+  const updated = await setProfileRoleService(profile.id, "staff");
+  if (!updated) throw notFound("Account not found.");
+  await insertAuditLog({
+    actor_id: user.id,
+    action: "staff.grant",
+    target_type: "profile",
+    target_id: profile.id,
+    previous_data: { role: profile.role },
+    new_data: { role: "staff" },
+  });
+  return updated;
+}
+
+export async function adminDeleteStaff(user: CurrentUser, staffId: string) {
+  requireAdmin(user);
+  if (staffId === user.id) throw conflict("You cannot delete your own account.");
+  const profile = await selectProfileByIdService(staffId);
+  if (!profile || profile.role !== "staff") throw notFound("Staff account not found.");
+
+  await deleteAuthUserService(staffId);
+  await insertAuditLog({
+    actor_id: user.id,
+    action: "staff.delete",
+    target_type: "profile",
+    target_id: staffId,
+    previous_data: { role: "staff", email: profile.email },
+    new_data: null,
+  });
 }
 
 async function resolveDefaultPriceListId(user: CurrentUser) {
@@ -2774,7 +2954,7 @@ export async function verifyOrderPayment(
     correction_reason?: PaymentCorrectionReason | null;
   }
 ) {
-  requireAdmin(user);
+  requireBackoffice(user);
 
   const existing = await selectOrderById(user, id);
   if (!existing) return null;
@@ -3249,8 +3429,8 @@ export async function submitCancellationRefundDetails(
   id: string,
   input: { bank_name: string; account_name: string; account_number: string }
 ) {
-  if (user.role === "admin") {
-    throw forbidden("Administrators cannot submit customer refund details.");
+  if (user.role === "admin" || user.role === "staff") {
+    throw forbidden("Back-office accounts cannot submit customer refund details.");
   }
 
   const order = await selectOrderById(user, id);
@@ -3540,8 +3720,8 @@ export async function openOrderHelpCase(
   orderId: string,
   input: { topic: HelpCaseTopic; summary: string }
 ) {
-  if (user.role === "admin") {
-    throw forbidden("Administrators open cases from the admin inbox.");
+  if (user.role === "admin" || user.role === "staff") {
+    throw forbidden("Back-office accounts open cases from the staff inbox.");
   }
 
   const order = await selectOrderById(user, orderId);
@@ -3586,8 +3766,14 @@ export async function listCustomerHelpCases(user: CurrentUser) {
 }
 
 export async function listAdminHelpCases(user: CurrentUser) {
-  requireAdmin(user);
-  return selectHelpCases();
+  requireBackoffice(user);
+  const cases = await selectHelpCases();
+  return user.role === "staff"
+    ? cases.map(({ profiles, ...helpCase }) => ({
+        ...helpCase,
+        profiles: profiles ? { full_name: profiles.full_name ?? null } : null,
+      }))
+    : cases;
 }
 
 /**
@@ -3596,7 +3782,7 @@ export async function listAdminHelpCases(user: CurrentUser) {
  * any return requests on that order, and the chat.
  */
 export async function getAdminHelpCase(user: CurrentUser, caseId: string) {
-  requireAdmin(user);
+  requireBackoffice(user);
 
   const helpCase = await selectHelpCaseById(caseId);
   if (!helpCase) throw notFound("Help case not found.");
@@ -3610,11 +3796,14 @@ export async function getAdminHelpCase(user: CurrentUser, caseId: string) {
   ]);
 
   return {
-    case: helpCase,
-    order: order ? orderResponse(order) : null,
-    return_requests: returnRequests.filter(
-      (request) => request.order_id === helpCase.order_id
-    ),
+    case:
+      user.role === "staff"
+        ? { ...helpCase, profiles: helpCase.profiles ? { full_name: helpCase.profiles.full_name ?? null } : null }
+        : helpCase,
+    order: order ? (user.role === "staff" ? staffOrderResponse(order) : orderResponse(order)) : null,
+    return_requests: returnRequests
+      .filter((request) => request.order_id === helpCase.order_id)
+      .map((request) => user.role === "staff" ? staffReturnRequestResponse(request) : request),
     messages: await supportMessagesResponse(conversationMessages),
   };
 }
@@ -3624,7 +3813,7 @@ export async function updateHelpCase(
   caseId: string,
   input: { status: HelpCaseStatus; admin_note?: string | null }
 ) {
-  requireAdmin(user);
+  requireBackoffice(user);
 
   const existing = await selectHelpCaseById(caseId);
   if (!existing) throw notFound("Help case not found.");
@@ -3677,8 +3866,8 @@ export async function createItemReturnRequest(
     evidence_url?: string | null;
   }
 ) {
-  if (user.role === "admin") {
-    throw forbidden("Administrators cannot open a return for a customer.");
+  if (user.role === "admin" || user.role === "staff") {
+    throw forbidden("Back-office accounts cannot open a return for a customer.");
   }
 
   const order = await selectOrderById(user, input.order_id);
@@ -3853,8 +4042,11 @@ export async function notifyReturnProgress(
 }
 
 export async function listAdminReturnRequests(user: CurrentUser) {
-  requireAdmin(user);
-  return selectReturnRequests();
+  requireBackoffice(user);
+  const requests = await selectReturnRequests();
+  return user.role === "staff"
+    ? requests.map(staffReturnRequestResponse)
+    : requests;
 }
 
 // ---------------------------------------------------------------------------
@@ -3882,7 +4074,7 @@ export type QueueItem = {
 };
 
 export async function getAdminWorkQueue(user: CurrentUser) {
-  requireAdmin(user);
+  requireBackoffice(user);
 
   const [orders, helpCases, returnRequests, assignments, admins] =
     await Promise.all([
@@ -3953,7 +4145,7 @@ export async function getAdminWorkQueue(user: CurrentUser) {
         lane === "awaiting_payment_check"
           ? `${order.payment_method} · ${(order.payment_slips ?? []).length} slip(s) uploaded`
           : "Courier could not hand the order over",
-        order.profiles?.email ?? order.shipping_name,
+        user.role === "staff" ? order.shipping_name : order.profiles?.email ?? order.shipping_name,
         order.id,
         order.created_at
       )
@@ -3975,7 +4167,7 @@ export async function getAdminWorkQueue(user: CurrentUser) {
         lane,
         `Help: ${helpCase.topic.replaceAll("_", " ")}`,
         helpCase.summary.slice(0, 160),
-        helpCase.profiles?.email ?? "Customer",
+        user.role === "staff" ? helpCase.profiles?.full_name ?? "Customer" : helpCase.profiles?.email ?? "Customer",
         helpCase.order_id,
         helpCase.created_at
       )
@@ -3993,7 +4185,7 @@ export async function getAdminWorkQueue(user: CurrentUser) {
         lane,
         `Return: ${request.order_items?.products?.name ?? "item"} × ${request.quantity}`,
         `${request.status.replaceAll("_", " ")} · wants ${request.preferred_resolution}`,
-        request.profiles?.email ?? "Customer",
+        user.role === "staff" ? request.profiles?.full_name ?? "Customer" : request.profiles?.email ?? "Customer",
         request.order_id,
         request.created_at
       )
@@ -4029,7 +4221,7 @@ export async function assignWorkItem(
     due_at?: string | null;
   }
 ) {
-  requireAdmin(user);
+  requireBackoffice(user);
 
   return upsertWorkQueueItem({
     subject_type: input.subject_type,
@@ -4045,7 +4237,7 @@ export async function listStaffNotes(
   subjectType: QueueSubjectType,
   subjectId: string
 ) {
-  requireAdmin(user);
+  requireBackoffice(user);
   return selectStaffNotes(subjectType, subjectId);
 }
 
@@ -4054,7 +4246,7 @@ export async function addStaffNote(
   user: CurrentUser,
   input: { subject_type: QueueSubjectType; subject_id: string; body: string }
 ) {
-  requireAdmin(user);
+  requireBackoffice(user);
 
   return insertStaffNote({
     subject_type: input.subject_type,
@@ -4391,7 +4583,10 @@ function cleanSupportMessage(value: unknown, allowEmpty = false) {
   return message;
 }
 
-function supportConversationResponse(conversation: SupportConversationRow) {
+function supportConversationResponse(
+  conversation: SupportConversationRow,
+  hideContact = false
+) {
   return {
     id: conversation.id,
     customer_id: conversation.customer_id,
@@ -4403,7 +4598,7 @@ function supportConversationResponse(conversation: SupportConversationRow) {
     needs_reply: conversation.last_sender_role === "customer",
     created_at: conversation.created_at,
     customer: {
-      email: conversation.profiles?.email ?? "Unknown customer",
+      email: hideContact ? "Customer" : conversation.profiles?.email ?? "Unknown customer",
       full_name: conversation.profiles?.full_name ?? null,
     },
   };
@@ -4510,8 +4705,8 @@ function mapSupportError(error: unknown) {
 }
 
 export async function getCustomerSupportConversation(user: CurrentUser) {
-  if (user.role === "admin") {
-    throw forbidden("Administrators must use the Live Chat admin inbox.");
+  if (user.role === "admin" || user.role === "staff") {
+    throw forbidden("Back-office accounts must use the Live Chat staff inbox.");
   }
 
   try {
@@ -4545,8 +4740,8 @@ export async function sendCustomerSupportMessage(
     productId?: number | null;
   } = {}
 ) {
-  if (user.role === "admin") {
-    throw forbidden("Administrators must use the Live Chat admin inbox.");
+  if (user.role === "admin" || user.role === "staff") {
+    throw forbidden("Back-office accounts must use the Live Chat staff inbox.");
   }
 
   const { attachment = null, productId = null } = extras;
@@ -4645,7 +4840,7 @@ export async function setAdminPresence(
     back_in_minutes?: number | null;
   }
 ) {
-  requireAdmin(user);
+  requireBackoffice(user);
 
   const backAt = input.back_in_minutes
     ? new Date(Date.now() + input.back_in_minutes * 60_000).toISOString()
@@ -4673,11 +4868,11 @@ export async function setAdminPresence(
 }
 
 export async function listAdminSupportConversations(user: CurrentUser) {
-  requireAdmin(user);
+  requireBackoffice(user);
 
   try {
     return (await selectSupportConversations()).map(
-      supportConversationResponse
+      (conversation) => supportConversationResponse(conversation, user.role === "staff")
     );
   } catch (error) {
     throw mapSupportError(error);
@@ -4688,7 +4883,7 @@ export async function getAdminSupportConversation(
   user: CurrentUser,
   conversationId: string
 ) {
-  requireAdmin(user);
+  requireBackoffice(user);
 
   try {
     const conversation = await selectSupportConversationById(conversationId);
@@ -4705,7 +4900,7 @@ export async function getAdminSupportConversation(
     ]);
 
     return {
-      conversation: supportConversationResponse(conversation),
+      conversation: supportConversationResponse(conversation, user.role === "staff"),
       messages: await supportMessagesResponse(messages),
     };
   } catch (error) {
@@ -4718,7 +4913,7 @@ export async function sendAdminSupportMessage(
   conversationId: string,
   value: unknown
 ) {
-  requireAdmin(user);
+  requireBackoffice(user);
   const body = cleanSupportMessage(value);
 
   try {
@@ -4752,7 +4947,7 @@ export async function setAdminSupportConversationStatus(
   conversationId: string,
   status: SupportConversationStatus
 ) {
-  requireAdmin(user);
+  requireBackoffice(user);
 
   try {
     const existing = await selectSupportConversationById(conversationId);
@@ -4791,11 +4986,16 @@ const ORDER_STATUSES: OrderRow["status"][] = [
 ];
 
 export type AdminStats = {
+  period: SalesPeriod;
+  range: { start: string; end: string; label: string };
   products: { total: number; inStock: number; outOfStock: number };
   customers: { total: number };
-  orders: { total: number; pending: number };
-  revenue: { total: number };
-  monthlySales: { label: string; value: number }[];
+  orders: { total: number; pending: number; previous: number; changePercent: number | null };
+  revenue: { total: number; previous: number; changePercent: number | null };
+  averageOrderValue: { total: number; previous: number; changePercent: number | null };
+  itemsSold: { total: number; previous: number; changePercent: number | null };
+  returns: { total: number };
+  salesSeries: { label: string; value: number; orders: number }[];
   ordersByStatus: { status: OrderRow["status"]; count: number; value: number }[];
   topProducts: {
     productId: number;
@@ -4806,16 +5006,86 @@ export type AdminStats = {
   recentOrders: ReturnType<typeof orderResponse>[];
 };
 
-export async function getAdminStats(user: CurrentUser): Promise<AdminStats> {
-  requireAdmin(user);
+export type SalesPeriod = "week" | "month" | "quarter" | "year";
+
+function percentChange(current: number, previous: number) {
+  if (previous === 0) return current === 0 ? 0 : null;
+  return Math.round(((current - previous) / previous) * 1000) / 10;
+}
+
+function salesPeriodRange(period: SalesPeriod, now = new Date()) {
+  const end = new Date(now);
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  if (period === "week") start.setUTCDate(start.getUTCDate() - 6);
+  if (period === "month") start.setUTCDate(1);
+  if (period === "quarter") start.setUTCMonth(Math.floor(now.getUTCMonth() / 3) * 3, 1);
+  if (period === "year") start.setUTCMonth(0, 1);
+  const previousEnd = new Date(start.getTime() - 1);
+  const previousStart = new Date(start.getTime() - (end.getTime() - start.getTime()));
+  const label = period === "week"
+    ? `${start.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })} – ${end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}`
+    : period === "month"
+      ? end.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })
+      : period === "quarter"
+        ? `Q${Math.floor(end.getUTCMonth() / 3) + 1} ${end.getUTCFullYear()}`
+        : String(end.getUTCFullYear());
+  return { start, end, previousStart, previousEnd, label };
+}
+
+function inRange(date: string, start: Date, end: Date) {
+  const value = Date.parse(date);
+  return value >= start.getTime() && value <= end.getTime();
+}
+
+function salesSeries(
+  orders: Array<Pick<OrderRow, "created_at" | "total_amount">>,
+  period: SalesPeriod,
+  start: Date,
+  end: Date
+) {
+  const buckets = new Map<string, { label: string; value: number; orders: number }>();
+  const cursor = new Date(start);
+  const monthly = period === "quarter" || period === "year";
+  while (cursor <= end) {
+    const key = monthly
+      ? `${cursor.getUTCFullYear()}-${cursor.getUTCMonth()}`
+      : cursor.toISOString().slice(0, 10);
+    buckets.set(key, {
+      label: cursor.toLocaleDateString("en-US", monthly
+        ? { month: "short", timeZone: "UTC" }
+        : { month: "short", day: "numeric", timeZone: "UTC" }),
+      value: 0,
+      orders: 0,
+    });
+    if (monthly) cursor.setUTCMonth(cursor.getUTCMonth() + 1, 1);
+    else cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  for (const order of orders) {
+    const date = new Date(order.created_at);
+    const key = monthly
+      ? `${date.getUTCFullYear()}-${date.getUTCMonth()}`
+      : date.toISOString().slice(0, 10);
+    const bucket = buckets.get(key);
+    if (bucket) {
+      bucket.value += Number(order.total_amount || 0);
+      bucket.orders += 1;
+    }
+  }
+  return [...buckets.values()];
+}
+
+export async function getAdminStats(
+  user: CurrentUser,
+  period: SalesPeriod = "month"
+): Promise<AdminStats> {
+  requireBackoffice(user);
+  const databaseToken = user.role === "staff" ? undefined : user.accessToken;
 
   const [
     totalProducts,
     inStockProducts,
     outOfStockProducts,
     totalCustomers,
-    totalOrders,
-    pendingOrders,
     orderStats,
     orderItemStats,
     recentOrdersRaw,
@@ -4824,44 +5094,30 @@ export async function getAdminStats(user: CurrentUser): Promise<AdminStats> {
     countProducts("In Stock"),
     countProducts("Out of Stock"),
     countCustomers(),
-    countOrders(user.accessToken),
-    countOrders(user.accessToken, "pending"),
-    selectOrderStats(user.accessToken),
-    selectOrderItemStats(user.accessToken),
+    selectOrderStats(databaseToken),
+    selectOrderItemStats(databaseToken),
     selectOrders(user, { limit: 5 }),
   ]);
 
-  const activeOrders = orderStats.filter(
+  const range = salesPeriodRange(period);
+  const selectedOrders = orderStats.filter((order) => inRange(order.created_at, range.start, range.end));
+  const previousOrders = orderStats.filter((order) => inRange(order.created_at, range.previousStart, range.previousEnd));
+  const activeOrders = selectedOrders.filter(
+    (order) => order.status !== "cancelled" && order.status !== "returned"
+  );
+  const previousActiveOrders = previousOrders.filter(
     (order) => order.status !== "cancelled" && order.status !== "returned"
   );
   const totalRevenue = activeOrders.reduce(
     (sum, order) => sum + Number(order.total_amount || 0),
     0
   );
-
-  const now = new Date();
-  const monthlySales = Array.from({ length: 6 }).map((_, index) => {
-    const date = new Date(now.getFullYear(), now.getMonth() - 5 + index, 1);
-    const value = activeOrders
-      .filter((order) => {
-        const created = new Date(order.created_at);
-        return (
-          created.getMonth() === date.getMonth() &&
-          created.getFullYear() === date.getFullYear()
-        );
-      })
-      .reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
-
-    return {
-      label: `${date.toLocaleDateString("en-US", { month: "short" })} ${String(
-        date.getFullYear()
-      ).slice(2)}`,
-      value,
-    };
-  });
+  const previousRevenue = previousActiveOrders.reduce(
+    (sum, order) => sum + Number(order.total_amount || 0), 0
+  );
 
   const ordersByStatus = ORDER_STATUSES.map((status) => {
-    const matching = orderStats.filter((order) => order.status === status);
+    const matching = selectedOrders.filter((order) => order.status === status);
 
     return {
       status,
@@ -4875,7 +5131,20 @@ export async function getAdminStats(user: CurrentUser): Promise<AdminStats> {
     { name: string; image: string | null; quantitySold: number }
   >();
 
-  for (const item of orderItemStats) {
+  const selectedItems = orderItemStats.filter((item) =>
+    item.orders &&
+    item.orders.status !== "cancelled" &&
+    item.orders.status !== "returned" &&
+    inRange(item.orders.created_at, range.start, range.end)
+  );
+  const previousItems = orderItemStats.filter((item) =>
+    item.orders &&
+    item.orders.status !== "cancelled" &&
+    item.orders.status !== "returned" &&
+    inRange(item.orders.created_at, range.previousStart, range.previousEnd)
+  );
+
+  for (const item of selectedItems) {
     const existing = productSales.get(item.product_id);
     const name = item.products?.name ?? `Product #${item.product_id}`;
     const image = item.products?.image ?? null;
@@ -4893,17 +5162,73 @@ export async function getAdminStats(user: CurrentUser): Promise<AdminStats> {
     .slice(0, 5);
 
   return {
+    period,
+    range: { start: range.start.toISOString(), end: range.end.toISOString(), label: range.label },
     products: {
       total: totalProducts,
       inStock: inStockProducts,
       outOfStock: outOfStockProducts,
     },
     customers: { total: totalCustomers },
-    orders: { total: totalOrders, pending: pendingOrders },
-    revenue: { total: totalRevenue },
-    monthlySales,
+    orders: {
+      total: activeOrders.length,
+      pending: selectedOrders.filter((order) => order.status === "pending").length,
+      previous: previousActiveOrders.length,
+      changePercent: percentChange(activeOrders.length, previousActiveOrders.length),
+    },
+    revenue: {
+      total: totalRevenue,
+      previous: previousRevenue,
+      changePercent: percentChange(totalRevenue, previousRevenue),
+    },
+    averageOrderValue: {
+      total: activeOrders.length ? Math.round(totalRevenue / activeOrders.length) : 0,
+      previous: previousActiveOrders.length ? Math.round(previousRevenue / previousActiveOrders.length) : 0,
+      changePercent: percentChange(
+        activeOrders.length ? totalRevenue / activeOrders.length : 0,
+        previousActiveOrders.length ? previousRevenue / previousActiveOrders.length : 0
+      ),
+    },
+    itemsSold: {
+      total: selectedItems.reduce((sum, item) => sum + item.quantity, 0),
+      previous: previousItems.reduce((sum, item) => sum + item.quantity, 0),
+      changePercent: percentChange(
+        selectedItems.reduce((sum, item) => sum + item.quantity, 0),
+        previousItems.reduce((sum, item) => sum + item.quantity, 0)
+      ),
+    },
+    returns: { total: selectedOrders.filter((order) => order.status === "returned").length },
+    salesSeries: salesSeries(activeOrders, period, range.start, range.end),
     ordersByStatus,
     topProducts,
-    recentOrders: recentOrdersRaw.map(orderResponse),
+    recentOrders: recentOrdersRaw.map((order) =>
+      user.role === "staff" ? staffOrderResponse(order) : orderResponse(order)
+    ),
+  };
+}
+
+export async function getMonthlySalesReport(user: CurrentUser, month: string) {
+  requireBackoffice(user);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw badRequest("Choose a valid report month.");
+  const [year, monthNumber] = month.split("-").map(Number);
+  const start = new Date(Date.UTC(year, monthNumber - 1, 1));
+  const end = new Date(Date.UTC(year, monthNumber, 1));
+  const orders = await selectSalesReportOrders(start.toISOString(), end.toISOString());
+  const active = orders.filter((order) => order.status !== "cancelled" && order.status !== "returned");
+  return {
+    month,
+    label: start.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }),
+    generatedAt: new Date().toISOString(),
+    summary: {
+      revenue: active.reduce((sum, order) => sum + Number(order.total_amount || 0), 0),
+      orders: active.length,
+      averageOrderValue: active.length
+        ? Math.round(active.reduce((sum, order) => sum + Number(order.total_amount || 0), 0) / active.length)
+        : 0,
+      itemsSold: active.reduce((sum, order) => sum + (order.order_items ?? []).reduce((itemSum, item) => itemSum + item.quantity, 0), 0),
+      cancelled: orders.filter((order) => order.status === "cancelled").length,
+      returned: orders.filter((order) => order.status === "returned").length,
+    },
+    orders,
   };
 }

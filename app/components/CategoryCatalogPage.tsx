@@ -62,7 +62,7 @@ export default function CategoryCatalogPage({ section }: Props) {
   const [wishlist, setWishlist] = useState<number[]>([]);
   const [cart, setCart] = useState<number[]>([]);
   const { user: currentUser, refresh: refreshUser } = useCurrentUser();
-  const deliveryEstimate = useDeliveryEstimate(Boolean(currentUser && currentUser.role !== "admin"));
+  const deliveryEstimate = useDeliveryEstimate(Boolean(currentUser && currentUser.role !== "admin" && currentUser.role !== "staff"));
 
   useEffect(() => {
     let cancelled = false;

@@ -93,18 +93,74 @@ export function getProductFamily(product: Product): ProductFamily {
 
 export function extractSocket(product: Product) {
   const values = specificationMap(product);
-  return (
+  const explicit = (
     firstValue(values, ["socket", "cpu socket", "processor socket"]) ||
-    extracted(sourceText(product), /\b(?:AM[345]|LGA\s?\d{3,4}|TRX40|sTRX4)\b/i).replace(/\s+/g, "")
+    extracted(sourceText(product), /\b(?:AM[345]|LGA\s?\d{3,4}|TRX40|sTRX4)\b/i).replace(/\s+/g, "") ||
+    extracted(sourceText(product), /\((?:1151|1200|1700|1851)\)/).replace(/[()]/g, "")
   ).toUpperCase();
+
+  if (explicit) return /^\d{4}$/.test(explicit) ? `LGA${explicit}` : explicit;
+
+  const text = sourceText(product).toUpperCase();
+
+  // The production sheet often contains only a model/chipset name. These
+  // platform mappings let the builder reject clear Intel/AMD mismatches
+  // without requiring every row to be manually enriched first.
+  if (/\b(?:A620|B650E?|B840|B850|X670E?|X870E?)M?\b/.test(text)) return "AM5";
+  if (/\b(?:A320|B350|X370|B450|X470|A520|B550|X570)M?\b/.test(text)) return "AM4";
+  if (/\b(?:H810|B860|Z890)M?\b/.test(text)) return "LGA1851";
+  if (/\b(?:H610|B660|H670|Z690|B760|H770|Z790)M?\b/.test(text)) return "LGA1700";
+  if (/\b(?:H410|B460|H470|Z490|H510|B560|H570|Z590)M?\b/.test(text)) return "LGA1200";
+  if (/\b(?:H310|B360|B365|H370|Z370|Z390)M?\b/.test(text)) return "LGA1151";
+
+  const ryzenModel = text.match(/\bRYZEN\s+[3579]\s+(\d{4})/i)?.[1];
+  if (ryzenModel) {
+    const series = Number(ryzenModel[0]);
+    if (series >= 7 && series <= 9) return "AM5";
+    if (series >= 1 && series <= 5) return "AM4";
+  }
+
+  if (/\bCORE\s+ULT(?:RA|ER)\b/.test(text) && /\b2\d{2}K?F?\b/.test(text)) {
+    return "LGA1851";
+  }
+
+  const intelGeneration = text.match(/\bCORE\s+I[3579][- ]?(\d{4,5})/i)?.[1];
+  if (intelGeneration) {
+    const generation = intelGeneration.length === 5
+      ? Number(intelGeneration.slice(0, 2))
+      : Number(intelGeneration[0]);
+    if (generation >= 12 && generation <= 14) return "LGA1700";
+    if (generation >= 10 && generation <= 11) return "LGA1200";
+    if (generation >= 8 && generation <= 9) return "LGA1151";
+  }
+
+  return "";
 }
 
 export function extractMemoryType(product: Product) {
   const values = specificationMap(product);
-  return (
+  const explicit = (
     firstValue(values, ["memory type", "ram type", "supported memory"]) ||
     extracted(sourceText(product), /\bDDR[345](?:L|X)?\b/i)
   ).toUpperCase();
+
+  if (explicit) return explicit;
+
+  const socket = extractSocket(product);
+  if (socket === "AM5" || socket === "LGA1851") return "DDR5";
+
+  const speed = Number(sourceText(product).match(/\b(\d{4,5})\s*(?:MHZ|MT\/S)\b/i)?.[1]);
+  if (speed >= 4800) return "DDR5";
+  if (speed >= 1600 && speed <= 4400) return "DDR4";
+  return "";
+}
+
+export function extractSupportedSockets(product: Product) {
+  const sockets = sourceText(product)
+    .toUpperCase()
+    .match(/\b(?:AM[345]|LGA\s?\d{3,4}|TRX40|STRX4)\b/g)
+    ?.map((socket) => socket.replace(/\s+/g, "")) ?? [];
+  return Array.from(new Set(sockets));
 }
 
 function baseRows(product: Product) {

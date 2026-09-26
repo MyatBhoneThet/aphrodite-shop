@@ -55,8 +55,8 @@ export default function Navbar({ search, setSearch, searchSuggestions, language,
 
   return (
     <header className="sticky top-0 z-50 border-b bg-white/95 shadow-sm backdrop-blur-xl">
-      <div className="mx-auto flex max-w-[92rem] flex-wrap items-center gap-4 px-4 py-3 lg:px-6">
-        <Link href="/" aria-label="Aphrodite Myanmar home" className="w-36 shrink-0 sm:w-44"><BrandLogo /></Link>
+      <div className="mx-auto flex max-w-[92rem] flex-wrap items-center gap-3 px-4 py-3 sm:gap-4 lg:px-6">
+        <Link href="/" aria-label="Aphrodite Myanmar home" className="w-32 shrink-0 sm:w-44"><BrandLogo className="h-9 sm:h-12" /></Link>
         {/* whitespace-nowrap on every link: without it the labels break
             mid-word ("PC / Parts") once the signed-in account controls take
             their share of the row. Returns and Support appear only on very
@@ -74,7 +74,7 @@ export default function Navbar({ search, setSearch, searchSuggestions, language,
         {/* min-w-0 lets the search shrink instead of forcing the nav to squash;
             it only claims a wide minimum where there is room for it. */}
         <div className="hidden min-w-0 max-w-lg flex-1 md:block xl:min-w-[11rem] 2xl:min-w-[16rem]"><SearchBox search={search} setSearch={setSearch} suggestions={searchSuggestions} /></div>
-        <div className="ml-auto flex w-full flex-wrap items-center justify-end gap-2 text-sm sm:w-auto">
+        <div className="ml-auto flex w-full flex-wrap items-center justify-between gap-2 text-sm sm:w-auto sm:justify-end">
           <LanguageSwitcher language={language} setLanguage={setLanguage} />
           {currentUser ? (
             <AccountControls user={currentUser} wishlistCount={wishlistCount} cartCount={cartCount} onLogout={onLogout} />
@@ -92,7 +92,7 @@ export default function Navbar({ search, setSearch, searchSuggestions, language,
       </div>
       <div className="px-4 pb-3 md:hidden"><SearchBox search={search} setSearch={setSearch} suggestions={searchSuggestions} /></div>
       <nav aria-label={text("Product categories")} className="grid grid-cols-3 gap-x-3 gap-y-2 border-t border-zinc-100 px-4 py-3 text-center text-xs font-semibold sm:flex sm:gap-5 sm:overflow-x-auto sm:px-5 sm:text-left sm:text-sm [&>a]:min-w-0 sm:[&>a]:shrink-0"><Link href="/catalog/laptops" className="sm:whitespace-nowrap">{text("Laptops")}</Link><Link href="/catalog/accessories" className="sm:whitespace-nowrap">{text("Accessories")}</Link><Link href="/catalog/pc-parts" className="sm:whitespace-nowrap">{text("PC Parts")}</Link><Link href="/find-my-laptop" className="col-span-2 text-red-600 sm:col-auto sm:whitespace-nowrap">{text("Find my laptop")} →</Link><Link href="/pc-builder" className="text-red-600 sm:whitespace-nowrap">{text("Build a PC")} →</Link></nav>
-      <LastOrderStatusBar enabled={Boolean(currentUser && currentUser.role !== "admin")} />
+      <LastOrderStatusBar enabled={Boolean(currentUser && currentUser.role !== "admin" && currentUser.role !== "staff")} />
     </header>
   );
 }

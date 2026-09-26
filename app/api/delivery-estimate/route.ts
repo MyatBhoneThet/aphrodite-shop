@@ -9,7 +9,7 @@ const headers = { "Cache-Control": "private, no-store" };
 export async function GET(request: NextRequest) {
   try {
     const user = await authenticate(request);
-    if (user.role === "admin") {
+    if (user.role === "admin" || user.role === "staff") {
       return NextResponse.json({ estimate: null }, { headers });
     }
     const addresses = await selectCustomerAddresses(user.id);

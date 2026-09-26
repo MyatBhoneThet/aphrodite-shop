@@ -22,7 +22,7 @@ export default function AdminLoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (status === "ready" && user?.role === "admin") {
+    if (status === "ready" && (user?.role === "admin" || user?.role === "staff")) {
       window.location.assign("/admin/dashboard");
     }
   }, [status, user]);
@@ -67,7 +67,7 @@ export default function AdminLoginPage() {
         throw new Error(data.error ?? "Unable to login.");
       }
 
-      // Admin session lives in an httpOnly cookie set by the route.
+      // Back-office session lives in an httpOnly cookie set by the route.
       window.location.assign("/admin/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to login.");
@@ -92,13 +92,13 @@ export default function AdminLoginPage() {
           </Link>
 
           <p className="text-sm font-semibold uppercase tracking-[0.25em] text-red-600">
-            Admin
+            Back office
           </p>
-          <h1 className="mt-3 text-4xl font-bold">Admin sign in</h1>
+          <h1 className="mt-3 text-4xl font-bold">Admin & staff sign in</h1>
 
           <p className="mt-4 max-w-md text-zinc-500">
-            Sign in with your admin account to manage products, orders, and
-            view business statistics.
+            Sign in with your admin or staff account. Your role controls which
+            tools and customer information are available.
           </p>
 
           <form

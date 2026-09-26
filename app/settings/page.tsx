@@ -114,7 +114,7 @@ export default function SettingsPage() {
     async function loadSettings() {
       if (status !== "ready") return;
 
-      if (!user || user.role === "admin") {
+      if (!user || user.role === "admin" || user.role === "staff") {
         if (!cancelled) setIsLoading(false);
         return;
       }
@@ -280,7 +280,7 @@ export default function SettingsPage() {
     );
   }
 
-  if (user.role === "admin") {
+  if (user.role === "admin" || user.role === "staff") {
     return (
       <SettingsNotice
         title="Customer settings"

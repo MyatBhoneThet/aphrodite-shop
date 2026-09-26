@@ -79,13 +79,14 @@ export async function GET(request: NextRequest) {
     const session = await exchangeOAuthCode(authCode, verifier);
     const profile = await getProfile(session.user.id, session.access_token);
 
-    const destination = profile?.role === "admin" ? "/admin/dashboard" : next;
+    const isBackoffice = profile?.role === "admin" || profile?.role === "staff";
+    const destination = isBackoffice ? "/admin/dashboard" : next;
     // The server URL may use an internal host such as 0.0.0.0 behind a proxy.
     // Use the same public origin as the OAuth start route.
     const response = NextResponse.redirect(new URL(destination, appOrigin()));
 
     setSessionCookies(response, session.access_token, {
-      isAdmin: profile?.role === "admin",
+      isBackoffice,
     });
     // The verifier is single-use; leaving it behind would only widen the
     // window in which a replayed code could be redeemed.

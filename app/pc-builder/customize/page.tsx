@@ -11,11 +11,15 @@ import { effectiveProductPrice } from "../../lib/promotions";
 import {
   classifyPcPart,
   getProductFamily,
-  type PcPartKind,
 } from "../../lib/product-specifications";
+import {
+  isCompatiblePcPart,
+  normalizePcBuildSelection,
+  REQUIRED_BUILD_KINDS,
+  type BuildKind,
+  type PcBuildSelection,
+} from "../../lib/pc-compatibility";
 import { useCurrentUser } from "../../lib/useCurrentUser";
-
-type BuildKind = Exclude<PcPartKind, "other">;
 
 const buildKinds: BuildKind[] = [
   "cpu",
@@ -44,12 +48,14 @@ function PartPicker({
   options,
   chosen,
   isLoading,
+  emptyLabel,
   onChoose,
 }: {
   label: string;
   options: Product[];
   chosen?: Product;
   isLoading: boolean;
+  emptyLabel: string;
   onChoose: (productId: number) => void;
 }) {
   const pickerRef = useRef<HTMLDetailsElement>(null);
@@ -88,7 +94,7 @@ function PartPicker({
           </>
         ) : (
           <span className="min-w-0 flex-1 text-sm font-bold">
-            {isLoading ? "Loading..." : "Add a part"}
+            {isLoading ? "Loading..." : emptyLabel}
           </span>
         )}
         <span aria-hidden="true" className="shrink-0 text-zinc-400 transition group-open:rotate-180">⌄</span>
@@ -178,12 +184,16 @@ export default function CustomizePcBuildPage() {
           if (page.length < 100) break;
         }
 
-        const initial: Partial<Record<BuildKind, number>> = {};
+        const initialProducts: PcBuildSelection = {};
         for (const product of loaded) {
           if (!ids.has(product.id)) continue;
           const kind = classifyPcPart(product);
-          if (kind !== "other") initial[kind] = product.id;
+          if (kind !== "other") initialProducts[kind] = product;
         }
+        const normalized = normalizePcBuildSelection(initialProducts);
+        const initial = Object.fromEntries(
+          Object.entries(normalized).map(([kind, product]) => [kind, product.id])
+        ) as Partial<Record<BuildKind, number>>;
         if (requestedName) setBuildName(requestedName.slice(0, 80));
         setProducts(loaded);
         setSelected(initial);
@@ -197,7 +207,7 @@ export default function CustomizePcBuildPage() {
     void loadProducts();
   }, []);
 
-  const optionsByKind = useMemo(() => {
+  const availableByKind = useMemo(() => {
     const groups = new Map<BuildKind, Product[]>();
     for (const kind of buildKinds) groups.set(kind, []);
     for (const product of products) {
@@ -216,6 +226,41 @@ export default function CustomizePcBuildPage() {
     return groups;
   }, [products]);
 
+  const selectedByKind = useMemo(() => {
+    const result: PcBuildSelection = {};
+    for (const kind of buildKinds) {
+      const id = selected[kind];
+      const product = id ? products.find((item) => item.id === id) : undefined;
+      if (product) result[kind] = product;
+    }
+    return result;
+  }, [products, selected]);
+
+  const optionsByKind = useMemo(() => {
+    const compatible = new Map<BuildKind, Product[]>();
+    for (const kind of buildKinds) {
+      const candidates = availableByKind.get(kind) ?? [];
+      if (kind === "cpu") {
+        compatible.set(kind, candidates);
+      } else if (kind === "motherboard") {
+        compatible.set(
+          kind,
+          selectedByKind.cpu
+            ? candidates.filter((product) => isCompatiblePcPart(kind, product, selectedByKind))
+            : []
+        );
+      } else {
+        compatible.set(
+          kind,
+          selectedByKind.cpu && selectedByKind.motherboard
+            ? candidates.filter((product) => isCompatiblePcPart(kind, product, selectedByKind))
+            : []
+        );
+      }
+    }
+    return compatible;
+  }, [availableByKind, selectedByKind]);
+
   const selectedProducts = useMemo(
     () => buildKinds.flatMap((kind) => {
       const id = selected[kind];
@@ -228,20 +273,36 @@ export default function CustomizePcBuildPage() {
     (sum, item) => sum + effectiveProductPrice(item.product),
     0
   );
+  const hasRequiredParts = Boolean(selectedByKind.cpu && selectedByKind.motherboard);
 
   function choosePart(kind: BuildKind, value: string) {
     setMessage("");
     setSelected((current) => {
-      const next = { ...current };
+      const nextProducts: PcBuildSelection = {};
+      for (const currentKind of buildKinds) {
+        const currentId = current[currentKind];
+        const currentProduct = currentId
+          ? products.find((product) => product.id === currentId)
+          : undefined;
+        if (currentProduct) nextProducts[currentKind] = currentProduct;
+      }
       const id = Number(value);
-      if (Number.isInteger(id) && id > 0) next[kind] = id;
-      else delete next[kind];
-      return next;
+      const product = products.find((item) => item.id === id);
+      if (product) nextProducts[kind] = product;
+      else delete nextProducts[kind];
+
+      const normalized = normalizePcBuildSelection(nextProducts);
+      return Object.fromEntries(
+        Object.entries(normalized).map(([selectedKind, selectedProduct]) => [
+          selectedKind,
+          selectedProduct.id,
+        ])
+      ) as Partial<Record<BuildKind, number>>;
     });
   }
 
   async function addBuildToCart() {
-    if (!user || selectedProducts.length === 0 || isAdding) return;
+    if (!user || !hasRequiredParts || isAdding) return;
     setIsAdding(true);
     setMessage("");
     setError("");
@@ -252,6 +313,7 @@ export default function CustomizePcBuildPage() {
         body: JSON.stringify({
           product_ids: selectedProducts.map(({ product }) => product.id),
           quantity: buildQuantity,
+          build_name: buildName.trim() || "My custom PC build",
         }),
       });
       const data = await response.json().catch(() => null) as { error?: string } | null;
@@ -267,18 +329,18 @@ export default function CustomizePcBuildPage() {
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
       <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-5 py-4">
-          <Link href="/" className="shrink-0">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 sm:px-5">
+          <Link href="/" className="w-28 shrink-0 sm:w-auto">
             <Image
               src="/brand/aphrodite-myanmar.png"
               alt="Aphrodite Myanmar"
               width={218}
               height={77}
-              className="h-10 w-auto"
+              className="h-9 w-auto sm:h-10"
               priority
             />
           </Link>
-          <Link href="/pc-builder" className="rounded-xl border border-zinc-300 px-4 py-2 text-sm font-bold hover:border-red-500 hover:text-red-600">
+          <Link href="/pc-builder" className="shrink-0 rounded-xl border border-zinc-300 px-3 py-2 text-xs font-bold hover:border-red-500 hover:text-red-600 sm:px-4 sm:text-sm">
             ← {text("Back to build ideas")}
           </Link>
         </div>
@@ -312,11 +374,25 @@ export default function CustomizePcBuildPage() {
               const chosen = selected[kind]
                 ? products.find((product) => product.id === selected[kind])
                 : undefined;
+              const required = REQUIRED_BUILD_KINDS.has(kind);
+              const emptyLabel = kind === "motherboard" && !selectedByKind.cpu
+                ? text("Choose a processor first")
+                : kind !== "cpu" && kind !== "motherboard" && !hasRequiredParts
+                  ? text("Choose a processor and motherboard first")
+                  : options.length === 0
+                    ? text("No compatible parts available")
+                    : text("Add a part");
               return (
                 <div key={kind} className="grid gap-4 border-b border-zinc-100 p-5 last:border-b-0 sm:grid-cols-[140px_minmax(0,1fr)_auto] sm:items-center">
                   <div>
                     <p className="text-xs font-black uppercase tracking-wider text-zinc-400">
                       <span aria-hidden="true">{details.icon}</span> {text(details.label)}
+                      {required && (
+                        <>
+                          <span aria-hidden="true" className="ml-1 text-red-600">*</span>
+                          <span className="sr-only"> ({text("required")})</span>
+                        </>
+                      )}
                     </p>
                     <p className="mt-1 text-xs text-zinc-500">{options.length} {text("available")}</p>
                   </div>
@@ -326,17 +402,20 @@ export default function CustomizePcBuildPage() {
                       options={options}
                       chosen={chosen}
                       isLoading={isLoading}
+                      emptyLabel={emptyLabel}
                       onChoose={(productId) => choosePart(kind, String(productId))}
                     />
                   </div>
-                  <button
-                    type="button"
-                    disabled={!chosen}
-                    onClick={() => choosePart(kind, "")}
-                    className="justify-self-start rounded-lg border border-zinc-300 px-3 py-2 text-sm font-bold text-zinc-600 transition enabled:hover:border-red-500 enabled:hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-35 sm:justify-self-end"
-                  >
-                    {text("Remove")}
-                  </button>
+                  {!required && (
+                    <button
+                      type="button"
+                      disabled={!chosen}
+                      onClick={() => choosePart(kind, "")}
+                      className="justify-self-start rounded-lg border border-zinc-300 px-3 py-2 text-sm font-bold text-zinc-600 transition enabled:hover:border-red-500 enabled:hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-35 sm:justify-self-end"
+                    >
+                      {text("Remove")}
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -393,10 +472,14 @@ export default function CustomizePcBuildPage() {
                 <button disabled className="mt-6 w-full rounded-xl bg-zinc-700 px-5 py-3 font-black text-zinc-300">
                   {text("Checking account...")}
                 </button>
+              ) : !hasRequiredParts ? (
+                <button disabled className="mt-6 w-full cursor-not-allowed rounded-xl bg-zinc-700 px-5 py-3 font-black text-zinc-300">
+                  {text("Choose a processor and motherboard")}
+                </button>
               ) : user ? (
                 <button
                   type="button"
-                  disabled={selectedProducts.length === 0 || isAdding}
+                  disabled={!hasRequiredParts || isAdding}
                   onClick={addBuildToCart}
                   className="mt-6 w-full rounded-xl bg-red-600 px-5 py-3 font-black text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-zinc-700"
                 >
@@ -409,7 +492,7 @@ export default function CustomizePcBuildPage() {
               )}
 
               <p className="mt-4 text-xs leading-5 text-zinc-400">
-                {text("Each selected component is added at the chosen PC quantity. Staff should confirm compatibility and stock before checkout.")}
+                {text("Compatible options update automatically from your processor, motherboard, graphics card, case, and power supply selections.")}
               </p>
             </div>
           </aside>

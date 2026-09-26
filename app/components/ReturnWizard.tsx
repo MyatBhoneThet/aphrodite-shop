@@ -252,7 +252,7 @@ export default function ReturnWizard({
             {items.map((item) => (
               <div
                 key={item.id}
-                className={`flex cursor-pointer items-center gap-3 rounded-xl border bg-white p-3 text-sm ${
+                className={`flex cursor-pointer flex-wrap items-center gap-3 rounded-xl border bg-white p-3 text-sm ${
                   selectedQuantities[item.id] ? "border-red-500" : "border-zinc-200"
                 }`}
               >
@@ -275,7 +275,7 @@ export default function ReturnWizard({
                   </span>
                 </span>
                 {selectedQuantities[item.id] && item.quantity > 1 && (
-                  <label className="flex shrink-0 items-center gap-2 text-xs font-semibold">
+                  <label className="ml-7 flex w-full items-center justify-between gap-2 border-t border-zinc-100 pt-3 text-xs font-semibold sm:ml-0 sm:w-auto sm:shrink-0 sm:justify-start sm:border-0 sm:pt-0">
                     {t("return.quantity")}
                     <input
                       type="number"
@@ -455,7 +455,7 @@ export default function ReturnWizard({
         </p>
       )}
 
-      <div className="mt-5 flex flex-wrap gap-2">
+      <div className="mt-5 grid gap-2 sm:flex sm:flex-wrap">
         {step > 1 && (
           <button
             type="button"

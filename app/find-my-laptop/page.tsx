@@ -41,7 +41,7 @@ const STEPS = ["Budget", "Main use", "Screen size"];
 
 export default function FindMyLaptopPage() {
   const { user } = useCurrentUser();
-  const deliveryEstimate = useDeliveryEstimate(Boolean(user && user.role !== "admin"));
+  const deliveryEstimate = useDeliveryEstimate(Boolean(user && user.role !== "admin" && user.role !== "staff"));
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -123,27 +123,27 @@ export default function FindMyLaptopPage() {
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
       <header className="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/85 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-3">
-          <Link href="/">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-5">
+          <Link href="/" className="w-28 shrink-0 sm:w-auto">
             <Image
               src="/brand/aphrodite-myanmar.png"
               alt="Aphrodite Myanmar"
               width={218}
               height={77}
-              className="h-11 w-auto"
+              className="h-9 w-auto sm:h-11"
               priority
             />
           </Link>
-          <div className="flex gap-2">
+          <div className="flex shrink-0 gap-2">
             <Link
               href="/catalog/laptops"
-              className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-bold transition hover:border-zinc-950"
+              className="rounded-full border border-zinc-300 px-3 py-2 text-xs font-bold transition hover:border-zinc-950 sm:px-4 sm:text-sm"
             >
               All laptops
             </Link>
             <Link
               href="/"
-              className="rounded-full bg-zinc-950 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-600"
+              className="rounded-full bg-zinc-950 px-3 py-2 text-xs font-bold text-white transition hover:bg-red-600 sm:px-4 sm:text-sm"
             >
               Store
             </Link>

@@ -82,7 +82,7 @@ export default function ChatbotButton({ currentUser, products }: { language?: "e
   const localMessageId = useRef(1);
 
   const loadConversation = useCallback(async (quiet = false) => {
-    if (!currentUser || currentUser.role === "admin") return;
+    if (!currentUser || currentUser.role === "admin" || currentUser.role === "staff") return;
     if (!quiet) setIsLoading(true);
     try {
       const response = await fetch("/api/chat", { headers: authHeaders(), cache: "no-store" });
@@ -114,7 +114,7 @@ export default function ChatbotButton({ currentUser, products }: { language?: "e
   }, [isOpen, loadPresence]);
 
   useEffect(() => {
-    if (!isOpen || mode !== "live" || !currentUser || currentUser.role === "admin") return;
+    if (!isOpen || mode !== "live" || !currentUser || currentUser.role === "admin" || currentUser.role === "staff") return;
     const first = window.setTimeout(() => void loadConversation(), 0);
     const interval = window.setInterval(() => { void loadConversation(true); void loadPresence(); }, 4000);
     return () => { window.clearTimeout(first); window.clearInterval(interval); };
@@ -183,7 +183,7 @@ export default function ChatbotButton({ currentUser, products }: { language?: "e
     event.preventDefault();
     if (mode === "assistant") { void askAssistant(message); return; }
     const trimmed = message.trim();
-    if (!currentUser || currentUser.role === "admin") return;
+    if (!currentUser || currentUser.role === "admin" || currentUser.role === "staff") return;
     if (!trimmed && !attachment && !productPick) return;
     setIsSending(true); setError("");
     try {
@@ -234,7 +234,7 @@ export default function ChatbotButton({ currentUser, products }: { language?: "e
       </> : !currentUser ? <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
         {presence && <p className="mb-3 flex items-center gap-2 text-xs font-semibold text-zinc-500"><span className={`h-2 w-2 rounded-full ${PRESENCE_DOT[presence.status]}`} />{PRESENCE_TEXT[presence.status]}</p>}
         <p className="text-lg font-bold">{t("chat.loginTitle")}</p><p className="mt-2 text-sm text-zinc-500">{t("chat.loginBody")}</p><Link href="/login" className="mt-5 rounded-full bg-red-600 px-5 py-2.5 text-sm font-bold text-white">{t("nav.login")}</Link></div>
-      : currentUser.role === "admin" ? <div className="flex flex-1 flex-col items-center justify-center p-6 text-center"><p className="text-lg font-bold">Admin support inbox</p><p className="mt-2 text-sm text-zinc-500">Reply from the single admin dashboard.</p><Link href="/admin?panel=support" className="mt-5 rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-bold text-white">Open admin</Link></div>
+      : currentUser.role === "admin" || currentUser.role === "staff" ? <div className="flex flex-1 flex-col items-center justify-center p-6 text-center"><p className="text-lg font-bold">Support inbox</p><p className="mt-2 text-sm text-zinc-500">Reply from the staff dashboard.</p><Link href="/admin?panel=support" className="mt-5 rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-bold text-white">Open dashboard</Link></div>
       : <>
         {presence && <div className="flex flex-wrap items-center gap-2 border-b bg-zinc-50 px-4 py-2 text-xs">
           <span className={`h-2 w-2 rounded-full ${PRESENCE_DOT[presence.status]}`} />

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { authenticate } from "@/app/lib/backend";
 import { badRequest, handleRouteError } from "@/app/lib/errors";
-import { requireAdmin, uploadProductPhotoObject } from "@/app/lib/supabase";
+import { requireBackoffice, uploadProductPhotoObject } from "@/app/lib/supabase";
 
 export const runtime = "nodejs";
 
@@ -14,7 +14,7 @@ const MAX_PRODUCT_PHOTO_BYTES = 5 * 1024 * 1024;
 export async function POST(request: NextRequest) {
   try {
     const user = await authenticate(request);
-    requireAdmin(user);
+    requireBackoffice(user);
 
     const form = await request.formData();
     const files = form

@@ -24,7 +24,7 @@ type WishlistItem = {
 export default function WishlistPage() {
   const { user, status: userStatus } = useCurrentUser();
   const { t } = useLanguage();
-  const deliveryEstimate = useDeliveryEstimate(Boolean(user && user.role !== "admin"));
+  const deliveryEstimate = useDeliveryEstimate(Boolean(user && user.role !== "admin" && user.role !== "staff"));
   const [items, setItems] = useState<WishlistItem[]>([]);
   const [alerts, setAlerts] = useState<FollowedAlert[]>([]);
   const [isLoading, setIsLoading] = useState(true);

@@ -54,6 +54,7 @@ export const cartQuantityUpdateSchema = z.object({
 export const pcBuildCartInputSchema = z.object({
   product_ids: z.array(z.number().int().positive()).min(1).max(8),
   quantity: z.number().int().positive().max(999),
+  build_name: z.string().trim().min(1).max(120).default("My custom PC build"),
 });
 
 export const wishlistInputSchema = z.object({
@@ -122,6 +123,7 @@ export const orderInputSchema = z
       .optional()
       .nullable(),
     notes: z.string().trim().max(1000).optional().nullable(),
+    selected_cart_item_ids: z.array(z.string().uuid()).min(1).max(100).optional(),
     // The total the client last displayed. Used only to detect price drift
     // (409 response); the authoritative total is always recomputed server-side.
     expected_total: z.number().int().nonnegative().optional(),

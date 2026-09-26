@@ -4,7 +4,7 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null unique,
   full_name text,
-  role text not null default 'normal' check (role in ('normal', 'wholesale', 'admin')),
+  role text not null default 'normal' check (role in ('normal', 'wholesale', 'staff', 'admin')),
   -- Wholesale access is granted/revoked by administrators only (no
   -- customer application flow): not_applied -> approved <-> suspended.
   wholesale_status text not null default 'not_applied'
@@ -45,10 +45,18 @@ create table if not exists public.cart_items (
   user_id uuid not null references public.profiles(id) on delete cascade,
   product_id integer not null references public.products(id) on delete cascade,
   quantity integer not null check (quantity > 0),
+  build_group_id uuid,
+  build_name text,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (user_id, product_id)
+  updated_at timestamptz not null default now()
 );
+
+create unique index if not exists cart_items_regular_product_uidx
+  on public.cart_items (user_id, product_id) where build_group_id is null;
+create unique index if not exists cart_items_build_product_uidx
+  on public.cart_items (user_id, build_group_id, product_id) where build_group_id is not null;
+create index if not exists cart_items_build_group_idx
+  on public.cart_items (user_id, build_group_id) where build_group_id is not null;
 
 create table if not exists public.customer_addresses (
   id uuid primary key default gen_random_uuid(),
@@ -357,6 +365,19 @@ as $$
   select exists (
     select 1 from public.profiles
     where id = auth.uid() and role = 'admin'
+  );
+$$;
+
+create or replace function public.is_backoffice()
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role in ('admin', 'staff')
   );
 $$;
 
@@ -879,6 +900,8 @@ grant execute on function public.resolve_order_action(uuid, uuid, text, text, te
 
 grant usage on schema public to anon, authenticated;
 grant execute on function public.is_admin() to authenticated;
+revoke all on function public.is_backoffice() from public;
+grant execute on function public.is_backoffice() to authenticated;
 -- RLS filters rows, not columns. Keep exact inventory and legacy wholesale
 -- prices inaccessible to public/authenticated PostgREST clients; server-side
 -- service-role helpers read those fields only after application authorization.

@@ -24,7 +24,7 @@ describe("storefront language rendering", () => {
   it("renders the PC builder panel in the selected language", () => {
     locale.value = "my";
     const burmese = renderToStaticMarkup(React.createElement(PcBuilderPage));
-    for (const label of ["PC Build Planner", "Minimum budget", "Maximum budget", "What will you use the PC for?", "Loading catalogue...", "Why the price may change", "Gaming and live streaming"]) {
+    for (const label of ["PC Build Planner", "Minimum budget", "Maximum budget", "Usage of PC", "Loading catalogue...", "Why the price may change", "Gaming and live streaming"]) {
       expect(burmese).toContain(translateStorefrontText("my", label));
       expect(burmese).not.toContain(label);
     }

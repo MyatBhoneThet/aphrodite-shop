@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import ProductPrice from "../components/ProductPrice";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Product } from "../data/products";
 import { authHeaders } from "../lib/client-auth";
 import { formatCurrency } from "../lib/format";
@@ -20,6 +21,7 @@ import {
   type PaymentAccountId,
   type PaymentMethod,
 } from "../lib/payment-accounts";
+import { readCartIntent } from "../lib/cart-intent";
 
 type LinePricing = {
   promotional?: boolean;
@@ -39,9 +41,44 @@ type CartLine = {
   product: Product;
   product_id: number;
   quantity: number;
+  build_group_id: string | null;
+  build_name: string | null;
   lineTotal: number;
   pricing: LinePricing;
 };
+
+type CartEntry = {
+  id: string;
+  name: string;
+  items: CartLine[];
+  isBuild: boolean;
+  quantity: number;
+  lineTotal: number;
+};
+
+const CHECKOUT_SELECTION_KEY = "aphrodite.checkout.selected-cart-items.v1";
+
+function groupCartEntries(items: CartLine[]): CartEntry[] {
+  const entries = new Map<string, CartEntry>();
+  for (const item of items) {
+    const id = item.build_group_id ? `build:${item.build_group_id}` : `item:${item.id}`;
+    const existing = entries.get(id);
+    if (existing) {
+      existing.items.push(item);
+      existing.lineTotal += item.lineTotal;
+      continue;
+    }
+    entries.set(id, {
+      id,
+      name: item.build_name || item.product.name,
+      items: [item],
+      isBuild: Boolean(item.build_group_id),
+      quantity: item.quantity,
+      lineTotal: item.lineTotal,
+    });
+  }
+  return [...entries.values()];
+}
 
 type CartSummary = {
   items: CartLine[];
@@ -54,6 +91,9 @@ type CartSummary = {
 };
 
 export default function CartPage() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const checkoutMode = pathname === "/checkout";
   const { user, status: userStatus } = useCurrentUser();
   const { t, text } = useLanguage();
   const [cart, setCart] = useState<CartSummary | null>(null);
@@ -86,7 +126,29 @@ export default function CartPage() {
   const [addressLookupMessage, setAddressLookupMessage] = useState("");
   const [isSavingAddress, setIsSavingAddress] = useState(false);
   const [addressSaveMessage, setAddressSaveMessage] = useState("");
-  const hasPendingPrices = cart?.items.some((item) => !Number.isFinite(item.product.price) || item.product.price <= 0) ?? false;
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [selectionReady, setSelectionReady] = useState(false);
+  const phoneInputRef = useRef<HTMLInputElement>(null);
+  const houseInputRef = useRef<HTMLInputElement>(null);
+  const cartIntentHandledRef = useRef(false);
+  const cartEntries = useMemo(() => groupCartEntries(cart?.items ?? []), [cart]);
+  const selectedItems = useMemo(
+    () => (cart?.items ?? []).filter((item) => selectedItemIds.has(item.id)),
+    [cart, selectedItemIds]
+  );
+  const selectedEntries = useMemo(
+    () => cartEntries.filter((entry) => entry.items.some((item) => selectedItemIds.has(item.id))),
+    [cartEntries, selectedItemIds]
+  );
+  const displayedEntryCount = checkoutMode ? selectedEntries.length : cartEntries.length;
+  const selectedTotal = selectedItems.reduce((sum, item) => sum + item.lineTotal, 0);
+  const selectedRetailSubtotal = selectedItems.reduce(
+    (sum, item) => sum + item.pricing.retailUnitPrice * item.quantity,
+    0
+  );
+  const selectedSavings = selectedItems.reduce((sum, item) => sum + item.pricing.savings, 0);
+  const selectedQuantity = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
+  const hasPendingPrices = selectedItems.some((item) => !Number.isFinite(item.product.price) || item.product.price <= 0);
   const savedAddressDeliveryEstimate = selectedAddressId && deliveryLocation && shippingCity
     ? estimateDelivery(deliveryLocation.latitude, deliveryLocation.longitude, shippingCity)
     : null;
@@ -106,7 +168,48 @@ export default function CartPage() {
   useEffect(() => {
     async function loadOnMount() {
       if (userStatus === "ready" && user) {
-        await loadCart();
+        let cartLoadedFromIntent = false;
+
+        if (!checkoutMode && !cartIntentHandledRef.current) {
+          const intent = readCartIntent(window.location.search);
+
+          if (intent) {
+            // Mark and clean the one-time intent before the request. This
+            // prevents React Strict Mode or a refresh from adding it twice.
+            cartIntentHandledRef.current = true;
+            window.history.replaceState(window.history.state, "", "/cart");
+
+            const response = await fetch("/api/cart", {
+              method: "POST",
+              headers: {
+                ...authHeaders(),
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                product_id: intent.productId,
+                quantity: intent.quantity,
+              }),
+            });
+            const data = (await response.json().catch(() => null)) as
+              | CartSummary
+              | { error?: string }
+              | null;
+
+            if (response.ok && data && "items" in data) {
+              setCart(data);
+              setIsLoading(false);
+              cartLoadedFromIntent = true;
+            } else {
+              setError(
+                data && "error" in data
+                  ? data.error ?? "Unable to add this product to your cart."
+                  : "Unable to add this product to your cart."
+              );
+            }
+          }
+        }
+
+        if (!cartLoadedFromIntent) await loadCart();
         setShippingName((current) => current || user.full_name || "");
         setShippingPhone((current) => current || user.phone || "");
         setAddressLine1(
@@ -130,7 +233,33 @@ export default function CartPage() {
     }
 
     loadOnMount();
-  }, [userStatus, user, loadCart]);
+  }, [userStatus, user, loadCart, checkoutMode]);
+
+  useEffect(() => {
+    if (!cart) return;
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      const available = new Set(cart.items.map((item) => item.id));
+      if (!selectionReady) {
+        if (checkoutMode) {
+          try {
+            const stored = JSON.parse(window.sessionStorage.getItem(CHECKOUT_SELECTION_KEY) ?? "[]") as unknown;
+            const ids = Array.isArray(stored) ? stored.filter((id): id is string => typeof id === "string" && available.has(id)) : [];
+            setSelectedItemIds(new Set(ids));
+          } catch {
+            setSelectedItemIds(new Set());
+          }
+        } else {
+          setSelectedItemIds(available);
+        }
+        setSelectionReady(true);
+        return;
+      }
+      setSelectedItemIds((current) => new Set([...current].filter((id) => available.has(id))));
+    });
+    return () => { active = false; };
+  }, [cart, checkoutMode, selectionReady]);
 
   function applySavedAddress(address: SavedAddress) {
     setSelectedAddressId(address.id);
@@ -263,6 +392,65 @@ export default function CartPage() {
     setCart((await response.json()) as CartSummary);
   }
 
+  async function updateBuildQuantity(buildGroupId: string, quantity: number) {
+    setError("");
+    const response = await fetch(`/api/cart/build/${buildGroupId}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ quantity }),
+    });
+    const data = await response.json().catch(() => null) as CartSummary | { error?: string } | null;
+    if (!response.ok) {
+      setError(data && "error" in data ? data.error ?? "Unable to update this PC build." : "Unable to update this PC build.");
+      return;
+    }
+    setCart(data as CartSummary);
+  }
+
+  async function removeBuild(buildGroupId: string) {
+    setError("");
+    const response = await fetch(`/api/cart/build/${buildGroupId}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    const data = await response.json().catch(() => null) as CartSummary | { error?: string } | null;
+    if (!response.ok) {
+      setError(data && "error" in data ? data.error ?? "Unable to remove this PC build." : "Unable to remove this PC build.");
+      return;
+    }
+    setCart(data as CartSummary);
+  }
+
+  function toggleEntry(entry: CartEntry) {
+    setSelectedItemIds((current) => {
+      const next = new Set(current);
+      const allSelected = entry.items.every((item) => next.has(item.id));
+      for (const item of entry.items) {
+        if (allSelected) next.delete(item.id);
+        else next.add(item.id);
+      }
+      return next;
+    });
+  }
+
+  function toggleAllEntries() {
+    if (!cart) return;
+    setSelectedItemIds(
+      selectedItemIds.size === cart.items.length
+        ? new Set()
+        : new Set(cart.items.map((item) => item.id))
+    );
+  }
+
+  function continueToCheckout() {
+    if (selectedItemIds.size === 0) {
+      setError("Select at least one product or PC build to check out.");
+      return;
+    }
+    window.sessionStorage.setItem(CHECKOUT_SELECTION_KEY, JSON.stringify([...selectedItemIds]));
+    router.push("/checkout");
+  }
+
   async function deleteAllCartItems() {
     if (!cart || cart.items.length === 0 || isClearingCart) return;
     if (!window.confirm(text("Remove every product from your cart? This cannot be undone."))) return;
@@ -294,6 +482,21 @@ export default function CartPage() {
     // events). The database serializes concurrent checkouts too; this just
     // avoids ever issuing the duplicate request.
     if (isPlacingOrder) return;
+
+    if (!shippingPhone.trim()) {
+      setError("Phone number is required.");
+      phoneInputRef.current?.focus();
+      return;
+    }
+    if (!addressLine1.trim()) {
+      setError("House number or building details are required.");
+      houseInputRef.current?.focus();
+      return;
+    }
+    if (selectedItemIds.size === 0) {
+      setError("Return to your cart and select at least one item.");
+      return;
+    }
 
     if (hasPendingPrices) {
       setError("A cart item is waiting for a confirmed price. Remove it or contact support before ordering.");
@@ -332,9 +535,10 @@ export default function CartPage() {
           delivery_location_consent: Boolean(deliveryLocation),
           delivery_location: deliveryLocation,
           notes: notes.trim() || null,
+          selected_cart_item_ids: [...selectedItemIds],
           // Server detects price drift against this and answers 409;
           // authoritative prices are always recomputed server-side.
-          expected_total: cart?.total,
+          expected_total: selectedTotal,
         }),
       });
 
@@ -356,11 +560,81 @@ export default function CartPage() {
 
       setPlacedOrderId(data?.order?.id ?? null);
       setCart(null);
+      window.sessionStorage.removeItem(CHECKOUT_SELECTION_KEY);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to place order.");
     } finally {
       setIsPlacingOrder(false);
     }
+  }
+
+  function renderCartEntry(entry: CartEntry) {
+    const selected = entry.items.every((item) => selectedItemIds.has(item.id));
+    const firstItem = entry.items[0];
+    const buildGroupId = firstItem.build_group_id;
+    const customizeHref = entry.isBuild
+      ? `/pc-builder/customize?${new URLSearchParams({
+          parts: entry.items.map((item) => item.product_id).join(","),
+          name: entry.name,
+        }).toString()}`
+      : null;
+
+    if (entry.isBuild && buildGroupId) {
+      return <article key={entry.id} className={`rounded-3xl border p-5 transition ${selected || checkoutMode ? "border-red-200 bg-red-50/40" : "border-zinc-200 bg-white"}`}>
+        <div className="flex items-start gap-3">
+          {!checkoutMode && <input type="checkbox" checked={selected} onChange={() => toggleEntry(entry)} aria-label={`Select ${entry.name}`} className="mt-1 h-5 w-5 shrink-0 accent-red-600" />}
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-red-600">{text("Complete PC package")}</p>
+                <h2 className="mt-1 text-xl font-black">{entry.name}</h2>
+                <p className="mt-1 text-sm text-zinc-500">{entry.items.length} {text("items in one package")} · {entry.quantity} {text(entry.quantity === 1 ? "PC build" : "PC builds")}</p>
+              </div>
+              <p className="text-lg font-black">{formatCurrency(entry.lineTotal)}</p>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {entry.items.map((item) => <div key={item.id} className="group relative">
+                <img src={item.product.image} alt={item.product.name} title={item.product.name} className="h-14 w-14 rounded-xl border bg-white object-contain p-1" />
+              </div>)}
+            </div>
+            <details className="mt-3 text-sm">
+              <summary className="cursor-pointer font-bold text-zinc-700">{text("View package components")}</summary>
+              <ul className="mt-2 space-y-1 text-zinc-600">{entry.items.map((item) => <li key={item.id}>• {item.product.name} × {item.quantity}</li>)}</ul>
+            </details>
+            {!checkoutMode && <div className="mt-4 flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => entry.quantity > 1 ? void updateBuildQuantity(buildGroupId, entry.quantity - 1) : void removeBuild(buildGroupId)} className="h-10 w-10 rounded-full border bg-white font-bold" aria-label={text("Decrease PC quantity")}>−</button>
+              <span className="min-w-8 text-center font-bold">{entry.quantity}</span>
+              <button type="button" onClick={() => void updateBuildQuantity(buildGroupId, entry.quantity + 1)} className="h-10 w-10 rounded-full border bg-white font-bold" aria-label={text("Increase PC quantity")}>+</button>
+              <Link href={customizeHref!} className="ml-1 rounded-full bg-zinc-950 px-4 py-2.5 text-xs font-bold text-white hover:bg-red-600">{text("Customize build")}</Link>
+              <Link href="/pc-builder" className="rounded-full border border-zinc-300 bg-white px-4 py-2.5 text-xs font-bold hover:border-red-500 hover:text-red-600">{text("Choose another build")}</Link>
+              <button type="button" onClick={() => void removeBuild(buildGroupId)} className="ml-auto text-sm font-bold text-red-600">{text("Remove package")}</button>
+            </div>}
+          </div>
+        </div>
+      </article>;
+    }
+
+    const item = firstItem;
+    return <article key={entry.id} className={`grid items-center gap-3 rounded-2xl border p-4 transition ${checkoutMode ? "grid-cols-[4rem_minmax(0,1fr)] sm:grid-cols-[5rem_minmax(0,1fr)_auto]" : "grid-cols-[auto_4rem_minmax(0,1fr)] sm:grid-cols-[auto_5rem_minmax(0,1fr)_auto]"} ${selected || checkoutMode ? "border-red-200" : "border-zinc-200"}`}>
+      {!checkoutMode && <input type="checkbox" checked={selected} onChange={() => toggleEntry(entry)} aria-label={`Select ${item.product.name}`} className="h-5 w-5 accent-red-600" />}
+      <img src={item.product.image} alt={item.product.name} className="h-16 w-16 rounded-xl bg-zinc-50 object-contain sm:h-20 sm:w-20" />
+      <div className="min-w-0">
+        <p className="font-bold">{item.product.name}</p>
+        <ProductPrice price={item.product.price > 0 ? item.pricing.unitPrice : 0} regularPrice={item.pricing.retailUnitPrice} />
+        {item.product.price > 0 && (item.pricing.tierMinQuantity || item.pricing.promotional) && <p className="mt-1 text-xs font-semibold text-green-700">{item.pricing.label} · {text("save")} {formatCurrency(item.pricing.savings)}</p>}
+        {item.product.price > 0 && item.pricing.nextTier && !checkoutMode && <p className="mt-1 text-xs text-zinc-500">{text("Add")} {item.pricing.nextTier.unitsAway} {text("more to pay")} {formatCurrency(item.pricing.nextTier.unitPrice)}/{text("unit")}</p>}
+        <DeliveryEstimateBadge estimate={savedAddressDeliveryEstimate} compact />
+        {!checkoutMode && <div className="mt-2 flex items-center gap-2">
+          <button type="button" onClick={() => item.quantity > 1 ? void updateQuantity(item.id, item.quantity - 1) : void removeItem(item.id)} className="h-10 w-10 rounded-full border font-bold" aria-label={t("detail.decrease")}>−</button>
+          <span className="w-8 text-center">{item.quantity}</span>
+          <button type="button" onClick={() => void updateQuantity(item.id, item.quantity + 1)} className="h-10 w-10 rounded-full border font-bold" aria-label={t("detail.increase")}>+</button>
+        </div>}
+      </div>
+      <div className={`${checkoutMode ? "col-span-2" : "col-span-3"} flex items-center justify-between gap-3 sm:col-span-1 sm:block sm:text-right`}>
+        <p className="font-bold">{item.product.price > 0 ? formatCurrency(item.lineTotal) : text("Price pending")}</p>
+        {!checkoutMode && <button type="button" onClick={() => void removeItem(item.id)} className="mt-2 text-sm text-red-600">{text("Remove")}</button>}
+      </div>
+    </article>;
   }
 
   if (userStatus === "checking" || isLoading) {
@@ -406,16 +680,19 @@ export default function CartPage() {
           <Link href="/" className="text-2xl font-bold text-red-600">
             Aphrodite
           </Link>
-          <Link href="/" className="rounded-full border px-5 py-2 text-sm">
-            {text("Back to Store")}
+          <Link href={checkoutMode ? "/cart" : "/"} className="rounded-full border px-5 py-2 text-sm">
+            {checkoutMode ? text("Back to cart") : text("Back to Store")}
           </Link>
         </div>
       </header>
 
       <section className="mx-auto max-w-5xl px-5 py-10">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <h1 className="text-4xl font-bold">{t("cart.title")}</h1>
-          {cart && cart.items.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-4xl font-bold">{checkoutMode ? text("Checkout") : t("cart.title")}</h1>
+            {displayedEntryCount > 0 && <span className="rounded-full bg-zinc-100 px-3 py-1 text-sm font-bold text-zinc-600">{displayedEntryCount} {text(displayedEntryCount === 1 ? "item" : "items")}</span>}
+          </div>
+          {!checkoutMode && cart && cart.items.length > 0 && (
             <button
               type="button"
               disabled={isClearingCart || isPlacingOrder}
@@ -447,105 +724,45 @@ export default function CartPage() {
         ) : (
           <div className="mt-8 grid gap-10 lg:grid-cols-[1.4fr_1fr]">
             <div className="space-y-4">
-              {cart.items.map((item) => (
-                <div
-                  key={item.id}
-                  className="grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-4 rounded-2xl border p-4 sm:grid-cols-[5rem_minmax(0,1fr)_auto]"
-                >
-                  <img
-                    src={item.product.image}
-                    alt={item.product.name}
-                    className="h-16 w-16 rounded-xl sm:h-20 sm:w-20 object-contain bg-zinc-50"
-                  />
-
-                  <div className="flex-1">
-                    <p className="font-bold">{item.product.name}</p>
-                    <ProductPrice price={item.product.price > 0 ? item.pricing.unitPrice : 0} regularPrice={item.pricing.retailUnitPrice} />
-
-                    {item.product.price <= 0 ? null : (item.pricing.tierMinQuantity || item.pricing.promotional) ? (
-                      <p className="mt-1 text-xs font-semibold text-green-700">
-                        {item.pricing.label} · save{" "}
-                        {formatCurrency(item.pricing.savings)}
-                      </p>
-                    ) : item.pricing.wholesaleEligible ? (
-                      <p className="mt-1 text-xs font-semibold text-zinc-500">
-                        {text("Retail price \u2014 below wholesale tier")}
-                      </p>
-                    ) : null}
-
-                    {item.product.price > 0 && item.pricing.nextTier && (
-                      <p className="mt-1 text-xs text-zinc-500">
-                        Add {item.pricing.nextTier.unitsAway} more to pay{" "}
-                        {formatCurrency(item.pricing.nextTier.unitPrice)}/unit
-                      </p>
-                    )}
-
-                    <DeliveryEstimateBadge estimate={savedAddressDeliveryEstimate} compact />
-
-                    <div className="mt-2 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          item.quantity > 1
-                            ? updateQuantity(item.id, item.quantity - 1)
-                            : removeItem(item.id)
-                        }
-                        className="h-11 w-11 rounded-full border font-bold"
-                        aria-label={t("detail.decrease")}
-                      >
-                        −
-                      </button>
-                      <span className="w-8 text-center">{item.quantity}</span>
-                      <button
-                        type="button"
-                        onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                        className="h-11 w-11 rounded-full border font-bold"
-                        aria-label={t("detail.increase")}
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="col-span-2 flex flex-wrap items-center justify-between gap-3 sm:col-span-1 sm:block sm:text-right">
-                    <p className="font-bold">{item.product.price > 0 ? formatCurrency(item.lineTotal) : text("Price pending")}</p>
-                    <button
-                      type="button"
-                      onClick={() => removeItem(item.id)}
-                      className="mt-2 text-sm text-red-600"
-                    >
-                      {text("Remove")}
-                    </button>
-                  </div>
-                </div>
-              ))}
+              {!checkoutMode && <div className="flex items-center justify-between gap-3 rounded-2xl bg-zinc-50 px-4 py-3">
+                <label className="flex cursor-pointer items-center gap-3 text-sm font-bold">
+                  <input type="checkbox" checked={selectedItemIds.size === cart.items.length} onChange={toggleAllEntries} className="h-5 w-5 accent-red-600" />
+                  {text("Select all")}
+                </label>
+                <span className="text-sm text-zinc-500">{selectedEntries.length} {text("selected")}</span>
+              </div>}
+              {(checkoutMode ? selectedEntries : cartEntries).map(renderCartEntry)}
+              {checkoutMode && selectedEntries.length === 0 && <div className="rounded-3xl border border-amber-200 bg-amber-50 p-6 text-center">
+                <p className="font-bold">{text("No cart items are selected for checkout.")}</p>
+                <Link href="/cart" className="mt-4 inline-block rounded-full bg-zinc-950 px-5 py-3 text-sm font-bold text-white">{text("Return to cart")}</Link>
+              </div>}
             </div>
 
             <div className="rounded-[2rem] bg-zinc-100 p-6">
               <h2 className="text-xl font-bold">{t("cart.checkout")}</h2>
 
               <div className="mt-4 space-y-2 text-sm">
-                {!hasPendingPrices && cart.totalSavings > 0 && (
+                {!hasPendingPrices && selectedSavings > 0 && (
                   <>
                     <div className="flex items-center justify-between gap-3 text-zinc-500">
                       <span>{t("cart.retailSubtotal")}</span>
                       <span className="shrink-0 whitespace-nowrap line-through">
-                        {formatCurrency(cart.retailSubtotal)}
+                        {formatCurrency(selectedRetailSubtotal)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-3 font-semibold text-green-700">
                       <span>{t("cart.totalSavings")}</span>
-                      <span className="shrink-0 whitespace-nowrap">−{formatCurrency(cart.totalSavings)}</span>
+                      <span className="shrink-0 whitespace-nowrap">−{formatCurrency(selectedSavings)}</span>
                     </div>
                   </>
                 )}
 
                 <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                   <span className="text-zinc-500">
-                    {t("cart.itemCount", { count: cart.totalQuantity })}
+                    {t("cart.itemCount", { count: selectedQuantity })}
                   </span>
                   <span className="whitespace-nowrap text-2xl font-bold">
-                    {hasPendingPrices ? text("Awaiting prices") : formatCurrency(cart.total)}
+                    {hasPendingPrices ? text("Awaiting prices") : formatCurrency(selectedTotal)}
                   </span>
                 </div>
 
@@ -554,7 +771,7 @@ export default function CartPage() {
                 </p>
               </div>
 
-              <form onSubmit={handleCheckout} className="mt-6 space-y-4">
+              {!checkoutMode ? <button type="button" onClick={continueToCheckout} disabled={selectedItemIds.size === 0 || hasPendingPrices} className="mt-6 w-full rounded-full bg-red-600 px-5 py-4 font-bold text-white disabled:bg-zinc-400">{text("Checkout selected items")}</button> : <form onSubmit={handleCheckout} className="mt-6 space-y-4">
                 {savedAddresses.length > 0 && <div>
                   <label htmlFor="saved-address" className="mb-1 block text-sm font-semibold">Saved address</label>
                   <select id="saved-address" value={selectedAddressId} onChange={(event) => {
@@ -582,9 +799,10 @@ export default function CartPage() {
 
                 <div>
                   <label htmlFor="shipping-phone" className="mb-1 block text-sm font-semibold">
-                    {text("Phone")}
+                    {text("Phone")} <span className="text-red-600" aria-hidden="true">*</span>
                   </label>
                   <input
+                    ref={phoneInputRef}
                     id="shipping-phone"
                     type="tel"
                     required
@@ -594,34 +812,37 @@ export default function CartPage() {
                   />
                 </div>
 
-                <div>
-                  <label htmlFor="address-line-1" className="mb-1 block text-sm font-semibold">
-                    {text("House number / building details")}
-                  </label>
-                  <input
-                    id="address-line-1"
-                    required
-                    placeholder={text("House number, building, floor, or room")}
-                    value={addressLine1}
-                    onChange={(event) => setAddressLine1(event.target.value)}
-                    className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500"
-                  />
-                </div>
+                <fieldset className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-4">
+                  <legend className="px-2 text-base font-black">{text("Billing address")}</legend>
+                  <div>
+                    <label htmlFor="address-line-1" className="mb-1 block text-sm font-semibold">
+                      {text("House number / building details")} <span className="text-red-600" aria-hidden="true">*</span>
+                    </label>
+                    <input
+                      ref={houseInputRef}
+                      id="address-line-1"
+                      required
+                      placeholder={text("House number, building, floor, or room")}
+                      value={addressLine1}
+                      onChange={(event) => setAddressLine1(event.target.value)}
+                      className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500"
+                    />
+                  </div>
 
-                <div>
-                  <label htmlFor="address-line-2" className="mb-1 block text-sm font-semibold">
-                    {text("Street / ward / landmark")}
-                  </label>
-                  <input
-                    id="address-line-2"
-                    placeholder={text("Filled automatically from your pin; you can edit it")}
-                    value={addressLine2}
-                    onChange={(event) => setAddressLine2(event.target.value)}
-                    className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500"
-                  />
-                </div>
+                  <div>
+                    <label htmlFor="address-line-2" className="mb-1 block text-sm font-semibold">
+                      {text("Street / ward / landmark")}
+                    </label>
+                    <input
+                      id="address-line-2"
+                      placeholder={text("Filled automatically from your pin; you can edit it")}
+                      value={addressLine2}
+                      onChange={(event) => setAddressLine2(event.target.value)}
+                      className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500"
+                    />
+                  </div>
 
-                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <label htmlFor="shipping-city" className="mb-1 block text-sm font-semibold">
                       {text("Yangon township")}
@@ -634,11 +855,10 @@ export default function CartPage() {
                     </select>
                   </div>
                   <div>
-                    <label htmlFor="shipping-state" className="mb-1 block text-sm font-semibold">
+                    <p className="mb-1 block text-sm font-semibold">
                       {text("Region")}
-                    </label>
-                    <input id="shipping-state" readOnly value="Yangon"
-                      className="w-full rounded-xl border bg-zinc-50 px-4 py-3 text-zinc-600" />
+                    </p>
+                    <div id="shipping-state" className="w-full rounded-xl border bg-zinc-100 px-4 py-3 font-semibold text-zinc-600" aria-label="Region: Yangon">Yangon</div>
                   </div>
                   <div>
                     <label htmlFor="postal-code" className="mb-1 block text-sm font-semibold">
@@ -649,14 +869,21 @@ export default function CartPage() {
                       className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500" />
                   </div>
                   <div>
-                    <label htmlFor="shipping-country" className="mb-1 block text-sm font-semibold">
+                    <p className="mb-1 block text-sm font-semibold">
                       {text("Country")}
-                    </label>
-                    <input id="shipping-country" readOnly value={text(shippingCountry)}
-                      className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500" />
+                    </p>
+                    <div id="shipping-country" className="w-full rounded-xl border bg-zinc-100 px-4 py-3 font-semibold text-zinc-600" aria-label="Country: Myanmar">{text(shippingCountry)}</div>
                     <p className="mt-1 text-xs text-zinc-500">{text("Delivery is available in Yangon only.")}</p>
                   </div>
-                </div>
+                  </div>
+
+                  <div>
+                    <label htmlFor="order-notes" className="mb-1 block text-sm font-semibold">
+                      {text("Delivery notes (optional)")}
+                    </label>
+                    <textarea id="order-notes" rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder={text("Gate, floor, landmark, or courier instructions")} className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500" />
+                  </div>
+                </fieldset>
 
                 <DeliveryPinPicker value={deliveryLocation} onChange={handlePinChange} onPinPlaced={resolvePinAddress} addressLookupStatus={addressLookupMessage} showDeliveryEstimate />
                 {isResolvingAddress && <span className="sr-only" role="status">Finding the street and township from your pin…</span>}
@@ -725,7 +952,7 @@ export default function CartPage() {
                     </label>
                   </> : <div className="mt-4 space-y-3">
                     <p className="text-sm font-semibold">
-                      {t("payment.amountToTransfer")}: {formatCurrency(cart?.total ?? 0)}
+                      {t("payment.amountToTransfer")}: {formatCurrency(selectedTotal)}
                     </p>
                     {paymentAccountsFor({ wholesale: Boolean(cart?.wholesale) })
                       .filter((account) => account.method === paymentMethod)
@@ -754,19 +981,6 @@ export default function CartPage() {
                   </div>}
                 </fieldset>
 
-                <div>
-                  <label htmlFor="order-notes" className="mb-1 block text-sm font-semibold">
-                    {text("Notes (optional)")}
-                  </label>
-                  <textarea
-                    id="order-notes"
-                    rows={2}
-                    value={notes}
-                    onChange={(event) => setNotes(event.target.value)}
-                    className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500"
-                  />
-                </div>
-
                 <button
                   type="submit"
                   disabled={isPlacingOrder || hasPendingPrices}
@@ -776,7 +990,7 @@ export default function CartPage() {
                     ? t("cart.placingOrder")
                     : t(`cart.place.${paymentMethod}`)}
                 </button>
-              </form>
+              </form>}
             </div>
           </div>
         )}

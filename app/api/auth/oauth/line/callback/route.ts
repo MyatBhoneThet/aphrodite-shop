@@ -114,13 +114,13 @@ export async function GET(request: NextRequest) {
 
     const session = await createSessionForVerifiedEmail(identity.email);
     const profile = await getProfile(session.user.id, session.access_token);
-    const isAdmin = profile?.role === "admin";
+    const isBackoffice = profile?.role === "admin" || profile?.role === "staff";
 
     const response = NextResponse.redirect(
-      new URL(isAdmin ? "/admin/dashboard" : next, request.url)
+      new URL(isBackoffice ? "/admin/dashboard" : next, request.url)
     );
 
-    setSessionCookies(response, session.access_token, { isAdmin });
+    setSessionCookies(response, session.access_token, { isBackoffice });
     response.cookies.delete(LINE_OAUTH_COOKIE);
 
     return response;

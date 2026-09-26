@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { authenticate } from "@/app/lib/backend";
 import { handleRouteError } from "@/app/lib/errors";
 import { autoSyncStatus, runProductSync } from "@/app/lib/product-sync";
-import { requireAdmin } from "@/app/lib/supabase";
+import { requireBackoffice } from "@/app/lib/supabase";
 import { readJsonBody } from "@/app/lib/request";
 
 export const runtime = "nodejs";
@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 export async function GET(request: NextRequest) {
   try {
     const user = await authenticate(request);
-    requireAdmin(user);
+    requireBackoffice(user);
 
     return NextResponse.json({ automatic: autoSyncStatus() });
   } catch (error) {
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const user = await authenticate(request);
-    requireAdmin(user);
+    requireBackoffice(user);
 
     const body = (await readJsonBody(request)) as {
       dryRun?: boolean;

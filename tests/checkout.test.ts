@@ -262,6 +262,37 @@ describe("checkout pricing authority", () => {
 });
 
 describe("checkout safety", () => {
+  it("checks out only the selected cart rows and leaves the selection explicit for the transaction", async () => {
+    const first = cartRow({ id: "11111111-1111-4111-8111-111111111111", quantity: 2 });
+    const secondProduct = { ...cartRow().products!, id: 2, name: "Selected monitor", price: 70_000 };
+    const second = cartRow({
+      id: "22222222-2222-4222-8222-222222222222",
+      product_id: 2,
+      quantity: 1,
+      products: secondProduct,
+    });
+    vi.mocked(selectCart).mockResolvedValue([first, second]);
+    vi.mocked(selectProductsByIdsService).mockResolvedValue([secondProduct]);
+
+    await createOrder(user(), {
+      ...SHIPPING,
+      selected_cart_item_ids: [second.id],
+      expected_total: 70_000,
+    });
+
+    const call = vi.mocked(checkoutOrderRpc).mock.calls[0][0];
+    expect(call.cart_item_ids).toEqual([second.id]);
+    expect(call.lines).toEqual([expect.objectContaining({ product_id: 2, quantity: 1 })]);
+  });
+
+  it("rejects a selected cart id that does not belong to the customer", async () => {
+    await expect(createOrder(user(), {
+      ...SHIPPING,
+      selected_cart_item_ids: ["33333333-3333-4333-8333-333333333333"],
+    })).rejects.toMatchObject({ status: 409 });
+    expect(checkoutOrderRpc).not.toHaveBeenCalled();
+  });
+
   it("rejects foreign destinations before reading the cart", async () => {
     await expect(createOrder(user(), { ...SHIPPING, shipping_country: "Thailand" })).rejects.toMatchObject({ status: 400 });
     expect(selectCart).not.toHaveBeenCalled();

@@ -6,7 +6,7 @@ import { effectiveProductPrice } from "../lib/promotions";
 
 import Image from "next/image";
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Product } from "../data/products";
 import { formatCurrency } from "../lib/format";
 import { productPhotos } from "../lib/product-gallery";
@@ -36,6 +36,42 @@ const purposeIcons: Record<PcBuildPurpose, string> = {
   "3d_rendering": "🧊",
 };
 
+const PC_BUILDER_STORAGE_KEY = "aphrodite.pc-builder.preferences.v1";
+const DEFAULT_PC_BUILD_INPUT: PcBuildInput = {
+  minimumBudget: 6_700_000,
+  maximumBudget: 8_040_000,
+  purpose: "gaming",
+};
+
+type SavedPcBuilderPreferences = {
+  minimumBudget: string;
+  maximumBudget: string;
+  purpose: PcBuildPurpose;
+  request: PcBuildInput;
+};
+
+function isPcBuildPurpose(value: unknown): value is PcBuildPurpose {
+  return typeof value === "string" && value in purposeLabels;
+}
+
+function savedBuildInput(value: unknown): PcBuildInput | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<PcBuildInput>;
+  if (
+    !Number.isFinite(candidate.minimumBudget) ||
+    !Number.isFinite(candidate.maximumBudget) ||
+    !isPcBuildPurpose(candidate.purpose) ||
+    Number(candidate.minimumBudget) < 1_340_000 ||
+    Number(candidate.maximumBudget) < Number(candidate.minimumBudget) ||
+    Number(candidate.maximumBudget) > 134_000_000
+  ) return null;
+  return {
+    minimumBudget: Number(candidate.minimumBudget),
+    maximumBudget: Number(candidate.maximumBudget),
+    purpose: candidate.purpose,
+  };
+}
+
 const partIcons: Record<Exclude<PcPartKind, "other">, string> = {
   cpu: "🔲",
   motherboard: "🧩",
@@ -53,6 +89,12 @@ const tierThemes: Record<string, { accent: string; soft: string; bar: string; ri
   Value: { accent: "text-emerald-600", soft: "bg-emerald-50", bar: "bg-emerald-500", ring: "ring-emerald-100", tagline: "Most for your money" },
   Balanced: { accent: "text-sky-600", soft: "bg-sky-50", bar: "bg-sky-500", ring: "ring-sky-100", tagline: "Best all-round choice" },
   Performance: { accent: "text-red-600", soft: "bg-red-50", bar: "bg-red-500", ring: "ring-red-100", tagline: "Maximum speed in your range" },
+};
+
+const tierExplanations: Record<string, string> = {
+  Value: "Keeps the total close to your minimum budget while covering the essential PC part categories.",
+  Balanced: "Spreads the budget across the parts for a strong mix of price and performance.",
+  Performance: "Uses more of your available budget to prioritise faster parts for your selected usage.",
 };
 
 const heroKinds: Array<Exclude<PcPartKind, "other">> = ["gpu", "motherboard", "cooling", "memory"];
@@ -87,10 +129,61 @@ export default function PcBuilderPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
-  const [minimumBudget, setMinimumBudget] = useState("6700000");
-  const [maximumBudget, setMaximumBudget] = useState("8040000");
-  const [purpose, setPurpose] = useState<PcBuildPurpose>("gaming");
-  const [request, setRequest] = useState<PcBuildInput>({ minimumBudget: 6700000, maximumBudget: 8040000, purpose: "gaming" });
+  const [minimumBudget, setMinimumBudget] = useState(String(DEFAULT_PC_BUILD_INPUT.minimumBudget));
+  const [maximumBudget, setMaximumBudget] = useState(String(DEFAULT_PC_BUILD_INPUT.maximumBudget));
+  const [purpose, setPurpose] = useState<PcBuildPurpose>(DEFAULT_PC_BUILD_INPUT.purpose);
+  const [request, setRequest] = useState<PcBuildInput>(DEFAULT_PC_BUILD_INPUT);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let restoredMinimum = String(DEFAULT_PC_BUILD_INPUT.minimumBudget);
+    let restoredMaximum = String(DEFAULT_PC_BUILD_INPUT.maximumBudget);
+    let restoredPurpose = DEFAULT_PC_BUILD_INPUT.purpose;
+    let restoredRequest = DEFAULT_PC_BUILD_INPUT;
+    try {
+      const stored = window.localStorage.getItem(PC_BUILDER_STORAGE_KEY);
+      if (stored) {
+        const saved = JSON.parse(stored) as Partial<SavedPcBuilderPreferences>;
+        if (typeof saved.minimumBudget === "string") restoredMinimum = saved.minimumBudget;
+        if (typeof saved.maximumBudget === "string") restoredMaximum = saved.maximumBudget;
+        if (isPcBuildPurpose(saved.purpose)) restoredPurpose = saved.purpose;
+        restoredRequest = savedBuildInput({
+          minimumBudget: Number(restoredMinimum),
+          maximumBudget: Number(restoredMaximum),
+          purpose: restoredPurpose,
+        }) ?? savedBuildInput(saved.request) ?? DEFAULT_PC_BUILD_INPUT;
+      }
+    } catch {
+      // A blocked or malformed local-storage value should never prevent the
+      // planner from working with its normal defaults.
+    }
+    queueMicrotask(() => {
+      if (!active) return;
+      setMinimumBudget(restoredMinimum);
+      setMaximumBudget(restoredMaximum);
+      setPurpose(restoredPurpose);
+      setRequest(restoredRequest);
+      setPreferencesLoaded(true);
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!preferencesLoaded) return;
+    try {
+      const saved: SavedPcBuilderPreferences = {
+        minimumBudget,
+        maximumBudget,
+        purpose,
+        request,
+      };
+      window.localStorage.setItem(PC_BUILDER_STORAGE_KEY, JSON.stringify(saved));
+    } catch {
+      // Private browsing or strict browser settings can disable storage. The
+      // planner remains usable for the current visit in that case.
+    }
+  }, [maximumBudget, minimumBudget, preferencesLoaded, purpose, request]);
 
   useEffect(() => {
     async function loadProducts() {
@@ -128,10 +221,9 @@ export default function PcBuilderPage() {
     });
   }, [pcParts]);
 
-  function generate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const minimum = Number(minimumBudget);
-    const maximum = Number(maximumBudget);
+  function updateBuildRequest(nextMinimum: string, nextMaximum: string, nextPurpose: PcBuildPurpose) {
+    const minimum = Number(nextMinimum);
+    const maximum = Number(nextMaximum);
     if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || minimum < 1340000) {
       setError("Enter a minimum budget of at least MMK 1,340,000.");
       return;
@@ -145,7 +237,22 @@ export default function PcBuilderPage() {
       return;
     }
     setError("");
-    setRequest({ minimumBudget: Math.floor(minimum), maximumBudget: Math.floor(maximum), purpose });
+    setRequest({ minimumBudget: Math.floor(minimum), maximumBudget: Math.floor(maximum), purpose: nextPurpose });
+  }
+
+  function changeMinimumBudget(value: string) {
+    setMinimumBudget(value);
+    updateBuildRequest(value, maximumBudget, purpose);
+  }
+
+  function changeMaximumBudget(value: string) {
+    setMaximumBudget(value);
+    updateBuildRequest(minimumBudget, value, purpose);
+  }
+
+  function changePurpose(value: PcBuildPurpose) {
+    setPurpose(value);
+    updateBuildRequest(minimumBudget, maximumBudget, value);
   }
 
   function translateBuildWarning(warning: string) {
@@ -163,7 +270,7 @@ export default function PcBuilderPage() {
   ];
 
   return <main className="min-h-screen bg-zinc-50 text-zinc-950">
-    <header className="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/85 backdrop-blur"><div className="mx-auto flex max-w-7xl items-center justify-between gap-2 px-4 py-3 sm:px-5"><Link href="/" className="shrink-0"><Image src="/brand/aphrodite-myanmar.png" alt="Aphrodite Myanmar" width={218} height={77} className="h-9 w-auto sm:h-11" priority /></Link><div className="flex shrink-0 gap-2"><Link href="/#pc-parts" className="whitespace-nowrap rounded-full border border-zinc-300 px-3 py-1.5 text-xs font-bold transition hover:border-zinc-950 sm:px-4 sm:py-2 sm:text-sm">{text("Browse PC parts")}</Link><Link href="/" className="whitespace-nowrap rounded-full bg-zinc-950 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-red-600 sm:px-4 sm:py-2 sm:text-sm">{text("Store")}</Link></div></div></header>
+    <header className="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/85 backdrop-blur"><div className="mx-auto flex max-w-7xl items-center justify-between gap-2 px-4 py-3 sm:px-5"><Link href="/" className="w-28 shrink-0 sm:w-auto"><Image src="/brand/aphrodite-myanmar.png" alt="Aphrodite Myanmar" width={218} height={77} className="h-9 w-auto sm:h-11" priority /></Link><div className="flex shrink-0 gap-2"><Link href="/#pc-parts" className="whitespace-nowrap rounded-full border border-zinc-300 px-2.5 py-2 text-[11px] font-bold transition hover:border-zinc-950 sm:px-4 sm:text-sm">{text("PC parts")}</Link><Link href="/" className="whitespace-nowrap rounded-full bg-zinc-950 px-3 py-2 text-[11px] font-bold text-white transition hover:bg-red-600 sm:px-4 sm:text-sm">{text("Store")}</Link></div></div></header>
 
     <section className="mx-auto max-w-7xl px-5 py-8 sm:py-10">
       {/* Hero */}
@@ -205,32 +312,32 @@ export default function PcBuilderPage() {
 
       <div className="mt-8 grid gap-8 xl:grid-cols-[380px_1fr]">
         {/* Requirements form */}
-        <aside id="requirements" className="scroll-mt-24"><form onSubmit={generate} className="sticky top-24 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <aside id="requirements" className="scroll-mt-24"><div className="sticky top-24 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
           <div className="flex items-center gap-3"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-50 text-xl">🛠️</span><div><h2 className="text-2xl font-black">{text("Your requirements")}</h2><p className="text-sm text-zinc-500">{text("Example: MMK 6,700,000 – 8,040,000.")}</p></div></div>
 
           <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
             <label className="block text-sm font-bold">{text("Minimum budget")}
-              <span className="mt-2 flex items-center rounded-2xl border border-zinc-300 bg-zinc-50 transition focus-within:border-red-500 focus-within:bg-white focus-within:ring-4 focus-within:ring-red-100"><span className="shrink-0 pl-4 text-xs font-black text-zinc-400">MMK</span><input type="number" min={1340000} max={134000000} step={1} value={minimumBudget} onChange={(event) => setMinimumBudget(event.target.value)} className="w-full bg-transparent px-3 py-3 text-lg font-black outline-none" /></span>
+              <span className="mt-2 flex items-center rounded-2xl border border-zinc-300 bg-zinc-50 transition focus-within:border-red-500 focus-within:bg-white focus-within:ring-4 focus-within:ring-red-100"><span className="shrink-0 pl-4 text-xs font-black text-zinc-400">MMK</span><input type="number" min={1340000} max={134000000} step={1} value={minimumBudget} onChange={(event) => changeMinimumBudget(event.target.value)} className="w-full bg-transparent px-3 py-3 text-lg font-black outline-none" /></span>
               <span className="mt-1 block text-xs font-normal text-zinc-400">{Number(minimumBudget) ? formatCurrency(Number(minimumBudget)) : "—"}</span>
             </label>
             <label className="block text-sm font-bold">{text("Maximum budget")}
-              <span className="mt-2 flex items-center rounded-2xl border border-zinc-300 bg-zinc-50 transition focus-within:border-red-500 focus-within:bg-white focus-within:ring-4 focus-within:ring-red-100"><span className="shrink-0 pl-4 text-xs font-black text-zinc-400">MMK</span><input type="number" min={1340000} max={134000000} step={1} value={maximumBudget} onChange={(event) => setMaximumBudget(event.target.value)} className="w-full bg-transparent px-3 py-3 text-lg font-black outline-none" /></span>
+              <span className="mt-2 flex items-center rounded-2xl border border-zinc-300 bg-zinc-50 transition focus-within:border-red-500 focus-within:bg-white focus-within:ring-4 focus-within:ring-red-100"><span className="shrink-0 pl-4 text-xs font-black text-zinc-400">MMK</span><input type="number" min={1340000} max={134000000} step={1} value={maximumBudget} onChange={(event) => changeMaximumBudget(event.target.value)} className="w-full bg-transparent px-3 py-3 text-lg font-black outline-none" /></span>
               <span className="mt-1 block text-xs font-normal text-zinc-400">{Number(maximumBudget) ? formatCurrency(Number(maximumBudget)) : "—"}</span>
             </label>
           </div>
 
-          <fieldset className="mt-5"><legend className="text-sm font-bold">{text("What will you use the PC for?")}</legend>
+          <fieldset className="mt-5"><legend className="text-sm font-bold">{text("Usage of PC")}</legend>
             <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3 xl:grid-cols-2">
               {(Object.keys(purposeLabels) as PcBuildPurpose[]).map((value) => {
                 const selected = purpose === value;
-                return <button key={value} type="button" aria-pressed={selected} onClick={() => setPurpose(value)} className={`flex items-center gap-2 rounded-2xl border px-3 py-3 text-left text-sm font-bold leading-relaxed transition ${selected ? "border-red-500 bg-red-50 text-red-700 ring-4 ring-red-100" : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400"}`}><span className="shrink-0 text-xl leading-none" aria-hidden="true">{purposeIcons[value]}</span><span className="min-w-0">{text(purposeLabels[value])}</span></button>;
+                return <button key={value} type="button" aria-pressed={selected} onClick={() => changePurpose(value)} className={`flex items-center gap-2 rounded-2xl border px-3 py-3 text-left text-sm font-bold leading-relaxed transition ${selected ? "border-red-500 bg-red-50 text-red-700 ring-4 ring-red-100" : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400"}`}><span className="shrink-0 text-xl leading-none" aria-hidden="true">{purposeIcons[value]}</span><span className="min-w-0">{text(purposeLabels[value])}</span></button>;
               })}
             </div>
           </fieldset>
 
-          <button type="submit" disabled={isLoading} className="mt-6 w-full rounded-full bg-red-600 px-5 py-3.5 font-black text-white shadow-lg shadow-red-600/25 transition hover:bg-red-500 active:scale-[0.99] disabled:bg-zinc-400 disabled:shadow-none">{isLoading ? text("Loading catalogue...") : text("Generate PC builds")}</button>
+          <p aria-live="polite" className="mt-5 rounded-2xl bg-red-50 px-4 py-3 text-center text-sm font-bold text-red-700">{isLoading ? text("Loading catalogue...") : text("Builds update automatically when you change the budget or usage.")}</p>
           <p className="mt-4 rounded-2xl bg-zinc-50 p-3 text-xs leading-5 text-zinc-500">{text("This is a demo estimate. Before ordering, staff must confirm CPU socket, motherboard, RAM, case clearance, cooling, and power-supply compatibility.")}</p>
-        </form></aside>
+        </div></aside>
 
         {/* Results */}
         <div>
@@ -247,9 +354,23 @@ export default function PcBuilderPage() {
               }).toString()}`;
               return <article key={plan.id} className={`hero-rise overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm ring-4 ${theme.ring}`}>
                 <div className={`relative p-6 ${theme.soft}`}>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div><p className={`text-sm font-black uppercase tracking-wider ${theme.accent}`}>{t("builder.planLabel", { label: text(plan.label) })}</p><p className="text-xs font-bold text-zinc-500">{text(theme.tagline)}</p><h3 className="mt-2 text-4xl font-black tracking-tight">{formatCurrency(plan.total)}</h3><p className="text-sm text-zinc-500">{t("builder.target", { price: formatCurrency(plan.targetBudget) })}</p></div>
-                    <span className={`rounded-full px-4 py-2 text-xs font-black ${plan.withinRequestedRange ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-900"}`}>{plan.withinRequestedRange ? text("✓ Within requested range") : text("Needs review")}</span>
+                  <div>
+                    <details className="group">
+                      <summary className={`flex w-fit cursor-pointer list-none items-center gap-2 text-sm font-black uppercase tracking-wider ${theme.accent} [&::-webkit-details-marker]:hidden`}>
+                        {t("builder.planLabel", { label: text(plan.label) })}
+                        <span aria-hidden="true" className="flex h-6 w-6 items-center justify-center rounded-full border border-current text-xs transition group-open:rotate-45">?</span>
+                      </summary>
+                      <div className="mt-3 max-w-2xl rounded-2xl border border-black/5 bg-white/85 p-4 text-left normal-case tracking-normal shadow-sm">
+                        <p className="text-sm font-black text-zinc-950">{text("About this build")}</p>
+                        <p className="mt-1 text-sm leading-6 text-zinc-600">{text(tierExplanations[plan.label] ?? tierExplanations.Balanced)}</p>
+                        {(plan.missing.length > 0 || plan.warnings.length > 0) && <div className="mt-3 border-t border-amber-200 pt-3 text-sm text-amber-950">
+                          <p className="font-black">{text("Compatibility checks before ordering")}</p>
+                          {plan.missing.length > 0 && <p className="mt-1"><b>{text("Missing catalogue categories:")}</b> {plan.missing.map(text).join("၊ ")}</p>}
+                          {plan.warnings.map((warning) => <p key={warning} className="mt-1">⚠️ {translateBuildWarning(warning)}</p>)}
+                        </div>}
+                      </div>
+                    </details>
+                    <p className="mt-1 text-xs font-bold text-zinc-500">{text(theme.tagline)}</p><h3 className="mt-2 text-4xl font-black tracking-tight">{formatCurrency(plan.total)}</h3><p className="text-sm text-zinc-500">{t("builder.target", { price: formatCurrency(plan.targetBudget) })}</p>
                   </div>
                   <div className="mt-5 flex flex-wrap gap-2">{plan.parts.map((part) => <PartThumb key={`${part.kind}-${part.product.id}`} product={part.product} kind={part.kind} size="sm" />)}</div>
                 </div>
@@ -268,7 +389,6 @@ export default function PcBuilderPage() {
                   </li>;
                 })}</ul>
 
-                {(plan.missing.length > 0 || plan.warnings.length > 0) && <div className="border-t border-amber-100 bg-amber-50 p-5 text-sm text-amber-950">{plan.missing.length > 0 && <p><b>{text("Missing catalogue categories:")}</b> {plan.missing.map(text).join("၊ ")}</p>}{plan.warnings.map((warning) => <p key={warning} className="mt-1">⚠️ {translateBuildWarning(warning)}</p>)}</div>}
                 <div className="flex justify-end border-t border-zinc-100 p-5">
                   <Link
                     href={editorHref}

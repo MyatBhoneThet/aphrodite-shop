@@ -44,14 +44,14 @@ export default function AccountControls({ user, wishlistCount, cartCount, onLogo
 
   const links = [
     { href: "/orders", label: t("nav.orders") },
-    ...(user.role !== "admin" ? [{ href: "/addresses", label: language === "my" ? "ကျွန်ုပ်၏လိပ်စာများ" : "My addresses" }] : []),
+    ...(!["admin", "staff"].includes(user.role) ? [{ href: "/addresses", label: language === "my" ? "ကျွန်ုပ်၏လိပ်စာများ" : "My addresses" }] : []),
     { href: "/location", label: t("nav.locationSharing") },
     { href: "/wishlist", label: t("nav.wishlist") },
     { href: "/cart", label: t("nav.cart") },
     { href: "/pc-builder", label: language === "my" ? "PC တည်ဆောက်ရန်" : "PC Build Planner" },
-    ...(user.role !== "admin" ? [{ href: "/settings", label: t("nav.settings") }] : []),
+    ...(!["admin", "staff"].includes(user.role) ? [{ href: "/settings", label: t("nav.settings") }] : []),
     { href: "/returns", label: t("nav.returnPolicy") },
-    ...(user.role === "admin" ? [{ href: "/admin?panel=dashboard", label: "Admin dashboard" }] : []),
+    ...(["admin", "staff"].includes(user.role) ? [{ href: "/admin?panel=dashboard", label: "Staff dashboard" }] : []),
   ];
 
   return <div className="flex items-center gap-2">
@@ -84,6 +84,6 @@ export default function AccountControls({ user, wishlistCount, cartCount, onLogo
         <div className="border-t border-zinc-100 p-2"><button type="button" onClick={() => { if (menu.current) menu.current.open = false; onLogout(); }} className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"><Icon kind="logout" />{t("nav.logout")}</button></div>
       </div>
     </details>
-    {user.role === "admin" && <Link href="/admin?panel=dashboard" className="hidden rounded-xl bg-red-50 px-3 py-3 text-xs font-bold text-red-700 hover:bg-red-100 lg:inline">Admin</Link>}
+    {["admin", "staff"].includes(user.role) && <Link href="/admin?panel=dashboard" className="hidden rounded-xl bg-red-50 px-3 py-3 text-xs font-bold text-red-700 hover:bg-red-100 lg:inline">Dashboard</Link>}
   </div>;
 }

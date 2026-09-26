@@ -33,7 +33,7 @@ export default function HomePage() {
   // Shared with every other page, and remembered between visits.
   const { language, setLanguage, text } = useLanguage();
   const { user: currentUser, refresh: refreshUser } = useCurrentUser();
-  const deliveryEstimate = useDeliveryEstimate(Boolean(currentUser && currentUser.role !== "admin"));
+  const deliveryEstimate = useDeliveryEstimate(Boolean(currentUser && currentUser.role !== "admin" && currentUser.role !== "staff"));
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [productLoadError, setProductLoadError] = useState("");
@@ -148,7 +148,7 @@ export default function HomePage() {
 
   useEffect(() => {
     async function loadRecentlyViewed() {
-      if (!currentUser || currentUser.role === "admin") {
+      if (!currentUser || currentUser.role === "admin" || currentUser.role === "staff") {
         setRecentlyViewed([]);
         return;
       }
@@ -172,7 +172,7 @@ export default function HomePage() {
   const userRole: UserRole = currentUser?.role ?? "normal";
   // Signed-in customers get a compact homepage preview. Full category pages
   // keep their normal pagination and the public homepage remains unchanged.
-  const compactSignedInHomepage = Boolean(currentUser && currentUser.role !== "admin");
+  const compactSignedInHomepage = Boolean(currentUser && currentUser.role !== "admin" && currentUser.role !== "staff");
   const brands = useMemo(
     () =>
       Array.from(new Set(products.map((product) => product.brand))).sort(

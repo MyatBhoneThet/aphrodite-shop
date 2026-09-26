@@ -26,6 +26,7 @@ import {
   insertAuditLog,
   insertTier,
   requireAdmin,
+  requireBackoffice,
   selectCustomerProfiles,
   selectPriceListById,
   selectProductById,
@@ -93,7 +94,15 @@ describe("admin-only operations", () => {
   it("requireAdmin rejects non-admin users", () => {
     expect(() => requireAdmin(makeUser())).toThrowError();
     expect(() => requireAdmin(makeUser({ role: "wholesale" }))).toThrowError();
+    expect(() => requireAdmin(makeUser({ role: "staff" }))).toThrowError();
     expect(() => requireAdmin(admin())).not.toThrowError();
+  });
+
+  it("requireBackoffice accepts staff and admins but rejects customers", () => {
+    expect(() => requireBackoffice(makeUser())).toThrowError();
+    expect(() => requireBackoffice(makeUser({ role: "wholesale" }))).toThrowError();
+    expect(() => requireBackoffice(makeUser({ role: "staff" }))).not.toThrowError();
+    expect(() => requireBackoffice(admin())).not.toThrowError();
   });
 
   it("a non-admin cannot grant wholesale access", async () => {

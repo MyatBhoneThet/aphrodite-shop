@@ -16,14 +16,15 @@ import {
  * token is httpOnly (never readable by client JS, so an XSS payload cannot
  * steal it), secure in production, and SameSite=Lax.
  *
- * Admins also get the admin cookie, exactly as /api/auth/login does, so
+ * Back-office users also get the admin-area cookie, exactly as
+ * /api/admin/login does, so
  * signing in once is enough to reach /admin. The role comes from the
  * profiles table server-side -- never from the request.
  */
 export function setSessionCookies(
   response: NextResponse,
   accessToken: string,
-  { isAdmin }: { isAdmin: boolean }
+  { isBackoffice }: { isBackoffice: boolean }
 ) {
   const shared = {
     httpOnly: true,
@@ -37,7 +38,7 @@ export function setSessionCookies(
     maxAge: USER_SESSION_MAX_AGE_SECONDS,
   });
 
-  if (isAdmin) {
+  if (isBackoffice) {
     response.cookies.set(ADMIN_SESSION_COOKIE, accessToken, {
       ...shared,
       maxAge: ADMIN_SESSION_MAX_AGE_SECONDS,

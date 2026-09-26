@@ -4,7 +4,6 @@ import { useAdminText } from "../lib/useAdminText";
 
 /* eslint-disable @next/next/no-img-element */
 
-import Image from "next/image";
 import BrandLogo from "../components/BrandLogo";
 import CustomerLocation from "./CustomerLocation";
 import {
@@ -32,6 +31,7 @@ import { orderTracking, trackingSteps } from "../lib/order-tracking";
 import { orderNextStep, nextStepLabels } from "../lib/next-step";
 import CodDeliveryForm from "./CodDeliveryForm";
 import AdsPanel from "./AdsPanel";
+import StaffPanel from "./StaffPanel";
 
 type OrderStatus =
   | "pending"
@@ -389,12 +389,14 @@ export default function AdminPage() {
   const authStatus: "checking" | "ready" | "forbidden" =
     userStatus === "checking"
       ? "checking"
-      : currentUser?.role === "admin"
+      : currentUser?.role === "admin" || currentUser?.role === "staff"
       ? "ready"
       : "forbidden";
+  const isAdmin = currentUser?.role === "admin";
+  const isStaff = currentUser?.role === "staff";
 
   const [activePanel, setActivePanel] = useState<
-    "dashboard" | "products" | "orders" | "queue" | "locations" | "support" | "ads" | "wholesale" | "pricing" | "sync"
+    "dashboard" | "products" | "orders" | "queue" | "locations" | "support" | "ads" | "wholesale" | "pricing" | "sync" | "staff"
   >("dashboard");
 
   const [products, setProducts] = useState<Product[]>([]);
@@ -438,16 +440,19 @@ export default function AdminPage() {
         panel === "ads" ||
         panel === "wholesale" ||
         panel === "pricing" ||
-        panel === "sync"
+        panel === "sync" ||
+        panel === "staff"
       ) {
-        setActivePanel(panel === "cases" ? "queue" : panel);
+        const requested = panel === "cases" ? "queue" : panel;
+        const adminOnly = requested === "locations" || requested === "wholesale" || requested === "pricing" || requested === "staff";
+        setActivePanel(!isAdmin && adminOnly ? "dashboard" : requested);
       }
-      if (panel === "products" && params.get("action") === "add") {
+      if (isAdmin && panel === "products" && params.get("action") === "add") {
         setIsProductFormOpen(true);
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [isAdmin]);
 
   const loadDashboardData = useCallback(async () => {
     setIsLoadingData(true);
@@ -1085,16 +1090,16 @@ export default function AdminPage() {
       <main className="flex min-h-screen items-center justify-center bg-[#f4f6f9] px-5 text-zinc-950">
         <div className="max-w-md rounded-3xl bg-white p-8 text-center shadow">
           <p className="text-5xl">🔒</p>
-          <h1 className="mt-4 text-2xl font-bold">{a("Admin access only")}</h1>
+          <h1 className="mt-4 text-2xl font-bold">{a("Back-office access only")}</h1>
           <p className="mt-3 text-zinc-500">
-             {a("You need an admin account to view this page. Please login with your admin credentials.")} </p>
+             {a("You need an admin or staff account to view this page.")} </p>
 
           <div className="mt-6 flex justify-center gap-3">
             <Link
               href="/admin/login"
               className="rounded-full bg-red-600 px-5 py-2 text-sm font-semibold text-white"
             >
-               {a("Go to Admin Login")} </Link>
+               {a("Go to staff login")} </Link>
 
             <Link href="/" className="rounded-full border px-5 py-2 text-sm">
                {a("Back to Store")} </Link>
@@ -1149,12 +1154,12 @@ export default function AdminPage() {
             onClick={() => setActivePanel("queue")}
           />
           <p className="px-3 pb-2 pt-3 text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500">{a("Customer care")}</p>
-          <SidebarButton
+          {isAdmin && <SidebarButton
             active={activePanel === "locations"}
             icon="📍"
             label={t("admin.locations")}
             onClick={() => setActivePanel("locations")}
-          />
+          />}
           <SidebarButton
             active={activePanel === "support"}
             icon="💬"
@@ -1168,24 +1173,30 @@ export default function AdminPage() {
             label={a("Homepage Ads")}
             onClick={() => setActivePanel("ads")}
           />
-          <SidebarButton
+          {isAdmin && <SidebarButton
             active={activePanel === "wholesale"}
             icon="🏢"
             label={t("admin.wholesale")}
             onClick={() => setActivePanel("wholesale")}
-          />
-          <SidebarButton
+          />}
+          {isAdmin && <SidebarButton
             active={activePanel === "pricing"}
             icon="🏷️"
             label={t("admin.priceLists")}
             onClick={() => setActivePanel("pricing")}
-          />
+          />}
           <SidebarButton
             active={activePanel === "sync"}
             icon="🔄"
             label={t("admin.sheetSync")}
             onClick={() => setActivePanel("sync")}
           />
+          {isAdmin && <SidebarButton
+            active={activePanel === "staff"}
+            icon="👤"
+            label={a("Staff access")}
+            onClick={() => setActivePanel("staff")}
+          />}
 
         </nav>
         </div>
@@ -1234,11 +1245,12 @@ export default function AdminPage() {
               {([
                 ["dashboard", "admin.overview"], ["products", "admin.products"],
                 ["orders", "admin.purchases"], ["queue", "admin.queue"],
-                ["locations", "admin.locations"], ["support", "admin.liveChat"],
+                ...(isAdmin ? [["locations", "admin.locations"]] as const : []), ["support", "admin.liveChat"],
                 ["ads", "admin.homepageAds"],
-                ["wholesale", "admin.wholesale"], ["pricing", "admin.priceLists"],
+                ...(isAdmin ? [["wholesale", "admin.wholesale"], ["pricing", "admin.priceLists"]] as const : []),
                 ["sync", "admin.sheetSync"],
               ] as const).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
+              {isAdmin && <option value="staff">{a("Staff access")}</option>}
             </select>
           </label>
           <input aria-label={a("Search admin products and orders")} placeholder={a("Search")} value={search} onChange={(event) => setSearch(event.target.value)} className="w-full rounded-xl border px-3 py-3" />
@@ -1257,7 +1269,7 @@ export default function AdminPage() {
           )}
 
           {activePanel === "dashboard" && (
-            <AdminOverviewPanel onNavigate={(panel) => setActivePanel(panel)} />
+            <AdminOverviewPanel role={currentUser!.role} onNavigate={(panel) => setActivePanel(panel)} />
           )}
 
           {activePanel === "products" && (
@@ -1399,7 +1411,7 @@ export default function AdminPage() {
                       />
                     </div>
 
-                    <div>
+                    {isAdmin && <div>
                       <label className="mb-1 block text-sm font-semibold">
                          {a("Wholesale Price (legacy)")} </label>
                       <input
@@ -1416,7 +1428,7 @@ export default function AdminPage() {
                       />
                       <p className="mt-1 text-xs text-zinc-400">
                          {a("Not used for pricing — manage quantity tiers in “Price Lists &amp; Tiers”.")} </p>
-                    </div>
+                    </div>}
                   </div>
 
                   <div>
@@ -1527,7 +1539,7 @@ export default function AdminPage() {
                       className="rounded-full border px-4 py-2 text-sm outline-none focus:border-red-500"
                       placeholder={a("Search products...")}
                     />
-                    {!isProductFormOpen && (
+                    {isAdmin && !isProductFormOpen && (
                       <button
                         onClick={() => {
                           setProductForm(emptyProductForm());
@@ -1547,7 +1559,7 @@ export default function AdminPage() {
                     setIsProductFormOpen(true);
                     window.scrollTo({ top: 0, behavior: "smooth" });
                   }}
-                  onDelete={handleDeleteProduct}
+                  onDelete={isAdmin ? handleDeleteProduct : undefined}
                 />
               </div>
             </section>
@@ -1561,13 +1573,14 @@ export default function AdminPage() {
                    {a("Confirm COD purchases, manage delivery, and review cancellation or return requests.")} </p>
               </div>
 
-              {deliveryOrder && <CodDeliveryForm key={deliveryOrder.id} order={deliveryOrder}
+              {isAdmin && deliveryOrder && <CodDeliveryForm key={deliveryOrder.id} order={deliveryOrder}
                 onClose={() => setDeliveryOrder(null)} onSaved={async () => {
                   await loadDashboardData(); setDeliveryOrder(null);
                   setMessage("COD verification and delivery details saved.");
                 }} />}
               <OrdersTable
                 orders={orders}
+                staffMode={isStaff}
                 onStatusChange={handleOrderStatusChange}
                 onResolveRequest={openOrderRequestResolution}
                 onWorkflow={openOrderWorkflow}
@@ -1580,15 +1593,17 @@ export default function AdminPage() {
 
           {activePanel === "queue" && <QueuePanel />}
 
-          {activePanel === "locations" && <CustomerLocationsPanel />}
+          {isAdmin && activePanel === "locations" && <CustomerLocationsPanel />}
 
           {activePanel === "support" && <SupportPanel />}
 
-          {activePanel === "ads" && <AdsPanel />}
+          {activePanel === "ads" && <AdsPanel allowDelete={isAdmin} />}
 
-          {activePanel === "wholesale" && <WholesalePanel />}
+          {isAdmin && activePanel === "wholesale" && <WholesalePanel />}
 
-          {activePanel === "pricing" && <PricingPanel />}
+          {isAdmin && activePanel === "pricing" && <PricingPanel />}
+
+          {isAdmin && activePanel === "staff" && <StaffPanel />}
 
           {activePanel === "sync" && (
             <section className="mt-6 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-100">
@@ -1765,7 +1780,7 @@ function ProductsTable({
 }: {
   products: Product[];
   onEdit: (product: Product) => void;
-  onDelete: (product: Product) => void;
+  onDelete?: (product: Product) => void;
 }) {
   const a = useAdminText();
   const { t } = useLanguage();
@@ -1842,11 +1857,11 @@ function ProductsTable({
                   >
                      {a("Edit")} </button>
 
-                  <button
+                  {onDelete && <button
                     onClick={() => onDelete(product)}
                     className="rounded-full bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
                   >
-                     {a("Delete")} </button>
+                     {a("Delete")} </button>}
                 </div>
               </td>
             </tr>
@@ -1859,6 +1874,7 @@ function ProductsTable({
 
 function OrdersTable({
   orders,
+  staffMode,
   onStatusChange,
   onResolveRequest,
   onWorkflow,
@@ -1867,6 +1883,7 @@ function OrdersTable({
   resendingOrderId,
 }: {
   orders: AdminOrder[];
+  staffMode: boolean;
   onStatusChange: (orderId: string, stage: DeliveryProgressStage) => void;
   onResolveRequest: (
     orderId: string,
@@ -1899,8 +1916,8 @@ function OrdersTable({
             <th className="p-4">{t("adminTable.total")}</th>
             <th className="p-4">{t("adminTable.status")}</th>
             <th className="p-4">{t("adminTable.payment")}</th>
-            <th className="p-4">{t("adminTable.request")}</th>
-            <th className="p-4">{t("adminTable.shipping")}</th>
+            {!staffMode && <th className="p-4">{t("adminTable.request")}</th>}
+            {!staffMode && <th className="p-4">{t("adminTable.shipping")}</th>}
           </tr>
         </thead>
 
@@ -1916,10 +1933,10 @@ function OrdersTable({
 
               <td className="p-4">
                 <p className="font-semibold">{order.shipping_name}</p>
-                <p className="text-xs text-zinc-500">
+                {!staffMode && <p className="text-xs text-zinc-500">
                   {order.profiles?.email ?? a("No email")}
-                </p>
-                <p className="text-xs text-zinc-500">{order.shipping_phone}</p>
+                </p>}
+                {!staffMode && <p className="text-xs text-zinc-500">{order.shipping_phone}</p>}
               </td>
 
               <td className="p-4">
@@ -1943,7 +1960,7 @@ function OrdersTable({
 
               <td className="p-4">
                 <p className="mb-2 text-xs font-bold text-blue-700">{a(orderTracking(order).label)}</p>
-                <select
+                {!staffMode && <select
                   value={order.status === "cancelled" || order.status === "returned"
                     ? order.status
                     : trackingSteps[Math.max(0, orderTracking(order).step)]}
@@ -1971,8 +1988,8 @@ function OrdersTable({
                       {stage === "cancelled" || stage === "returned" ? a(stage) : t(`tracking.${stage}`)}
                     </option>
                   ))}
-                </select>
-                {(order.status === "pending" || order.status === "confirmed") && (
+                </select>}
+                {!staffMode && (order.status === "pending" || order.status === "confirmed") && (
                   <button
                     type="button"
                     onClick={() => onWorkflow(order, "admin_cancel")}
@@ -1982,10 +1999,10 @@ function OrdersTable({
                   >
                      {a("Cancel / out of stock")} </button>
                 )}
-                {(order.status === "pending" || order.status === "confirmed") && order.payment_method !== "cash_on_delivery" && !["verified", "rejected"].includes(order.payment_verification_status ?? "pending") && (
+                {!staffMode && (order.status === "pending" || order.status === "confirmed") && order.payment_method !== "cash_on_delivery" && !["verified", "rejected"].includes(order.payment_verification_status ?? "pending") && (
                   <p className="mt-1 max-w-[11rem] text-[10px] font-semibold text-amber-700">{a("Finish checking payment before cancelling")}</p>
                 )}
-                {order.status === "shipped" && (
+                {!staffMode && order.status === "shipped" && (
                   <button
                     type="button"
                     onClick={() => onWorkflow(order, "delivery_attempt")}
@@ -1993,7 +2010,7 @@ function OrdersTable({
                   >
                      {a("Delivery attempt failed")} </button>
                 )}
-                {failedDeliveryAttempts(order) > 0 && (
+                {!staffMode && failedDeliveryAttempts(order) > 0 && (
                   <p className="mt-2 text-[10px] font-bold uppercase text-amber-700">
                     {failedDeliveryAttempts(order)}  {a("of")} {MAX_DELIVERY_ATTEMPTS}  {a("attempts failed")} {failedDeliveryAttempts(order) >= MAX_DELIVERY_ATTEMPTS && a(" — consider cancelling")}
                   </p>
@@ -2063,7 +2080,7 @@ function OrdersTable({
                     {order.receipt_email_error}
                   </p>
                 )}
-                {order.status === "delivered" && (
+                {!staffMode && order.status === "delivered" && (
                   <button
                     type="button"
                     onClick={() => onResendReceipt(order)}
@@ -2077,10 +2094,10 @@ function OrdersTable({
                         : a("Send receipt email")}
                   </button>
                 )}
-                {order.cancellation_refund_status === "details_required" && (
+                {!staffMode && order.cancellation_refund_status === "details_required" && (
                   <p className="mt-2 max-w-[12rem] rounded-xl bg-amber-50 p-2 text-[10px] font-semibold text-amber-800">{a("Waiting for customer refund bank information")}</p>
                 )}
-                {order.cancellation_refund_status === "pending" && (
+                {!staffMode && order.cancellation_refund_status === "pending" && (
                   <div className="mt-2 max-w-[13rem] rounded-xl bg-blue-50 p-2 text-[10px] text-blue-950">
                     <p className="font-bold">{a("Refund pending")}</p>
                     <p>{order.cancellation_refund_bank_name} · {order.cancellation_refund_account_name}</p>
@@ -2088,13 +2105,13 @@ function OrdersTable({
                     <button type="button" onClick={() => onWorkflow(order, "complete_cancellation_refund")} className="mt-2 rounded-full bg-zinc-900 px-3 py-1.5 font-bold text-white">{a("Mark refund sent")}</button>
                   </div>
                 )}
-                {order.cancellation_refund_status === "sent" && (
+                {!staffMode && order.cancellation_refund_status === "sent" && (
                   <p className="mt-2 max-w-[12rem] rounded-xl bg-emerald-50 p-2 text-[10px] font-semibold text-emerald-800">{a("Refund sent")} {order.refund_reference ? `· ${order.refund_reference}` : ""}</p>
                 )}
                 <p className="mt-2 text-[10px] font-bold uppercase text-zinc-500">{a("Verification:")} {a((order.cod_verification_status ?? "pending").replaceAll("_", " "))}</p>
               </td>
 
-              <td className="p-4">
+              {!staffMode && <td className="p-4">
                 {(order.item_return_requests?.length ?? 0) > 0 ? (
                   <div className="space-y-2 text-xs">
                     {order.item_return_requests
@@ -2150,9 +2167,9 @@ function OrdersTable({
                     {order.cancellation_request_status === "none" && order.return_request_status === "none" && <p>{a("No customer request")}</p>}
                   </div>
                 )}
-              </td>
+              </td>}
 
-              <td className="p-4">
+              {!staffMode && <td className="p-4">
                 <p className="max-w-xs text-xs text-zinc-600">
                   {order.shipping_address}
                 </p>
@@ -2172,7 +2189,7 @@ function OrdersTable({
                 {order.delivery_location_consent && order.delivery_latitude != null && order.delivery_longitude != null && <a href={`https://www.google.com/maps?q=${order.delivery_latitude},${order.delivery_longitude}`} target="_blank" rel="noreferrer" className="mt-2 block text-xs font-bold text-blue-600 hover:underline">{a("Open customer-selected delivery pin")}{order.delivery_accuracy_m != null ? ` (device accuracy ±${Math.round(order.delivery_accuracy_m)} m; not identity proof)` : a(" (manually placed; not verified)")}</a>}
                 <CustomerLocation userId={order.user_id} />
                 <button type="button" onClick={() => onDelivery(order)} className="mt-3 rounded-full bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100">{a("Update tracking / COD")}</button>
-              </td>
+              </td>}
             </tr>
           ))}
         </tbody>

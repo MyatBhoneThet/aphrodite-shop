@@ -22,6 +22,7 @@ import { useCurrentUser } from "../../lib/useCurrentUser";
 import { useLanguage } from "../../lib/language";
 import { useDeliveryEstimate } from "../../lib/useDeliveryEstimate";
 import DeliveryEstimateBadge from "../../components/DeliveryEstimateBadge";
+import { cartIntentPath } from "../../lib/cart-intent";
 
 type PublicTier = { minQuantity: number; unitPrice: number };
 
@@ -53,7 +54,7 @@ export default function ProductDetailsPage() {
   const productId = Number(params.id);
 
   const { user: currentUser } = useCurrentUser();
-  const deliveryEstimate = useDeliveryEstimate(Boolean(currentUser && currentUser.role !== "admin"));
+  const deliveryEstimate = useDeliveryEstimate(Boolean(currentUser && currentUser.role !== "admin" && currentUser.role !== "staff"));
   const [product, setProduct] = useState<ProductResponse["product"] | null>(null);
   const [pricing, setPricing] = useState<Pricing | null>(null);
   const [isWholesale, setIsWholesale] = useState(false);
@@ -302,15 +303,15 @@ export default function ProductDetailsPage() {
   return (
     <main className="min-h-screen bg-white text-zinc-950">
       <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5">
-          <Link href="/" className="text-2xl font-bold text-red-600">
-            <BrandLogo />
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 sm:px-5 sm:py-5">
+          <Link href="/" className="w-28 shrink-0 text-2xl font-bold text-red-600 sm:w-auto">
+            <BrandLogo className="h-9 sm:h-12" />
           </Link>
 
           <button
             type="button"
             onClick={goToPreviousPage}
-            className="rounded-full border px-5 py-2 text-sm"
+            className="shrink-0 rounded-full border px-3 py-2 text-xs sm:px-5 sm:text-sm"
           >
             ← {text("Back")}
           </button>
@@ -535,9 +536,10 @@ export default function ProductDetailsPage() {
                   </button>
                 </>
               ) : (
-                <Link href="/login"
+                <Link
+                  href={`/login?next=${encodeURIComponent(cartIntentPath(product.id, quantity))}`}
                   className="rounded-lg bg-red-600 px-7 py-3 font-semibold text-white">
-                  {text("Login to purchase")}
+                  {text("Login to add to cart")}
                 </Link>
               )}
 

@@ -25,7 +25,7 @@ async function responseError(response: Response) {
   return body.error || "Unable to save the advertisement.";
 }
 
-export default function AdsPanel() {
+export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean }) {
   const a = useAdminText();
   const [ads, setAds] = useState<AdminAd[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -185,7 +185,7 @@ export default function AdsPanel() {
                 <button disabled={busy === ad.id} onClick={() => void patch(ad.id, { is_active: !ad.is_active }, ad.is_active ? "Advertisement hidden." : "Advertisement published.")} className={`rounded-full px-4 py-2 text-sm font-semibold ${ad.is_active ? "border" : "bg-green-600 text-white"}`}>{ad.is_active ? a("Hide") : a("Publish")}</button>
                 <button disabled={index === 0 || busy === ad.id} onClick={() => void move(index, -1)} className="rounded-full border px-4 py-2 text-sm disabled:opacity-40">↑ {a("Earlier")}</button>
                 <button disabled={index === ads.length - 1 || busy === ad.id} onClick={() => void move(index, 1)} className="rounded-full border px-4 py-2 text-sm disabled:opacity-40">↓ {a("Later")}</button>
-                <button disabled={busy === ad.id} onClick={() => void remove(ad)} className="rounded-full bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-50">{a("Delete")}</button>
+                {allowDelete && <button disabled={busy === ad.id} onClick={() => void remove(ad)} className="rounded-full bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-50">{a("Delete")}</button>}
               </div>
             </div>
           </article>;
