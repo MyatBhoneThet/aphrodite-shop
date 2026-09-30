@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 248 72" role="img" aria-labelledby="title">
+  <title id="title">Aphrodite Myanmar</title>
+  <!-- Light variant of aphrodite-myanmar.svg for dark backgrounds: the mark and
+       wordmark are white instead of #111111. The red swoosh is unchanged so the
+       brand colour survives (a CSS whitening filter would have flattened it). -->
+  <g fill="#ffffff">
+    <path d="M39 2 67 69H52L35 19 23 44h-3L39 2Z"/>
+    <path d="M4 31h71v1.5H4zM45 68h29v1.5H45z"/>
+  </g>
+  <path d="M42 36C24 31 18 45 13 56 10 63 7 67 1 69c17 2 21-13 25-22 4-8 8-11 16-11Z" fill="#eb001b"/>
+  <g fill="#ffffff" font-family="Arial,Helvetica,sans-serif" font-weight="700">
+    <text x="83" y="34" font-size="21" letter-spacing=".1">APHRODITE</text>
+    <text x="84" y="54" font-size="18" letter-spacing="2.4">MYANMAR</text>
+  </g>
+</svg>

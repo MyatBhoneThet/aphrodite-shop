@@ -1,0 +1,74 @@
+"use client";
+
+import type { Product, UserRole } from "../data/products";
+import { useLanguage } from "../lib/language";
+import ProductCard from "./ProductCard";
+import type { DeliveryEstimate } from "../lib/delivery-estimate";
+
+type Props = {
+  products: Product[];
+  userRole: UserRole;
+  onClear: () => void;
+  deliveryEstimate?: DeliveryEstimate | null;
+};
+
+export default function RecentlyViewedSection({
+  products,
+  userRole,
+  onClear,
+  deliveryEstimate = null,
+}: Props) {
+  const { t } = useLanguage();
+  if (products.length === 0) return null;
+
+  function scrollToHistory() {
+    document
+      .getElementById("recently-viewed")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  return (
+    <>
+      <section
+        id="recently-viewed"
+        className="mx-auto max-w-7xl scroll-mt-28 px-3 pb-16 sm:px-5"
+      >
+        <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-3xl font-bold">{t("recent.title")}</h2>
+            <p className="mt-1 text-sm text-zinc-500">{t("recent.subtitle")}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClear}
+            className="rounded-full border px-5 py-2 text-sm font-semibold hover:border-red-500 hover:text-red-600"
+          >
+            {t("recent.clear")}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 sm:gap-6">
+          {products.map((product) => (
+            <ProductCard
+              key={product.id}
+              product={product}
+              userRole={userRole}
+              deliveryEstimate={deliveryEstimate}
+              compactMobile
+            />
+          ))}
+        </div>
+      </section>
+
+      <button
+        type="button"
+        onClick={scrollToHistory}
+        className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-3 z-40 flex h-12 min-w-12 items-center justify-center rounded-full border border-zinc-200 bg-white px-3 text-sm font-bold shadow-xl transition hover:-translate-y-1 hover:border-red-500 sm:bottom-5 sm:right-5 sm:h-auto sm:px-4 sm:py-3"
+        aria-label={t("recent.title")}
+      >
+        <span className="sm:hidden" aria-hidden="true">🕘 {products.length}</span>
+        <span className="hidden sm:inline">🕘 {t("recent.title")} ({products.length})</span>
+      </button>
+    </>
+  );
+}
