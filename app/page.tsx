@@ -310,26 +310,6 @@ export default function HomePage() {
       </div>
 
       <div id="pc-parts">
-        <section className="mx-auto max-w-7xl px-5 pb-10">
-          <div className="flex flex-col items-start justify-between gap-5 rounded-[2rem] bg-zinc-950 p-8 text-white md:flex-row md:items-center">
-            <div>
-              <p className="text-sm font-bold uppercase tracking-[0.2em] text-red-400">
-                New: PC Build Planner
-              </p>
-              <h2 className="mt-2 text-3xl font-black">
-                What PC can your budget build?
-              </h2>
-              <p className="mt-2 max-w-2xl text-sm text-zinc-300">
-                Enter a minimum and maximum budget, choose gaming, office,
-                development, streaming, creative, or 3D work, and generate a
-                complete demo parts list using current catalogue prices.
-              </p>
-            </div>
-            <a href="/pc-builder" className="shrink-0 rounded-full bg-red-600 px-6 py-3 font-bold">
-              Plan my PC →
-            </a>
-          </div>
-        </section>
         <ProductSection
           title={text("PC Parts")}
           animationKey={JSON.stringify(filters)}
@@ -341,7 +321,51 @@ export default function HomePage() {
           itemsPerPage={compactSignedInHomepage ? 4 : undefined}
           showPagination={!compactSignedInHomepage}
         />
+        <section className="mx-auto max-w-7xl px-3 pb-5 sm:px-5 sm:pb-10">
+          <div className="flex flex-col items-start justify-between gap-3 rounded-2xl bg-zinc-950 p-4 text-white sm:gap-5 sm:rounded-[2rem] sm:p-8 md:flex-row md:items-center">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-red-400 sm:text-sm sm:tracking-[0.2em]">
+                New: PC Build Planner
+              </p>
+              <h2 className="mt-1 text-xl font-black sm:mt-2 sm:text-3xl">
+                What PC can your budget build?
+              </h2>
+              <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-300 sm:mt-2 sm:text-sm sm:leading-normal">
+                Enter a minimum and maximum budget, choose gaming, office,
+                development, streaming, creative, or 3D work, and generate a
+                complete demo parts list using current catalogue prices.
+              </p>
+            </div>
+            <a href="/pc-builder" className="shrink-0 rounded-full bg-red-600 px-4 py-2 text-xs font-bold sm:px-6 sm:py-3 sm:text-base">
+              Plan my PC →
+            </a>
+          </div>
+        </section>
       </div>
+
+      <section id="support" className="mx-auto max-w-7xl px-3 pb-8 sm:px-5 sm:pb-16">
+        <div className="rounded-2xl bg-zinc-100 p-4 text-center sm:rounded-[2rem] sm:p-8">
+          <h2 className="text-xl font-bold sm:text-3xl">
+            {language === "en"
+              ? "Need help choosing?"
+              : "ရွေးချယ်ရန် အကူအညီလိုပါသလား။"}
+          </h2>
+          <p className="mt-2 text-xs leading-5 text-zinc-500 sm:mt-3 sm:text-base sm:leading-normal">
+            {language === "en"
+              ? "Answer three quick questions, or chat with us and we will help you find the right laptop."
+              : "မေးခွန်း ၃ ခုဖြေပါ။ သို့မဟုတ် Chat မှတဆင့် သင့်အတွက်သင့်တော်သော Laptop ကို ရွေးချယ်ပေးပါမည်။"}
+          </p>
+
+          <a
+            href="/find-my-laptop"
+            className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-red-600 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-red-600/25 transition hover:bg-red-500 sm:mt-6 sm:gap-2 sm:px-7 sm:py-3.5 sm:text-base"
+          >
+            <span aria-hidden="true">🔎</span>
+            {language === "en" ? "Find my laptop" : "ကျွန်ုပ်၏ Laptop ရှာရန်"}
+          </a>
+        </div>
+
+      </section>
 
       <RecentlyViewedSection
         products={recentlyViewed}
@@ -350,30 +374,9 @@ export default function HomePage() {
         deliveryEstimate={deliveryEstimate}
       />
 
-      <section id="support" className="mx-auto max-w-7xl px-5 pb-24">
-        <div className="rounded-[2rem] bg-zinc-100 p-8 text-center">
-          <h2 className="text-3xl font-bold">
-            {language === "en"
-              ? "Need help choosing?"
-              : "ရွေးချယ်ရန် အကူအညီလိုပါသလား။"}
-          </h2>
-          <p className="mt-3 text-zinc-500">
-            {language === "en"
-              ? "Answer three quick questions, or chat with us and we will help you find the right laptop."
-              : "မေးခွန်း ၃ ခုဖြေပါ။ သို့မဟုတ် Chat မှတဆင့် သင့်အတွက်သင့်တော်သော Laptop ကို ရွေးချယ်ပေးပါမည်။"}
-          </p>
-
-          <a
-            href="/find-my-laptop"
-            className="mt-6 inline-flex items-center gap-2 rounded-full bg-red-600 px-7 py-3.5 font-bold text-white shadow-lg shadow-red-600/25 transition hover:bg-red-500"
-          >
-            <span aria-hidden="true">🔎</span>
-            {language === "en" ? "Find my laptop" : "ကျွန်ုပ်၏ Laptop ရှာရန်"}
-          </a>
-        </div>
-
+      <div className="mx-auto max-w-7xl px-3 pb-12 sm:px-5 sm:pb-24">
         <SiteContact />
-      </section>
+      </div>
 
       <ChatbotButton
         language={language}

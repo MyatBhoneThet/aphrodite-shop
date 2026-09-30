@@ -59,11 +59,11 @@ export default function ProductSection({
   }
 
   return (
-    <section ref={sectionRef} className="mx-auto max-w-7xl scroll-mt-24 px-5 pb-16">
-      <div className="mb-8 flex flex-wrap items-end justify-between gap-5 border-b border-zinc-200 pb-5">
+    <section ref={sectionRef} className="mx-auto max-w-7xl scroll-mt-24 px-3 pb-12 sm:px-5 sm:pb-16">
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3 border-b border-zinc-200 pb-4 sm:mb-8 sm:gap-5 sm:pb-5">
         <div>
-          <h2 className="text-3xl font-black sm:text-4xl">{title}</h2>
-          <p className="mt-2 text-sm text-zinc-500">
+          <h2 className="text-2xl font-black sm:text-4xl">{title}</h2>
+          <p className="mt-1 text-xs text-zinc-500 sm:mt-2 sm:text-sm">
             {groups.length === 1
               ? t("section.countOne")
               : t("section.count", { count: groups.length.toLocaleString() })}
@@ -73,12 +73,12 @@ export default function ProductSection({
         {viewAllHref && (
           <Link
             href={viewAllHref}
-            className="group inline-flex shrink-0 items-center gap-2 rounded-full border border-zinc-300 bg-white px-5 py-3 text-sm font-bold transition hover:border-red-500 hover:bg-red-50 hover:text-red-700"
+            className="group inline-flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-300 bg-white px-3 py-2 text-xs font-bold transition hover:border-red-500 hover:bg-red-50 hover:text-red-700 sm:gap-2 sm:px-5 sm:py-3 sm:text-sm"
           >
             {viewAllLabel ?? t("common.viewAll")}
             <span
               aria-hidden="true"
-              className="text-lg transition-transform group-hover:translate-x-1"
+              className="text-base transition-transform group-hover:translate-x-1 sm:text-lg"
             >
               →
             </span>

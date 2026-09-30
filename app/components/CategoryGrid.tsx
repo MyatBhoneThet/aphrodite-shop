@@ -43,22 +43,22 @@ function HardwareIllustration({ kind }: { kind: string }) {
 export default function CategoryGrid({ language }: { language: "en" | "my" }) {
   const english = language === "en";
   return (
-    <section className="mx-auto max-w-7xl px-5 pb-8 pt-12 sm:pt-16" aria-labelledby="categories-heading">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+    <section className="mx-auto max-w-7xl px-3 pb-6 pt-7 sm:px-5 sm:pb-8 sm:pt-16" aria-labelledby="categories-heading">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-2 sm:mb-6 sm:gap-3">
         <div>
-          <p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-red-600">{english ? "Explore the store" : "စတိုးဆိုင်ကို လေ့လာရန်"}</p>
-          <h2 id="categories-heading" className="text-3xl font-bold tracking-tight sm:text-4xl">{english ? "Find your next upgrade." : "သင့်စက်ကို အဆင့်မြှင့်လိုက်ပါ။"}</h2>
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-red-600 sm:mb-2 sm:text-xs sm:tracking-[0.2em]">{english ? "Explore the store" : "စတိုးဆိုင်ကို လေ့လာရန်"}</p>
+          <h2 id="categories-heading" className="text-2xl font-bold tracking-tight sm:text-4xl">{english ? "Find your next upgrade." : "သင့်စက်ကို အဆင့်မြှင့်လိုက်ပါ။"}</h2>
         </div>
-        <p className="text-sm text-zinc-500">{english ? "The right tech, for the way you live." : "သင့်ဘဝနှင့် ကိုက်ညီသော နည်းပညာ။"}</p>
+        <p className="text-xs text-zinc-500 sm:text-sm">{english ? "The right tech, for the way you live." : "သင့်ဘဝနှင့် ကိုက်ညီသော နည်းပညာ။"}</p>
       </div>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
         {categories.map((category, index) => {
           const dark = category.kind === "tower";
-          return <a key={category.en} href={category.href} className={`group relative flex flex-col overflow-hidden rounded-2xl border p-4 transition duration-200 hover:-translate-y-1 focus-visible:outline-red-600 motion-reduce:transform-none sm:p-5 ${dark ? "border-zinc-900 bg-zinc-950 text-white hover:border-red-500" : "border-zinc-200 bg-zinc-50 text-zinc-900 hover:border-red-300 hover:bg-white hover:shadow-lg"}`}>
-            <div className="flex items-center justify-between"><span className={`text-[10px] font-bold tracking-[0.16em] ${dark ? "text-zinc-500" : "text-zinc-400"}`}>0{index + 1}</span><span className={`flex h-8 w-8 items-center justify-center rounded-full border transition group-hover:border-red-600 group-hover:bg-red-600 group-hover:text-white ${dark ? "border-zinc-700" : "border-zinc-200 bg-white"}`} aria-hidden="true">↗</span></div>
-            <div className="my-2 h-28 transition duration-300 group-hover:scale-105 motion-reduce:transform-none sm:h-36"><HardwareIllustration kind={category.kind} /></div>
-            <h3 className="text-base font-bold sm:text-xl">{english ? category.en : category.my}</h3>
-            <p className={`mt-2 text-xs leading-relaxed sm:text-sm ${dark ? "text-zinc-400" : "text-zinc-500"}`}>{english ? category.detail : category.detailMy}</p>
+          return <a key={category.en} href={category.href} className={`group relative flex flex-col overflow-hidden rounded-xl border p-3 transition duration-200 hover:-translate-y-1 focus-visible:outline-red-600 motion-reduce:transform-none sm:rounded-2xl sm:p-5 ${dark ? "border-zinc-900 bg-zinc-950 text-white hover:border-red-500" : "border-zinc-200 bg-zinc-50 text-zinc-900 hover:border-red-300 hover:bg-white hover:shadow-lg"}`}>
+            <div className="flex items-center justify-between"><span className={`text-[9px] font-bold tracking-[0.16em] sm:text-[10px] ${dark ? "text-zinc-500" : "text-zinc-400"}`}>0{index + 1}</span><span className={`flex h-6 w-6 items-center justify-center rounded-full border text-xs transition group-hover:border-red-600 group-hover:bg-red-600 group-hover:text-white sm:h-8 sm:w-8 sm:text-base ${dark ? "border-zinc-700" : "border-zinc-200 bg-white"}`} aria-hidden="true">↗</span></div>
+            <div className="my-1.5 h-20 transition duration-300 group-hover:scale-105 motion-reduce:transform-none sm:my-2 sm:h-36"><HardwareIllustration kind={category.kind} /></div>
+            <h3 className="text-sm font-bold sm:text-xl">{english ? category.en : category.my}</h3>
+            <p className={`mt-1 text-[10px] leading-snug sm:mt-2 sm:text-sm sm:leading-relaxed ${dark ? "text-zinc-400" : "text-zinc-500"}`}>{english ? category.detail : category.detailMy}</p>
           </a>;
         })}
       </div>

@@ -31,17 +31,17 @@ export default function RecentlyViewedSection({
     <>
       <section
         id="recently-viewed"
-        className="mx-auto max-w-7xl scroll-mt-28 px-3 pb-16 sm:px-5"
+        className="mx-auto max-w-7xl scroll-mt-28 px-3 pb-8 sm:px-5 sm:pb-16"
       >
-        <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 sm:mb-8 sm:gap-3">
           <div>
-            <h2 className="text-3xl font-bold">{t("recent.title")}</h2>
-            <p className="mt-1 text-sm text-zinc-500">{t("recent.subtitle")}</p>
+            <h2 className="text-xl font-bold sm:text-3xl">{t("recent.title")}</h2>
+            <p className="mt-1 text-[11px] text-zinc-500 sm:text-sm">{t("recent.subtitle")}</p>
           </div>
           <button
             type="button"
             onClick={onClear}
-            className="rounded-full border px-5 py-2 text-sm font-semibold hover:border-red-500 hover:text-red-600"
+            className="rounded-full border px-3 py-1.5 text-[11px] font-semibold transition hover:border-red-500 hover:text-red-600 sm:px-5 sm:py-2 sm:text-sm"
           >
             {t("recent.clear")}
           </button>
