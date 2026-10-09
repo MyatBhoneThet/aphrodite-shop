@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" role="img" aria-labelledby="title description">
+  <title id="title">Product image coming soon</title>
+  <desc id="description">A neutral product package placeholder</desc>
+  <rect width="800" height="600" rx="48" fill="#f4f4f5"/>
+  <rect x="245" y="145" width="310" height="250" rx="28" fill="#ffffff" stroke="#d4d4d8" stroke-width="12"/>
+  <path d="M245 220 400 310 555 220M400 310v175" fill="none" stroke="#a1a1aa" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m245 220 155-75 155 75" fill="none" stroke="#a1a1aa" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="400" y="535" text-anchor="middle" fill="#52525b" font-family="Arial, sans-serif" font-size="34" font-weight="700">IMAGE COMING SOON</text>
+</svg>
