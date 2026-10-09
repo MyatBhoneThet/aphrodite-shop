@@ -23,6 +23,7 @@
   }
 }
 
+<<<<<<< HEAD
 @layer utilities {
   /* Keep intentional horizontal navigation usable without showing a heavy
      platform scrollbar inside the sticky mobile header. */
@@ -35,6 +36,8 @@
   }
 }
 
+=======
+>>>>>>> origin/main
 /* A 16px field font prevents iOS from zooming the page when a form is focused. */
 @media (max-width: 639px) {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),

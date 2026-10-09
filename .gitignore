@@ -17,6 +17,12 @@
 /.next/
 /out/
 
+<<<<<<< HEAD
+=======
+# supabase local CLI state
+/supabase/.temp/
+
+>>>>>>> origin/main
 # production
 /build
 

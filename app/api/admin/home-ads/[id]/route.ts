@@ -2,7 +2,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { authenticate } from "@/app/lib/backend";
 import { badRequest, handleRouteError, notFound } from "@/app/lib/errors";
 import { readJsonBody } from "@/app/lib/request";
+<<<<<<< HEAD
 import { isHomepageAdPlacement } from "@/app/lib/homepage-ads";
+=======
+>>>>>>> origin/main
 import {
   deleteHomepageAd,
   deleteHomepageAdObject,
@@ -31,10 +34,13 @@ function safeFields(body: unknown) {
     if (!value.startsWith("/") && !/^https:\/\//i.test(value)) throw badRequest("Link must start with / or https://.");
     fields.href = value.slice(0, 500);
   }
+<<<<<<< HEAD
   if ("placement" in input) {
     if (!isHomepageAdPlacement(input.placement)) throw badRequest("Choose a valid advertisement placement.");
     fields.placement = input.placement;
   }
+=======
+>>>>>>> origin/main
   if ("is_active" in input) fields.is_active = Boolean(input.is_active);
   if ("sort_order" in input) {
     const value = Number(input.sort_order);

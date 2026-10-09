@@ -11,6 +11,10 @@ vi.mock("../app/lib/supabase", async (importOriginal) => {
     insertSupportMessage: vi.fn(),
     selectHelpCaseById: vi.fn(),
     selectHelpCases: vi.fn(),
+<<<<<<< HEAD
+=======
+    selectHelpCasesForCustomer: vi.fn(),
+>>>>>>> origin/main
     updateHelpCaseService: vi.fn(),
     selectReturnRequestsForCustomer: vi.fn(),
     selectSupportMessages: vi.fn(),

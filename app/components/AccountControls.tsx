@@ -55,10 +55,17 @@ export default function AccountControls({ user, wishlistCount, cartCount, onLogo
   ];
 
   return <div className="flex shrink-0 items-center gap-1 min-[460px]:gap-2">
+<<<<<<< HEAD
     <div className="hidden items-center gap-0.5 rounded-xl border border-zinc-200/80 bg-zinc-50 p-0.5 min-[380px]:flex min-[460px]:gap-1 min-[460px]:rounded-2xl min-[460px]:p-1">
       {([{ href: "/wishlist", label: t("nav.wishlist"), count: wishlistCount, kind: "heart" }, { href: "/cart", label: t("nav.cart"), count: cartCount, kind: "cart" }] as const).map(item => (
         <Link key={item.kind} href={item.href} aria-label={`${item.label}: ${item.count}`} title={item.label}
           className="group relative flex h-11 w-11 items-center justify-center rounded-lg text-zinc-600 transition hover:bg-white hover:text-red-600 hover:shadow-sm motion-reduce:transition-none min-[460px]:w-12 min-[460px]:rounded-xl">
+=======
+    <div className="flex items-center gap-0.5 rounded-xl border border-zinc-200/80 bg-zinc-50 p-0.5 min-[460px]:gap-1 min-[460px]:rounded-2xl min-[460px]:p-1">
+      {([{ href: "/wishlist", label: t("nav.wishlist"), count: wishlistCount, kind: "heart" }, { href: "/cart", label: t("nav.cart"), count: cartCount, kind: "cart" }] as const).map(item => (
+        <Link key={item.kind} href={item.href} aria-label={`${item.label}: ${item.count}`} title={item.label}
+          className="group relative flex h-8 w-8 items-center justify-center rounded-lg text-zinc-600 transition hover:bg-white hover:text-red-600 hover:shadow-sm motion-reduce:transition-none min-[460px]:h-10 min-[460px]:w-12 min-[460px]:rounded-xl">
+>>>>>>> origin/main
           <Icon kind={item.kind} />
           <span aria-hidden="true" className={`absolute right-0.5 top-0 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold ring-2 ring-zinc-50 ${item.count > 0 ? "bg-red-600 text-white" : "bg-zinc-200 text-zinc-600"}`}>{item.count > 99 ? "99+" : item.count}</span>
         </Link>
@@ -70,7 +77,11 @@ export default function AccountControls({ user, wishlistCount, cartCount, onLogo
       // moves to a known element outside the menu.
       if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
     }}>
+<<<<<<< HEAD
       <summary ref={trigger} className="flex h-11 cursor-pointer list-none items-center gap-1 rounded-xl bg-zinc-950 px-1 text-white shadow-sm transition hover:bg-zinc-800 [&::-webkit-details-marker]:hidden min-[460px]:h-12 min-[460px]:gap-2 min-[460px]:rounded-2xl min-[460px]:px-2.5 sm:pr-3">
+=======
+      <summary ref={trigger} className="flex h-9 cursor-pointer list-none items-center gap-1 rounded-xl bg-zinc-950 px-1 text-white shadow-sm transition hover:bg-zinc-800 [&::-webkit-details-marker]:hidden min-[460px]:h-12 min-[460px]:gap-2 min-[460px]:rounded-2xl min-[460px]:px-2.5 sm:pr-3">
+>>>>>>> origin/main
         <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10 text-red-300 min-[460px]:h-8 min-[460px]:w-8 min-[460px]:rounded-xl"><Icon kind="user" /></span>
         <span className="hidden font-semibold sm:block">{t("nav.account")}</span>
         <span className="sr-only sm:hidden">{t("nav.account")}</span>
@@ -79,9 +90,15 @@ export default function AccountControls({ user, wishlistCount, cartCount, onLogo
       <div className="absolute right-0 top-[calc(100%+0.75rem)] z-[80] w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-[0_16px_48px_-12px_rgba(0,0,0,0.25)]">
         <div className="border-b border-zinc-100 bg-zinc-50 px-4 py-3"><p className="text-xs font-bold text-red-600">{t("nav.account")}</p><p className="mt-1 truncate text-xs text-zinc-500" title={user.email}>{user.email}</p></div>
         <nav aria-label={t("nav.account")} className="max-h-[55vh] overflow-y-auto p-2">
+<<<<<<< HEAD
           {links.map(link => <Link key={link.href} href={link.href} onClick={() => { if (menu.current) menu.current.open = false; }} className="flex min-h-11 items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-red-50 hover:text-red-600">{link.label}<span aria-hidden="true" className="text-zinc-400">↗</span></Link>)}
         </nav>
         <div className="border-t border-zinc-100 p-2"><button type="button" onClick={() => { if (menu.current) menu.current.open = false; onLogout(); }} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"><Icon kind="logout" />{t("nav.logout")}</button></div>
+=======
+          {links.map(link => <Link key={link.href} href={link.href} onClick={() => { if (menu.current) menu.current.open = false; }} className="flex min-h-10 items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-red-50 hover:text-red-600">{link.label}<span aria-hidden="true" className="text-zinc-400">↗</span></Link>)}
+        </nav>
+        <div className="border-t border-zinc-100 p-2"><button type="button" onClick={() => { if (menu.current) menu.current.open = false; onLogout(); }} className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"><Icon kind="logout" />{t("nav.logout")}</button></div>
+>>>>>>> origin/main
       </div>
     </details>
     {["admin", "staff"].includes(user.role) && <Link href="/admin?panel=dashboard" className="hidden rounded-xl bg-red-50 px-3 py-3 text-xs font-bold text-red-700 hover:bg-red-100 lg:inline">Dashboard</Link>}

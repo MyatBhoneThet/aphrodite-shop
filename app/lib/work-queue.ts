@@ -18,6 +18,18 @@ export const queueLanes = [
 
 export type QueueLane = (typeof queueLanes)[number];
 
+<<<<<<< HEAD
+=======
+export const queueLaneLabels: Record<QueueLane, string> = {
+  awaiting_payment_check: "Awaiting payment check",
+  delivery_issue: "Delivery issue",
+  return_review: "Return review",
+  inspection: "Inspection",
+  refund_due: "Refund due",
+  warranty_repair: "Warranty repair",
+};
+
+>>>>>>> origin/main
 /** Shown as a placeholder until staff write their own next action. */
 export const defaultNextAction: Record<QueueLane, string> = {
   awaiting_payment_check: "Match the slip against the bank statement",

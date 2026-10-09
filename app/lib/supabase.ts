@@ -9,10 +9,13 @@ import { conflict, serviceUnavailable } from "./errors";
 import type { SupabaseSocialProvider } from "./oauth";
 import type { SavedAddress, SavedAddressInput } from "./address-book";
 import type { FeedbackInput } from "./feedback";
+<<<<<<< HEAD
 import {
   normalizeHomepageAdPlacement,
   type HomepageAdPlacement,
 } from "./homepage-ads";
+=======
+>>>>>>> origin/main
 
 export type { PriceTierRow } from "./pricing";
 
@@ -78,7 +81,10 @@ export type HomepageAdRow = {
   image_url: string;
   storage_path: string;
   href: string;
+<<<<<<< HEAD
   placement: HomepageAdPlacement;
+=======
+>>>>>>> origin/main
   width: number | null;
   height: number | null;
   is_active: boolean;
@@ -853,11 +859,15 @@ async function readHomepageAdManifest() {
   if (response.status === 400 || response.status === 404) return [] as HomepageAdRow[];
   if (!response.ok) throw new Error(await readError(response));
   const value = await response.json();
+<<<<<<< HEAD
   if (!Array.isArray(value)) return [];
   return value.map((item) => {
     const ad = item as HomepageAdRow;
     return { ...ad, placement: normalizeHomepageAdPlacement(ad.placement) };
   });
+=======
+  return Array.isArray(value) ? value as HomepageAdRow[] : [];
+>>>>>>> origin/main
 }
 
 async function writeHomepageAdManifest(ads: HomepageAdRow[]) {
@@ -922,6 +932,7 @@ export async function deleteHomepageAdObject(path: string) {
   if (!response.ok && response.status !== 404) throw new Error(await readError(response));
 }
 
+<<<<<<< HEAD
 export async function selectHomepageAds(
   includeInactive = false,
   placement?: HomepageAdPlacement
@@ -929,6 +940,12 @@ export async function selectHomepageAds(
   const ads = await readHomepageAdManifest();
   return ads
     .filter((ad) => (includeInactive || ad.is_active) && (!placement || ad.placement === placement))
+=======
+export async function selectHomepageAds(includeInactive = false) {
+  const ads = await readHomepageAdManifest();
+  return ads
+    .filter((ad) => includeInactive || ad.is_active)
+>>>>>>> origin/main
     .sort((left, right) => left.sort_order - right.sort_order || right.created_at.localeCompare(left.created_at));
 }
 
@@ -942,7 +959,11 @@ export async function insertHomepageAd(fields: Omit<HomepageAdRow, "id" | "creat
 
 export async function updateHomepageAd(
   id: string,
+<<<<<<< HEAD
   fields: Partial<Pick<HomepageAdRow, "title" | "alt_text" | "href" | "placement" | "is_active" | "sort_order">>
+=======
+  fields: Partial<Pick<HomepageAdRow, "title" | "alt_text" | "href" | "is_active" | "sort_order">>
+>>>>>>> origin/main
 ) {
   const ads = await readHomepageAdManifest();
   const index = ads.findIndex((ad) => ad.id === id);
@@ -2638,6 +2659,23 @@ export async function selectOrdersByPhoneTailService(tail: string) {
   );
 }
 
+<<<<<<< HEAD
+=======
+export async function countOrders(
+  accessToken?: string,
+  status?: OrderRow["status"]
+) {
+  const { anonKey } = requireSupabaseConfig();
+  const params = new URLSearchParams({ select: "id" });
+
+  if (status) params.set("status", `eq.${status}`);
+
+  return accessToken
+    ? supabaseCount(`orders?${params.toString()}`, accessToken, anonKey)
+    : supabaseCount(`orders?${params.toString()}`);
+}
+
+>>>>>>> origin/main
 // Slim projection for dashboard aggregates (revenue, monthly trend, status
 // breakdown) -- avoids the full order_items/products join that the orders
 // management table needs, since only these three columns are used here.
@@ -2847,6 +2885,17 @@ export async function insertOrderHelpCase(fields: {
   return rows[0];
 }
 
+<<<<<<< HEAD
+=======
+export async function selectHelpCasesForCustomer(customerId: string) {
+  return supabaseRest<OrderHelpCaseRow[]>(
+    `order_help_cases?select=${encodeURIComponent(
+      helpCaseSelect
+    )}&customer_id=eq.${encodeURIComponent(customerId)}&order=created_at.desc`
+  );
+}
+
+>>>>>>> origin/main
 export async function selectHelpCases() {
   return supabaseRest<OrderHelpCaseRow[]>(
     `order_help_cases?select=${encodeURIComponent(
@@ -3362,6 +3411,45 @@ export async function selectPercentBandsForList(
   }
 }
 
+<<<<<<< HEAD
+=======
+export async function selectPercentBandsAdmin(priceListId: string | null, adminToken: string) {
+  const { anonKey } = requireSupabaseConfig();
+  const scope = priceListId
+    ? `&price_list_id=eq.${encodeURIComponent(priceListId)}`
+    : "";
+
+  return supabaseRest<PercentBandRow[]>(
+    `price_list_percent_tiers?select=*${scope}&order=min_quantity.asc`,
+    {},
+    adminToken,
+    anonKey
+  );
+}
+
+export async function upsertPercentBandService(fields: {
+  price_list_id: string;
+  product_id: number | null;
+  min_quantity: number;
+  discount_percent: number;
+  is_active?: boolean;
+}) {
+  const rows = await supabaseRest<PercentBandRow[]>("price_list_percent_tiers", {
+    method: "POST",
+    body: JSON.stringify(fields),
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+  });
+
+  return rows[0] ?? null;
+}
+
+export async function deletePercentBandService(id: string) {
+  await supabaseRest(`price_list_percent_tiers?id=eq.${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+>>>>>>> origin/main
 // ---------------------------------------------------------------------------
 // One-time wholesale registration codes
 // ---------------------------------------------------------------------------

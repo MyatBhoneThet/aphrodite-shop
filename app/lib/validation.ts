@@ -871,6 +871,20 @@ export const inviteCodeInputSchema = z.object({
     .optional(),
 });
 
+<<<<<<< HEAD
+=======
+export const percentBandInputSchema = z.object({
+  price_list_id: z.string().uuid("Choose a valid price list."),
+  product_id: z.number().int().positive().nullable().optional(),
+  min_quantity: z.number().int().positive("Minimum quantity must be at least 1."),
+  discount_percent: z
+    .number()
+    .min(0, "Discount must be 0% or more.")
+    .max(90, "Discount cannot be more than 90%."),
+  is_active: z.boolean().optional(),
+});
+
+>>>>>>> origin/main
 export function firstIssueMessage(error: z.ZodError) {
   return error.issues[0]?.message ?? "Invalid request.";
 }

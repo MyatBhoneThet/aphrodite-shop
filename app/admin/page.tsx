@@ -1,7 +1,10 @@
 "use client";
 
+<<<<<<< HEAD
 import OrderFilterBar from "./OrderFilterBar";
 import { emptyOrderFilters, filterOrders, ORDER_PAGE_SIZE, paginate, type OrderFilters } from "@/app/lib/admin-order-filter";
+=======
+>>>>>>> origin/main
 import { useAdminText } from "../lib/useAdminText";
 
 /* eslint-disable @next/next/no-img-element */
@@ -403,8 +406,11 @@ export default function AdminPage() {
 
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
+<<<<<<< HEAD
   const [orderFilters, setOrderFilters] = useState<OrderFilters>(emptyOrderFilters);
   const [orderPage, setOrderPage] = useState(1);
+=======
+>>>>>>> origin/main
   const [deliveryOrder, setDeliveryOrder] = useState<AdminOrder | null>(null);
   const [productForm, setProductForm] =
     useState<ProductFormState>(emptyProductForm);
@@ -516,12 +522,15 @@ export default function AdminPage() {
     loadOnMount();
   }, [authStatus, loadDashboardData]);
 
+<<<<<<< HEAD
   const filteredOrders = useMemo(
     () => filterOrders(orders, orderFilters, { includeContact: !isStaff }),
     [orders, orderFilters, isStaff]
   );
   const pagedOrders = useMemo(() => paginate(filteredOrders, orderPage), [filteredOrders, orderPage]);
 
+=======
+>>>>>>> origin/main
   const filteredProducts = useMemo(() => {
     const keyword = search.trim().toLowerCase();
 
@@ -1588,6 +1597,7 @@ export default function AdminPage() {
                   await loadDashboardData(); setDeliveryOrder(null);
                   setMessage("COD verification and delivery details saved.");
                 }} />}
+<<<<<<< HEAD
               <OrderFilterBar
                 filters={orderFilters}
                 onFilters={(next) => { setOrderFilters(next); setOrderPage(1); }}
@@ -1601,6 +1611,10 @@ export default function AdminPage() {
               <OrdersTable
                 orders={pagedOrders.items}
                 filtered={filteredOrders.length === 0 && orders.length > 0}
+=======
+              <OrdersTable
+                orders={orders}
+>>>>>>> origin/main
                 staffMode={isStaff}
                 onStatusChange={handleOrderStatusChange}
                 onResolveRequest={openOrderRequestResolution}
@@ -1895,7 +1909,10 @@ function ProductsTable({
 
 function OrdersTable({
   orders,
+<<<<<<< HEAD
   filtered = false,
+=======
+>>>>>>> origin/main
   staffMode,
   onStatusChange,
   onResolveRequest,
@@ -1905,7 +1922,10 @@ function OrdersTable({
   resendingOrderId,
 }: {
   orders: AdminOrder[];
+<<<<<<< HEAD
   filtered?: boolean;
+=======
+>>>>>>> origin/main
   staffMode: boolean;
   onStatusChange: (orderId: string, stage: DeliveryProgressStage) => void;
   onResolveRequest: (
@@ -1921,10 +1941,13 @@ function OrdersTable({
   const a = useAdminText();
   const { t } = useLanguage();
 
+<<<<<<< HEAD
   if (orders.length === 0 && filtered) {
     return <p className="p-5 text-sm text-zinc-500">{a("No orders match these filters.")}</p>;
   }
 
+=======
+>>>>>>> origin/main
   if (orders.length === 0) {
     return (
       <p className="p-5 text-sm text-zinc-500">

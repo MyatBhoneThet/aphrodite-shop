@@ -26,7 +26,11 @@ export default function LanguageSwitcher({ language, setLanguage }: Props) {
         <button key={value} type="button" lang={value}
           aria-label={value === "en" ? "English" : "မြန်မာ"}
           aria-pressed={current === value} onClick={() => change(value)}
+<<<<<<< HEAD
           className={`min-h-11 min-w-11 rounded-full px-1.5 text-[10px] font-bold transition-all duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 motion-reduce:transition-none min-[460px]:px-3 min-[460px]:text-xs ${current === value ? "bg-red-600 text-white shadow-md shadow-red-600/20" : "text-zinc-600 hover:bg-white hover:text-zinc-950"}`}>
+=======
+          className={`min-h-8 rounded-full px-1.5 text-[10px] font-bold transition-all duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 motion-reduce:transition-none min-[460px]:min-h-9 min-[460px]:px-3 min-[460px]:text-xs ${current === value ? "bg-red-600 text-white shadow-md shadow-red-600/20" : "text-zinc-600 hover:bg-white hover:text-zinc-950"}`}>
+>>>>>>> origin/main
           {value === "en" ? "EN" : "မြန်မာ"}
         </button>
       ))}

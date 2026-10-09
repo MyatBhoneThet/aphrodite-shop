@@ -80,7 +80,11 @@ export default function Navbar({ search, setSearch, searchSuggestions, language,
             <AccountControls user={currentUser} wishlistCount={wishlistCount} cartCount={cartCount} onLogout={onLogout} />
           ) : (
             <><details className="group/guest relative sm:hidden">
+<<<<<<< HEAD
               <summary className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-xl bg-zinc-950 text-red-300 [&::-webkit-details-marker]:hidden" aria-label={`${t("nav.login")} / ${t("nav.register")}`}>
+=======
+              <summary className="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-xl bg-zinc-950 text-red-300 [&::-webkit-details-marker]:hidden" aria-label={`${t("nav.login")} / ${t("nav.register")}`}>
+>>>>>>> origin/main
                 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><circle cx="12" cy="8" r="4" /><path d="M4 21v-2a8 8 0 0 1 16 0v2" /></svg>
               </summary>
               <div className="absolute right-0 top-[calc(100%+0.5rem)] z-[80] flex min-w-36 flex-col gap-1 rounded-xl border border-zinc-200 bg-white p-2 shadow-xl">
@@ -99,7 +103,11 @@ export default function Navbar({ search, setSearch, searchSuggestions, language,
         </div>
       </div>
       <div className="px-4 pb-3 md:hidden"><SearchBox search={search} setSearch={setSearch} suggestions={searchSuggestions} /></div>
+<<<<<<< HEAD
       <nav aria-label={text("Product categories")} className="scrollbar-none flex items-center gap-4 overflow-x-auto whitespace-nowrap border-t border-zinc-100 px-4 py-1 text-xs font-semibold sm:gap-5 sm:px-5 sm:text-sm [&>a]:inline-flex [&>a]:min-h-11 [&>a]:shrink-0 [&>a]:items-center"><Link href="/catalog/laptops">{text("Laptops")}</Link><Link href="/catalog/accessories">{text("Accessories")}</Link><Link href="/catalog/pc-parts">{text("PC Parts")}</Link><Link href="/find-my-laptop" className="text-red-600">{text("Find my laptop")} →</Link><Link href="/pc-builder" className="text-red-600">{text("Build a PC")} →</Link></nav>
+=======
+      <nav aria-label={text("Product categories")} className="flex items-center gap-4 overflow-x-auto whitespace-nowrap border-t border-zinc-100 px-4 py-3 text-xs font-semibold sm:gap-5 sm:px-5 sm:text-sm [&>a]:shrink-0"><Link href="/catalog/laptops">{text("Laptops")}</Link><Link href="/catalog/accessories">{text("Accessories")}</Link><Link href="/catalog/pc-parts">{text("PC Parts")}</Link><Link href="/find-my-laptop" className="text-red-600">{text("Find my laptop")} →</Link><Link href="/pc-builder" className="text-red-600">{text("Build a PC")} →</Link></nav>
+>>>>>>> origin/main
       <LastOrderStatusBar enabled={Boolean(currentUser && currentUser.role !== "admin" && currentUser.role !== "staff")} />
     </header>
   );

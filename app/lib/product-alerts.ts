@@ -41,6 +41,14 @@ export type AlertStatus = {
   savings: number | null;
 };
 
+<<<<<<< HEAD
+=======
+export const ALERT_LABELS: Record<AlertKind, string> = {
+  back_in_stock: "Tell me when it is back in stock",
+  price_drop: "Tell me when the price drops",
+};
+
+>>>>>>> origin/main
 function pricePending(price: number) {
   return !Number.isFinite(price) || price <= 0;
 }
