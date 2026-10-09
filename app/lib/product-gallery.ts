@@ -24,18 +24,6 @@ export function productPhotos(product: Pick<Product, "image" | "fullSpecs">): Pr
   if (cover && cover !== PRODUCT_PLACEHOLDER && !gallery.some(photo => photo.url === cover)) gallery.unshift({ url: cover, label: "Product view" });
   return gallery.slice(0, 12);
 }
-<<<<<<< HEAD
-=======
-export function parseGalleryLines(text: string): ProductPhoto[] {
-  const rows = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  if (rows.length > 12) throw new Error("Use up to 12 product photos.");
-  return normalizeGallery(rows.map((line, i) => {
-    const [url, ...label] = line.split("|");
-    if (!safeImageUrl(url)) throw new Error(`Photo ${i + 1} needs an HTTPS URL or a local /products/ path.`);
-    return { url: url.trim(), label: label.join("|").trim() || `Photo ${i + 1}` };
-  }));
-}
->>>>>>> origin/main
 export function sheetGallery(headers: string[], cells: unknown[]): ProductPhoto[] {
   const photos = [
     ["front_image_url", "Front view"], ["rear_image_url", "Rear view"], ["side_image_url", "Side view"],

@@ -49,10 +49,6 @@ import {
   selectStaffNotes,
   insertStaffNote,
   type QueueSubjectType,
-<<<<<<< HEAD
-=======
-  selectHelpCasesForCustomer,
->>>>>>> origin/main
   selectHelpCases,
   selectHelpCaseById,
   updateHelpCaseService,
@@ -3764,13 +3760,6 @@ export async function openOrderHelpCase(
   return helpCase;
 }
 
-<<<<<<< HEAD
-=======
-export async function listCustomerHelpCases(user: CurrentUser) {
-  return selectHelpCasesForCustomer(user.id);
-}
-
->>>>>>> origin/main
 export async function listAdminHelpCases(user: CurrentUser) {
   requireBackoffice(user);
   const cases = await selectHelpCases();

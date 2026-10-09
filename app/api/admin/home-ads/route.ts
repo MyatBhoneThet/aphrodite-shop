@@ -2,10 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { authenticate } from "@/app/lib/backend";
 import { badRequest, handleRouteError } from "@/app/lib/errors";
-<<<<<<< HEAD
 import { isHomepageAdPlacement } from "@/app/lib/homepage-ads";
-=======
->>>>>>> origin/main
 import {
   deleteHomepageAdObject,
   insertHomepageAd,
@@ -50,26 +47,17 @@ export async function POST(request: NextRequest) {
 
     const title = String(form.get("title") ?? "").trim();
     const altText = String(form.get("alt_text") ?? "").trim();
-<<<<<<< HEAD
     const placement = String(form.get("placement") ?? "hero");
     if (!title || title.length > 120) throw badRequest("Title must be 1 to 120 characters.");
     if (!altText || altText.length > 240) throw badRequest("Image description must be 1 to 240 characters.");
     if (!isHomepageAdPlacement(placement)) throw badRequest("Choose a valid advertisement placement.");
-=======
-    if (!title || title.length > 120) throw badRequest("Title must be 1 to 120 characters.");
-    if (!altText || altText.length > 240) throw badRequest("Image description must be 1 to 240 characters.");
->>>>>>> origin/main
 
     const width = Number(form.get("width"));
     const height = Number(form.get("height"));
     const safeName = (file.name || "banner").replace(/[^a-zA-Z0-9._-]+/g, "-").slice(-100);
     uploadedPath = `uploads/${randomUUID()}-${safeName || "banner"}`;
     const imageUrl = await uploadHomepageAdObject(uploadedPath, await file.arrayBuffer(), file.type);
-<<<<<<< HEAD
     const existing = await selectHomepageAds(true, placement);
-=======
-    const existing = await selectHomepageAds(true);
->>>>>>> origin/main
     const sortOrder = existing.reduce((max, ad) => Math.max(max, ad.sort_order), -1) + 1;
     const ad = await insertHomepageAd({
       title,
@@ -77,10 +65,7 @@ export async function POST(request: NextRequest) {
       image_url: imageUrl,
       storage_path: uploadedPath,
       href: safeHref(form.get("href")),
-<<<<<<< HEAD
       placement,
-=======
->>>>>>> origin/main
       width: Number.isInteger(width) && width > 0 ? width : null,
       height: Number.isInteger(height) && height > 0 ? height : null,
       is_active: true,

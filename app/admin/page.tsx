@@ -1,10 +1,7 @@
 "use client";
 
-<<<<<<< HEAD
 import OrderFilterBar from "./OrderFilterBar";
 import { emptyOrderFilters, filterOrders, ORDER_PAGE_SIZE, paginate, type OrderFilters } from "@/app/lib/admin-order-filter";
-=======
->>>>>>> origin/main
 import { useAdminText } from "../lib/useAdminText";
 
 /* eslint-disable @next/next/no-img-element */
@@ -406,11 +403,8 @@ export default function AdminPage() {
 
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
-<<<<<<< HEAD
   const [orderFilters, setOrderFilters] = useState<OrderFilters>(emptyOrderFilters);
   const [orderPage, setOrderPage] = useState(1);
-=======
->>>>>>> origin/main
   const [deliveryOrder, setDeliveryOrder] = useState<AdminOrder | null>(null);
   const [productForm, setProductForm] =
     useState<ProductFormState>(emptyProductForm);
@@ -522,15 +516,12 @@ export default function AdminPage() {
     loadOnMount();
   }, [authStatus, loadDashboardData]);
 
-<<<<<<< HEAD
   const filteredOrders = useMemo(
     () => filterOrders(orders, orderFilters, { includeContact: !isStaff }),
     [orders, orderFilters, isStaff]
   );
   const pagedOrders = useMemo(() => paginate(filteredOrders, orderPage), [filteredOrders, orderPage]);
 
-=======
->>>>>>> origin/main
   const filteredProducts = useMemo(() => {
     const keyword = search.trim().toLowerCase();
 
@@ -1597,7 +1588,6 @@ export default function AdminPage() {
                   await loadDashboardData(); setDeliveryOrder(null);
                   setMessage("COD verification and delivery details saved.");
                 }} />}
-<<<<<<< HEAD
               <OrderFilterBar
                 filters={orderFilters}
                 onFilters={(next) => { setOrderFilters(next); setOrderPage(1); }}
@@ -1611,10 +1601,6 @@ export default function AdminPage() {
               <OrdersTable
                 orders={pagedOrders.items}
                 filtered={filteredOrders.length === 0 && orders.length > 0}
-=======
-              <OrdersTable
-                orders={orders}
->>>>>>> origin/main
                 staffMode={isStaff}
                 onStatusChange={handleOrderStatusChange}
                 onResolveRequest={openOrderRequestResolution}
@@ -1909,10 +1895,7 @@ function ProductsTable({
 
 function OrdersTable({
   orders,
-<<<<<<< HEAD
   filtered = false,
-=======
->>>>>>> origin/main
   staffMode,
   onStatusChange,
   onResolveRequest,
@@ -1922,10 +1905,7 @@ function OrdersTable({
   resendingOrderId,
 }: {
   orders: AdminOrder[];
-<<<<<<< HEAD
   filtered?: boolean;
-=======
->>>>>>> origin/main
   staffMode: boolean;
   onStatusChange: (orderId: string, stage: DeliveryProgressStage) => void;
   onResolveRequest: (
@@ -1941,13 +1921,10 @@ function OrdersTable({
   const a = useAdminText();
   const { t } = useLanguage();
 
-<<<<<<< HEAD
   if (orders.length === 0 && filtered) {
     return <p className="p-5 text-sm text-zinc-500">{a("No orders match these filters.")}</p>;
   }
 
-=======
->>>>>>> origin/main
   if (orders.length === 0) {
     return (
       <p className="p-5 text-sm text-zinc-500">
@@ -1957,8 +1934,8 @@ function OrdersTable({
 
   return (
     <div className="overflow-x-auto" tabIndex={0} role="region" aria-label={a("Orders table")}>
-      <table className="w-full min-w-[1180px] text-left text-sm">
-        <thead className="bg-zinc-50 text-xs uppercase text-zinc-500">
+      <table className="w-full min-w-[1180px] text-left text-sm max-lg:block max-lg:min-w-0">
+        <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 max-lg:hidden">
           <tr>
             <th className="p-4">{t("adminTable.order")}</th>
             <th className="p-4">{t("adminTable.customer")}</th>
@@ -1971,17 +1948,17 @@ function OrdersTable({
           </tr>
         </thead>
 
-        <tbody className="divide-y">
+        <tbody className="divide-y max-lg:block max-lg:space-y-4 max-lg:divide-y-0 max-lg:p-3">
           {orders.map((order) => (
-            <tr key={order.id} className="align-top">
-              <td className="p-4">
+            <tr key={order.id} className="align-top max-lg:block max-lg:overflow-hidden max-lg:rounded-2xl max-lg:border max-lg:border-zinc-200 max-lg:bg-white max-lg:shadow-sm">
+              <td data-label={t("adminTable.order")} className="p-4 max-lg:block max-lg:border-t max-lg:border-zinc-100 max-lg:px-4 max-lg:py-3 max-lg:first:border-t-0 max-lg:before:mb-1 max-lg:before:block max-lg:before:text-[10px] max-lg:before:font-bold max-lg:before:uppercase max-lg:before:tracking-wide max-lg:before:text-zinc-400 max-lg:before:content-[attr(data-label)]">
                 <p className="font-bold">#{order.id.slice(0, 8)}</p>
                 <p className="text-xs text-zinc-500">
                   {formatDateTime(order.created_at)}
                 </p>
               </td>
 
-              <td className="p-4">
+              <td data-label={t("adminTable.customer")} className="p-4 max-lg:block max-lg:border-t max-lg:border-zinc-100 max-lg:px-4 max-lg:py-3 max-lg:first:border-t-0 max-lg:before:mb-1 max-lg:before:block max-lg:before:text-[10px] max-lg:before:font-bold max-lg:before:uppercase max-lg:before:tracking-wide max-lg:before:text-zinc-400 max-lg:before:content-[attr(data-label)]">
                 <p className="font-semibold">{order.shipping_name}</p>
                 {!staffMode && <p className="text-xs text-zinc-500">
                   {order.profiles?.email ?? a("No email")}
@@ -1989,7 +1966,7 @@ function OrdersTable({
                 {!staffMode && <p className="text-xs text-zinc-500">{order.shipping_phone}</p>}
               </td>
 
-              <td className="p-4">
+              <td data-label={t("adminTable.items")} className="p-4 max-lg:block max-lg:border-t max-lg:border-zinc-100 max-lg:px-4 max-lg:py-3 max-lg:first:border-t-0 max-lg:before:mb-1 max-lg:before:block max-lg:before:text-[10px] max-lg:before:font-bold max-lg:before:uppercase max-lg:before:tracking-wide max-lg:before:text-zinc-400 max-lg:before:content-[attr(data-label)]">
                 <div className="space-y-1">
                   {(order.order_items ?? []).map((item) => {
                     const product = item.product ?? item.products;
@@ -2004,11 +1981,11 @@ function OrdersTable({
                 </div>
               </td>
 
-              <td className="p-4 font-bold">
+              <td data-label={t("adminTable.total")} className="p-4 font-bold max-lg:block max-lg:border-t max-lg:border-zinc-100 max-lg:px-4 max-lg:py-3 max-lg:first:border-t-0 max-lg:before:mb-1 max-lg:before:block max-lg:before:text-[10px] max-lg:before:font-bold max-lg:before:uppercase max-lg:before:tracking-wide max-lg:before:text-zinc-400 max-lg:before:content-[attr(data-label)]">
                 {formatCurrency(order.total_amount)}
               </td>
 
-              <td className="p-4">
+              <td data-label={t("adminTable.status")} className="p-4 max-lg:block max-lg:border-t max-lg:border-zinc-100 max-lg:px-4 max-lg:py-3 max-lg:first:border-t-0 max-lg:before:mb-1 max-lg:before:block max-lg:before:text-[10px] max-lg:before:font-bold max-lg:before:uppercase max-lg:before:tracking-wide max-lg:before:text-zinc-400 max-lg:before:content-[attr(data-label)]">
                 <p className="mb-2 text-xs font-bold text-blue-700">{a(orderTracking(order).label)}</p>
                 {!staffMode && <select
                   value={order.status === "cancelled" || order.status === "returned"
@@ -2067,7 +2044,7 @@ function OrdersTable({
                 )}
               </td>
 
-              <td className="p-4">
+              <td data-label={t("adminTable.payment")} className="p-4 max-lg:block max-lg:border-t max-lg:border-zinc-100 max-lg:px-4 max-lg:py-3 max-lg:first:border-t-0 max-lg:before:mb-1 max-lg:before:block max-lg:before:text-[10px] max-lg:before:font-bold max-lg:before:uppercase max-lg:before:tracking-wide max-lg:before:text-zinc-400 max-lg:before:content-[attr(data-label)]">
                 <p className="font-semibold">
                   {paymentMethodLabels[order.payment_method ?? a("cash_on_delivery")] ?? a("Cash on delivery")}
                   {order.payment_account && ` · ${order.payment_account.toUpperCase()}`}
@@ -2161,7 +2138,7 @@ function OrdersTable({
                 <p className="mt-2 text-[10px] font-bold uppercase text-zinc-500">{a("Verification:")} {a((order.cod_verification_status ?? "pending").replaceAll("_", " "))}</p>
               </td>
 
-              {!staffMode && <td className="p-4">
+              {!staffMode && <td data-label={t("adminTable.request")} className="p-4 max-lg:block max-lg:border-t max-lg:border-zinc-100 max-lg:px-4 max-lg:py-3 max-lg:first:border-t-0 max-lg:before:mb-1 max-lg:before:block max-lg:before:text-[10px] max-lg:before:font-bold max-lg:before:uppercase max-lg:before:tracking-wide max-lg:before:text-zinc-400 max-lg:before:content-[attr(data-label)]">
                 {(order.item_return_requests?.length ?? 0) > 0 ? (
                   <div className="space-y-2 text-xs">
                     {order.item_return_requests
@@ -2219,7 +2196,7 @@ function OrdersTable({
                 )}
               </td>}
 
-              {!staffMode && <td className="p-4">
+              {!staffMode && <td data-label={t("adminTable.shipping")} className="p-4 max-lg:block max-lg:border-t max-lg:border-zinc-100 max-lg:px-4 max-lg:py-3 max-lg:first:border-t-0 max-lg:before:mb-1 max-lg:before:block max-lg:before:text-[10px] max-lg:before:font-bold max-lg:before:uppercase max-lg:before:tracking-wide max-lg:before:text-zinc-400 max-lg:before:content-[attr(data-label)]">
                 <p className="max-w-xs text-xs text-zinc-600">
                   {order.shipping_address}
                 </p>

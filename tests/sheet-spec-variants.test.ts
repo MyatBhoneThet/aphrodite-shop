@@ -207,11 +207,7 @@ describe("syncing a new version to the website", () => {
 
     vi.stubGlobal(
       "fetch",
-<<<<<<< HEAD
       vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-=======
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
->>>>>>> origin/main
         if ((init?.method ?? "GET") === "GET") {
           // Only the original product is on the website so far.
           return Response.json([

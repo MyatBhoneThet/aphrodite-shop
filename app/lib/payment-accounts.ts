@@ -66,13 +66,6 @@ export function paymentAccountsFor(options: { wholesale: boolean }) {
   return PAYMENT_ACCOUNTS.filter((account) => !(options.wholesale && account.retailOnly));
 }
 
-<<<<<<< HEAD
-=======
-export function paymentAccountById(id: string | null | undefined) {
-  return PAYMENT_ACCOUNTS.find((account) => account.id === id) ?? null;
-}
-
->>>>>>> origin/main
 /** COD needs no slip; everything else is paid before delivery. */
 export function isPrepaidMethod(method: string | null | undefined): method is PrepaidMethod {
   return method === "bank_transfer" || method === "mmqr";

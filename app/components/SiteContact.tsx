@@ -61,11 +61,7 @@ export default function SiteContact() {
                 href={social.url}
                 target="_blank"
                 rel="noreferrer noopener"
-<<<<<<< HEAD
                 className="inline-flex min-h-11 items-center gap-2 rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-zinc-950 hover:bg-zinc-950 hover:text-white"
-=======
-                className="inline-flex items-center gap-2 rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:border-zinc-950 hover:bg-zinc-950 hover:text-white"
->>>>>>> origin/main
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -93,11 +89,7 @@ export default function SiteContact() {
                 <a
                   key={phone}
                   href={telHref(phone)}
-<<<<<<< HEAD
                   className="inline-flex min-h-11 items-center font-medium text-zinc-800 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-900"
-=======
-                  className="font-medium text-zinc-800 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-900"
->>>>>>> origin/main
                 >
                   {phone}
                 </a>
@@ -119,11 +111,7 @@ export default function SiteContact() {
           <li>
             <Link
               href="/privacy"
-<<<<<<< HEAD
               className="inline-flex min-h-11 items-center font-medium text-zinc-600 underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 hover:decoration-zinc-900"
-=======
-              className="font-medium text-zinc-600 underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 hover:decoration-zinc-900"
->>>>>>> origin/main
             >
               {language === "en" ? "Privacy policy" : "ကိုယ်ရေးအချက်အလက် မူဝါဒ"}
             </Link>
@@ -131,11 +119,7 @@ export default function SiteContact() {
           <li>
             <Link
               href="/data-deletion"
-<<<<<<< HEAD
               className="inline-flex min-h-11 items-center font-medium text-zinc-600 underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 hover:decoration-zinc-900"
-=======
-              className="font-medium text-zinc-600 underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 hover:decoration-zinc-900"
->>>>>>> origin/main
             >
               {language === "en" ? "Delete your data" : "အချက်အလက် ဖျက်သိမ်းရန်"}
             </Link>

@@ -125,13 +125,8 @@ export default function FindMyLaptopPage() {
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
       <header className="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/85 backdrop-blur">
-<<<<<<< HEAD
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-5">
-          <Link href="/" className="w-28 shrink-0 sm:w-auto">
-=======
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-3 py-3 sm:gap-3 sm:px-5">
           <Link href="/" className="w-20 shrink-0 min-[360px]:w-28 sm:w-auto">
->>>>>>> origin/main
             <Image
               src="/brand/aphrodite-myanmar.png"
               alt="Aphrodite Myanmar"
@@ -141,31 +136,18 @@ export default function FindMyLaptopPage() {
               priority
             />
           </Link>
-<<<<<<< HEAD
-          <div className="flex shrink-0 gap-2">
-            <Link
-              href="/catalog/laptops"
-              className="rounded-full border border-zinc-300 px-3 py-2 text-xs font-bold transition hover:border-zinc-950 sm:px-4 sm:text-sm"
-=======
           <div className="flex shrink-0 gap-1 sm:gap-2">
             <Link
               href="/catalog/laptops"
               className="whitespace-nowrap rounded-full border border-zinc-300 px-2 py-2 text-[10px] font-bold transition hover:border-zinc-950 min-[360px]:px-3 min-[360px]:text-xs sm:px-4 sm:text-sm"
->>>>>>> origin/main
             >
               All laptops
             </Link>
             <Link
               href="/"
-<<<<<<< HEAD
-              className="rounded-full bg-zinc-950 px-3 py-2 text-xs font-bold text-white transition hover:bg-red-600 sm:px-4 sm:text-sm"
-            >
-              Store
-=======
               className="whitespace-nowrap rounded-full bg-zinc-950 px-2 py-2 text-[10px] font-bold text-white transition hover:bg-red-600 min-[360px]:px-3 min-[360px]:text-xs sm:px-4 sm:text-sm"
             >
               Back to Store
->>>>>>> origin/main
             </Link>
           </div>
         </div>
@@ -480,11 +462,7 @@ export default function FindMyLaptopPage() {
                 </p>
               </div>
             ) : (
-<<<<<<< HEAD
-              <div className="mt-6 grid gap-5 lg:grid-cols-3">
-=======
               <div aria-label="Recommended laptops" className="mt-5 flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain pb-3 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-5 sm:overflow-visible sm:pb-0 lg:grid-cols-3">
->>>>>>> origin/main
                 {result.picks.map((pick) => {
                   const photo = productPhotos(pick.product)[0]?.url;
                   const isTop = pick.rank === 1;
@@ -492,24 +470,14 @@ export default function FindMyLaptopPage() {
                   return (
                     <article
                       key={pick.product.id}
-<<<<<<< HEAD
-                      className={`hero-rise flex flex-col overflow-hidden rounded-3xl border bg-white shadow-sm ${
-                        isTop
-                          ? "border-red-200 ring-4 ring-red-100"
-=======
                       className={`hero-rise flex w-[min(75vw,300px)] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border bg-white shadow-sm sm:w-auto sm:rounded-3xl ${
                         isTop
                           ? "border-red-200 ring-2 ring-red-100 sm:ring-4"
->>>>>>> origin/main
                           : "border-zinc-200"
                       }`}
                     >
                       <div
-<<<<<<< HEAD
-                        className={`flex items-center justify-between px-5 py-3 text-xs font-black uppercase tracking-wider ${
-=======
                         className={`flex items-center justify-between px-3 py-2 text-[10px] font-black uppercase tracking-wider sm:px-5 sm:py-3 sm:text-xs ${
->>>>>>> origin/main
                           isTop
                             ? "bg-red-600 text-white"
                             : "bg-zinc-100 text-zinc-600"
@@ -521,11 +489,7 @@ export default function FindMyLaptopPage() {
                         {isTop && <span aria-hidden="true">★</span>}
                       </div>
 
-<<<<<<< HEAD
-                      <div className="relative h-44 bg-zinc-50">
-=======
                       <div className="relative h-28 bg-zinc-50 sm:h-44">
->>>>>>> origin/main
                         {photo && (
                           <Image
                             src={photo}
@@ -533,32 +497,11 @@ export default function FindMyLaptopPage() {
                             alt={pick.product.name}
                             fill
                             sizes="320px"
-<<<<<<< HEAD
-                            className="object-contain p-4"
-=======
                             className="object-contain p-2 sm:p-4"
->>>>>>> origin/main
                           />
                         )}
                       </div>
 
-<<<<<<< HEAD
-                      <div className="flex flex-1 flex-col p-5">
-                        <Link
-                          href={`/products/${pick.product.id}`}
-                          className="text-lg font-black leading-snug hover:text-red-600"
-                        >
-                          {pick.product.name}
-                        </Link>
-                        <p className="mt-1 text-xs text-zinc-500">
-                          {pick.product.brand}
-                        </p>
-                        <div className="mt-3"><ProductPrice price={effectiveProductPrice(pick.product)} regularPrice={pick.product.price} /></div>
-                        <DeliveryEstimateBadge estimate={deliveryEstimate} compact />
-
-                        {pick.caveat && (
-                          <p className="mt-2 inline-flex rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-800">
-=======
                       <div className="flex flex-1 flex-col p-3 sm:p-5">
                         <Link
                           href={`/products/${pick.product.id}`}
@@ -574,22 +517,14 @@ export default function FindMyLaptopPage() {
 
                         {pick.caveat && (
                           <p className="mt-2 inline-flex rounded-full bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-800 sm:px-3 sm:text-xs">
->>>>>>> origin/main
                             {pick.caveat}
                           </p>
                         )}
 
-<<<<<<< HEAD
-                        <p className="mt-4 text-xs font-black uppercase tracking-wider text-zinc-400">
-                          Why this one
-                        </p>
-                        <ul className="mt-2 space-y-1.5 text-sm text-zinc-700">
-=======
                         <p className="mt-3 text-[10px] font-black uppercase tracking-wider text-zinc-400 sm:mt-4 sm:text-xs">
                           Why this one
                         </p>
                         <ul className="mt-1.5 space-y-1 text-xs text-zinc-700 sm:mt-2 sm:space-y-1.5 sm:text-sm">
->>>>>>> origin/main
                           {pick.reasons.map((reason) => (
                             <li key={reason} className="flex gap-2">
                               <span aria-hidden="true" className="text-red-600">
@@ -600,17 +535,10 @@ export default function FindMyLaptopPage() {
                           ))}
                         </ul>
 
-<<<<<<< HEAD
-                        <div className="mt-5 flex gap-2 pt-1">
-                          <Link
-                            href={`/products/${pick.product.id}`}
-                            className="flex-1 rounded-full bg-red-600 px-4 py-2.5 text-center text-sm font-black text-white transition hover:bg-red-500"
-=======
                         <div className="mt-3 flex gap-2 pt-1 sm:mt-5">
                           <Link
                             href={`/products/${pick.product.id}`}
                             className="flex-1 rounded-full bg-red-600 px-3 py-2 text-center text-xs font-black text-white transition hover:bg-red-500 sm:px-4 sm:py-2.5 sm:text-sm"
->>>>>>> origin/main
                           >
                             View
                           </Link>
@@ -618,11 +546,7 @@ export default function FindMyLaptopPage() {
                             href={`/compare?ids=${result.picks
                               .map((entry) => entry.product.id)
                               .join(",")}`}
-<<<<<<< HEAD
-                            className="rounded-full border border-zinc-300 px-4 py-2.5 text-sm font-bold transition hover:border-zinc-950"
-=======
                             className="rounded-full border border-zinc-300 px-3 py-2 text-xs font-bold transition hover:border-zinc-950 sm:px-4 sm:py-2.5 sm:text-sm"
->>>>>>> origin/main
                           >
                             Compare
                           </Link>

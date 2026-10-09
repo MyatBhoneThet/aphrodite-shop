@@ -18,11 +18,6 @@ export const YANGON_TOWNSHIPS = [
   "Thanlyin", "Thingangyun", "Thongwa", "Twante", "Yankin",
 ] as const;
 
-<<<<<<< HEAD
-=======
-export type YangonTownship = (typeof YANGON_TOWNSHIPS)[number];
-
->>>>>>> origin/main
 export function normalizeYangonTownship(value: string | null | undefined) {
   const normalized = value
     ?.trim()

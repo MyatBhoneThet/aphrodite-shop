@@ -58,11 +58,7 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
 
   useEffect(() => {
     let cancelled = false;
-<<<<<<< HEAD
     void fetch("/api/home-ads?placement=hero", { cache: "no-store" })
-=======
-    void fetch("/api/home-ads", { cache: "no-store" })
->>>>>>> origin/main
       .then(async (response) => {
         if (!response.ok) return;
         const data = await response.json() as {
@@ -163,7 +159,6 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
 
         {count > 1 && <div className="pointer-events-none absolute inset-x-0 bottom-1 z-20 flex items-center justify-between gap-2 bg-transparent px-2 sm:gap-3 sm:px-4">
           <div className="flex gap-1">
-<<<<<<< HEAD
             <button type="button" onClick={() => move(-1)} aria-label="Previous advertisement" className="pointer-events-auto h-11 w-11 shrink-0 rounded-full drop-shadow-[0_1px_2px_rgba(0,0,0,.9)] transition hover:bg-black/20">←</button>
             <button type="button" onClick={() => move(1)} aria-label="Next advertisement" className="pointer-events-auto h-11 w-11 shrink-0 rounded-full drop-shadow-[0_1px_2px_rgba(0,0,0,.9)] transition hover:bg-black/20">→</button>
           </div>
@@ -172,15 +167,6 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
             {slides.map((ad, position) => (
               <button type="button" key={ad.id} aria-label={`Show slide ${position + 1}: ${ad.title}`} aria-pressed={position === index}
                 onClick={() => setIndex(position)} className="flex h-11 min-w-11 items-center justify-center">
-=======
-            <button type="button" onClick={() => move(-1)} aria-label="Previous advertisement" className="pointer-events-auto h-7 w-7 rounded-full drop-shadow-[0_1px_2px_rgba(0,0,0,.9)] transition hover:bg-black/20 sm:h-10 sm:w-10">←</button>
-            <button type="button" onClick={() => move(1)} aria-label="Next advertisement" className="pointer-events-auto h-7 w-7 rounded-full drop-shadow-[0_1px_2px_rgba(0,0,0,.9)] transition hover:bg-black/20 sm:h-10 sm:w-10">→</button>
-          </div>
-          <div className="pointer-events-auto flex gap-2" aria-label="Choose advertisement">
-            {slides.map((ad, position) => (
-              <button type="button" key={ad.id} aria-label={`Show slide ${position + 1}: ${ad.title}`} aria-pressed={position === index}
-                onClick={() => setIndex(position)} className="flex h-7 items-center sm:h-10">
->>>>>>> origin/main
                 <span className={`relative h-1.5 overflow-hidden rounded-full bg-white/25 transition-all ${position === index ? "w-8 sm:w-12" : "w-3 sm:w-5"}`}>
                   {position === index && <span key={`${index}-${playing}`} className={`absolute inset-0 rounded-full bg-white ${playing ? "hero-progress" : ""}`} />}
                 </span>

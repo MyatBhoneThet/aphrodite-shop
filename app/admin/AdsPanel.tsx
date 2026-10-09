@@ -5,14 +5,11 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
 import { useAdminText } from "../lib/useAdminText";
-<<<<<<< HEAD
 import {
   HOMEPAGE_AD_PLACEMENTS,
   HOMEPAGE_AD_PLACEMENT_LABELS,
   type HomepageAdPlacement,
 } from "../lib/homepage-ads";
-=======
->>>>>>> origin/main
 
 type AdminAd = {
   id: string;
@@ -20,25 +17,18 @@ type AdminAd = {
   alt_text: string;
   image_url: string;
   href: string;
-<<<<<<< HEAD
   placement: HomepageAdPlacement;
-=======
->>>>>>> origin/main
   width: number | null;
   height: number | null;
   is_active: boolean;
   sort_order: number;
 };
 
-<<<<<<< HEAD
 type Draft = Pick<AdminAd, "title" | "alt_text" | "href" | "placement">;
 
 const placementOrder = Object.fromEntries(
   HOMEPAGE_AD_PLACEMENTS.map((placement, index) => [placement, index])
 ) as Record<HomepageAdPlacement, number>;
-=======
-type Draft = Pick<AdminAd, "title" | "alt_text" | "href">;
->>>>>>> origin/main
 
 async function responseError(response: Response) {
   const body = await response.json().catch(() => ({})) as { error?: string };
@@ -55,10 +45,7 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
   const [title, setTitle] = useState("");
   const [altText, setAltText] = useState("");
   const [href, setHref] = useState("/catalog/laptops");
-<<<<<<< HEAD
   const [placement, setPlacement] = useState<HomepageAdPlacement>("hero");
-=======
->>>>>>> origin/main
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -69,7 +56,6 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
       const response = await fetch("/api/admin/home-ads", { headers: authHeaders(), cache: "no-store" });
       if (!response.ok) { setError(await responseError(response)); return; }
       const data = await response.json() as { ads: AdminAd[] };
-<<<<<<< HEAD
       const next = (data.ads ?? []).sort((left, right) =>
         placementOrder[left.placement] - placementOrder[right.placement]
         || left.sort_order - right.sort_order
@@ -81,11 +67,6 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
         href: ad.href,
         placement: ad.placement,
       }])));
-=======
-      const next = (data.ads ?? []).sort((left, right) => left.sort_order - right.sort_order);
-      setAds(next);
-      setDrafts(Object.fromEntries(next.map((ad) => [ad.id, { title: ad.title, alt_text: ad.alt_text, href: ad.href }])));
->>>>>>> origin/main
     } catch {
       setError("Unable to load advertisements. Check the Supabase storage configuration and try again.");
     }
@@ -117,21 +98,13 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
     setBusy("create"); setError(""); setMessage("");
     try {
       const form = new FormData();
-<<<<<<< HEAD
       form.set("file", file); form.set("title", title); form.set("alt_text", altText); form.set("href", href); form.set("placement", placement);
-=======
-      form.set("file", file); form.set("title", title); form.set("alt_text", altText); form.set("href", href);
->>>>>>> origin/main
       if (dimensions) { form.set("width", String(dimensions.width)); form.set("height", String(dimensions.height)); }
       const response = await fetch("/api/admin/home-ads", { method: "POST", headers: authHeaders(), body: form });
       if (!response.ok) throw new Error(await responseError(response));
       setTitle(""); setAltText(""); setHref("/catalog/laptops"); setFile(null); setDimensions(null);
       if (preview) URL.revokeObjectURL(preview); setPreview("");
-<<<<<<< HEAD
       setMessage(`Advertisement added to ${HOMEPAGE_AD_PLACEMENT_LABELS[placement]}.`); await load();
-=======
-      setMessage("Advertisement added to the homepage."); await load();
->>>>>>> origin/main
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to add advertisement."); }
     finally { setBusy(""); }
   }
@@ -148,7 +121,6 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
     finally { setBusy(""); }
   }
 
-<<<<<<< HEAD
   async function move(current: AdminAd, amount: number) {
     const group = ads.filter((ad) => ad.placement === current.placement);
     const index = group.findIndex((ad) => ad.id === current.id);
@@ -161,20 +133,6 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
       const first = await fetch(`/api/admin/home-ads/${current.id}`, { method: "PATCH", headers, body: JSON.stringify({ sort_order: other.sort_order }) });
       if (!first.ok) throw new Error(await responseError(first));
       const second = await fetch(`/api/admin/home-ads/${other.id}`, { method: "PATCH", headers, body: JSON.stringify({ sort_order: current.sort_order }) });
-=======
-  async function move(index: number, amount: number) {
-    const otherIndex = index + amount;
-    if (!ads[index] || !ads[otherIndex]) return;
-    const current = ads[index]; const other = ads[otherIndex];
-    setBusy(current.id); setError("");
-    try {
-      const headers = { ...authHeaders(), "Content-Type": "application/json" };
-      const [first, second] = await Promise.all([
-        fetch(`/api/admin/home-ads/${current.id}`, { method: "PATCH", headers, body: JSON.stringify({ sort_order: other.sort_order }) }),
-        fetch(`/api/admin/home-ads/${other.id}`, { method: "PATCH", headers, body: JSON.stringify({ sort_order: current.sort_order }) }),
-      ]);
-      if (!first.ok) throw new Error(await responseError(first));
->>>>>>> origin/main
       if (!second.ok) throw new Error(await responseError(second));
       await load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to reorder advertisements."); }
@@ -199,11 +157,7 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
       <p className="text-sm font-bold uppercase tracking-wider text-red-600">{a("Homepage advertisements")}</p>
       <h2 className="mt-1 text-2xl font-black">{a("Add a custom banner")}</h2>
       <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600">
-<<<<<<< HEAD
         {a("Use 1800 × 600 px (3:1 ratio), JPG, PNG or WebP, up to 8 MB. Choose the main hero or either inline storefront position. The complete image is shown without cropping.")}
-=======
-        {a("Use 1800 × 600 px (3:1 ratio), JPG, PNG or WebP, up to 8 MB. The complete image is shown in a fixed 3:1 banner; other ratios may leave empty margins.")}
->>>>>>> origin/main
       </p>
       {(message || error) && <p className={`mt-4 rounded-xl p-3 text-sm font-semibold ${error ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>{error || message}</p>}
 
@@ -220,14 +174,11 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
               <input required value={href} onChange={(event) => setHref(event.target.value)} placeholder="/catalog/laptops" className="mt-2 w-full rounded-xl border px-4 py-3 font-normal" />
             </label>
           </div>
-<<<<<<< HEAD
           <label className="block text-sm font-semibold">{a("Storefront placement")}
             <select value={placement} onChange={(event) => setPlacement(event.target.value as HomepageAdPlacement)} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal">
               {HOMEPAGE_AD_PLACEMENTS.map((value) => <option key={value} value={value}>{a(HOMEPAGE_AD_PLACEMENT_LABELS[value])}</option>)}
             </select>
           </label>
-=======
->>>>>>> origin/main
           <label className="block text-sm font-semibold">{a("Image description for accessibility")}
             <input required maxLength={240} value={altText} onChange={(event) => setAltText(event.target.value)} placeholder="Aphrodite laptop promotion" className="mt-2 w-full rounded-xl border px-4 py-3 font-normal" />
           </label>
@@ -244,7 +195,6 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
     </div>
 
     <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-zinc-100 sm:p-6">
-<<<<<<< HEAD
       <div className="flex items-end justify-between gap-3"><div><h2 className="text-xl font-bold">{a("Uploaded advertisements")}</h2><p className="mt-1 text-sm text-zinc-500">{a("Active banners appear only in their selected storefront placement.")}</p></div><button type="button" onClick={() => void load()} className="rounded-full border px-4 py-2 text-sm font-semibold">{a("Refresh")}</button></div>
       {ads.length === 0 ? <p className="mt-5 rounded-xl bg-zinc-50 p-5 text-sm text-zinc-500">{a("No custom advertisements yet.")}</p> : <div className="mt-5 space-y-5">
         {ads.map((ad) => {
@@ -264,22 +214,6 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
                 <button disabled={busy === ad.id} onClick={() => void patch(ad.id, { is_active: !ad.is_active }, ad.is_active ? "Advertisement hidden." : "Advertisement published.")} className={`rounded-full px-4 py-2 text-sm font-semibold ${ad.is_active ? "border" : "bg-green-600 text-white"}`}>{ad.is_active ? a("Hide") : a("Publish")}</button>
                 <button disabled={placementIndex === 0 || busy === ad.id} onClick={() => void move(ad, -1)} className="rounded-full border px-4 py-2 text-sm disabled:opacity-40">↑ {a("Earlier")}</button>
                 <button disabled={placementIndex === placementAds.length - 1 || busy === ad.id} onClick={() => void move(ad, 1)} className="rounded-full border px-4 py-2 text-sm disabled:opacity-40">↓ {a("Later")}</button>
-=======
-      <div className="flex items-end justify-between gap-3"><div><h2 className="text-xl font-bold">{a("Uploaded advertisements")}</h2><p className="mt-1 text-sm text-zinc-500">{a("Active banners appear before the built-in store slides.")}</p></div><button type="button" onClick={() => void load()} className="rounded-full border px-4 py-2 text-sm font-semibold">{a("Refresh")}</button></div>
-      {ads.length === 0 ? <p className="mt-5 rounded-xl bg-zinc-50 p-5 text-sm text-zinc-500">{a("No custom advertisements yet.")}</p> : <div className="mt-5 space-y-5">
-        {ads.map((ad, index) => {
-          const draft = drafts[ad.id] ?? { title: ad.title, alt_text: ad.alt_text, href: ad.href };
-          return <article key={ad.id} className="grid gap-4 rounded-2xl border p-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-            <div><div className="aspect-[3/1] overflow-hidden rounded-xl bg-zinc-950"><img src={ad.image_url} alt={ad.alt_text} className="h-full w-full object-contain" /></div><p className="mt-2 text-xs text-zinc-500">{ad.width && ad.height ? `${ad.width} × ${ad.height}px` : "Dimensions unavailable"}</p></div>
-            <div className="space-y-3">
-              <div className="grid gap-3 sm:grid-cols-2"><input aria-label="Advertisement title" value={draft.title} onChange={(event) => setDrafts((all) => ({ ...all, [ad.id]: { ...draft, title: event.target.value } }))} className="rounded-xl border px-3 py-2 text-sm" /><input aria-label="Advertisement link" value={draft.href} onChange={(event) => setDrafts((all) => ({ ...all, [ad.id]: { ...draft, href: event.target.value } }))} className="rounded-xl border px-3 py-2 text-sm" /></div>
-              <input aria-label="Advertisement image description" value={draft.alt_text} onChange={(event) => setDrafts((all) => ({ ...all, [ad.id]: { ...draft, alt_text: event.target.value } }))} className="w-full rounded-xl border px-3 py-2 text-sm" />
-              <div className="flex flex-wrap gap-2">
-                <button disabled={busy === ad.id} onClick={() => void patch(ad.id, draft, "Advertisement updated.")} className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{a("Save")}</button>
-                <button disabled={busy === ad.id} onClick={() => void patch(ad.id, { is_active: !ad.is_active }, ad.is_active ? "Advertisement hidden." : "Advertisement published.")} className={`rounded-full px-4 py-2 text-sm font-semibold ${ad.is_active ? "border" : "bg-green-600 text-white"}`}>{ad.is_active ? a("Hide") : a("Publish")}</button>
-                <button disabled={index === 0 || busy === ad.id} onClick={() => void move(index, -1)} className="rounded-full border px-4 py-2 text-sm disabled:opacity-40">↑ {a("Earlier")}</button>
-                <button disabled={index === ads.length - 1 || busy === ad.id} onClick={() => void move(index, 1)} className="rounded-full border px-4 py-2 text-sm disabled:opacity-40">↓ {a("Later")}</button>
->>>>>>> origin/main
                 {allowDelete && <button disabled={busy === ad.id} onClick={() => void remove(ad)} className="rounded-full bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-50">{a("Delete")}</button>}
               </div>
             </div>

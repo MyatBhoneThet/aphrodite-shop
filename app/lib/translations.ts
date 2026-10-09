@@ -1,10 +1,5 @@
 export type Language = "en" | "my";
 
-<<<<<<< HEAD
-=======
-export const LANGUAGES: Language[] = ["en", "my"];
-
->>>>>>> origin/main
 /**
  * Every string that has a Burmese version lives here, one entry per key with
  * both languages side by side, so a missing translation is obvious in this
