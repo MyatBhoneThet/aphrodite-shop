@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { registerSignIn } from "@/app/lib/admin-signin";
 import { exchangeOAuthCode, getProfile } from "@/app/lib/supabase";
 import { checkRateLimit } from "@/app/lib/rate-limit";
 import { setSessionCookies } from "@/app/lib/session-cookies";
@@ -88,6 +89,9 @@ export async function GET(request: NextRequest) {
     setSessionCookies(response, session.access_token, {
       isBackoffice,
     });
+    // Announces a back-office sign-in by email (after a two-step code, if the
+    // account has one). Social sign-in gets no way around it.
+    await registerSignIn(request, { accessToken: session.access_token, profile, method: `${name} account` });
     // The verifier is single-use; leaving it behind would only widen the
     // window in which a replayed code could be redeemed.
     response.cookies.delete(OAUTH_VERIFIER_COOKIE);

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { authHeaders } from "../lib/client-auth";
+import PhoneNotificationsToggle from "./PhoneNotificationsToggle";
 
 const ratingWords = ["", "Poor", "Fair", "Good", "Very good", "Excellent"];
 
@@ -65,6 +66,10 @@ export default function OrderPlacedView({
             <Link href="/orders" className="rounded-full border border-zinc-300 px-6 py-3 font-semibold transition hover:border-red-500 hover:text-red-600">View my orders</Link>
             <Link href="/" className="rounded-full border border-zinc-300 px-6 py-3 font-semibold transition hover:border-red-500 hover:text-red-600">Continue shopping</Link>
           </div>
+        </section>
+
+        <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+          <PhoneNotificationsToggle compact />
         </section>
 
         <section className="rounded-3xl border border-zinc-200 bg-white p-7 shadow-sm">

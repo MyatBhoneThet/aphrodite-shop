@@ -10,7 +10,7 @@ const nextConfig: NextConfig = {
   // nodemailer (order emails over Gmail SMTP) uses Node's net/tls modules and
   // is not on Next.js's built-in opt-out list, so it is loaded with native
   // require instead of being bundled.
-  serverExternalPackages: ["nodemailer"],
+  serverExternalPackages: ["nodemailer", "web-push"],
   turbopack: {
     root: process.cwd(),
   },

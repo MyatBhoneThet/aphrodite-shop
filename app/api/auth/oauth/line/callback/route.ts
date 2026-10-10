@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { registerSignIn } from "@/app/lib/admin-signin";
 import { checkRateLimit } from "@/app/lib/rate-limit";
 import { setSessionCookies } from "@/app/lib/session-cookies";
 import {
@@ -121,6 +122,7 @@ export async function GET(request: NextRequest) {
     );
 
     setSessionCookies(response, session.access_token, { isBackoffice });
+    await registerSignIn(request, { accessToken: session.access_token, profile, method: "LINE account" });
     response.cookies.delete(LINE_OAUTH_COOKIE);
 
     return response;

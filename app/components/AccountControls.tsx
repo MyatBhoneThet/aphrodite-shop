@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useRef } from "react";
 import type { UserRole } from "../data/products";
 import { useLanguage } from "../lib/language";
+import { useNotifications } from "../lib/useNotifications";
+import NotificationBell from "./NotificationBell";
 
 function Icon({ kind }: { kind: "heart" | "cart" | "user" | "logout" }) {
   return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 shrink-0">
@@ -21,6 +23,8 @@ export default function AccountControls({ user, wishlistCount, cartCount, onLogo
   onLogout: () => void;
 }) {
   const { t, language } = useLanguage();
+  const customer = !["admin", "staff"].includes(user.role);
+  const notifications = useNotifications(customer);
   const menu = useRef<HTMLDetailsElement>(null);
   const trigger = useRef<HTMLElement>(null);
 
@@ -44,11 +48,13 @@ export default function AccountControls({ user, wishlistCount, cartCount, onLogo
 
   const links = [
     { href: "/orders", label: t("nav.orders") },
+    ...(customer ? [{ href: "/notifications", label: `${language === "my" ? "အသိပေးချက်များ" : "Notifications"}${notifications.unread > 0 ? ` (${notifications.unread})` : ""}` }] : []),
     ...(!["admin", "staff"].includes(user.role) ? [{ href: "/addresses", label: language === "my" ? "ကျွန်ုပ်၏လိပ်စာများ" : "My addresses" }] : []),
     { href: "/location", label: t("nav.locationSharing") },
     { href: "/wishlist", label: t("nav.wishlist") },
     { href: "/cart", label: t("nav.cart") },
     { href: "/pc-builder", label: language === "my" ? "PC တည်ဆောက်ရန်" : "PC Build Planner" },
+    ...(user.role === "wholesale" ? [{ href: "/company", label: language === "my" ? "ကုမ္ပဏီအချက်အလက်" : "Company details" }] : []),
     ...(!["admin", "staff"].includes(user.role) ? [{ href: "/settings", label: t("nav.settings") }] : []),
     { href: "/returns", label: t("nav.returnPolicy") },
     ...(["admin", "staff"].includes(user.role) ? [{ href: "/admin?panel=dashboard", label: "Staff dashboard" }] : []),
@@ -56,6 +62,7 @@ export default function AccountControls({ user, wishlistCount, cartCount, onLogo
 
   return <div className="flex shrink-0 items-center gap-1 min-[460px]:gap-2">
     <div className="hidden items-center gap-0.5 rounded-xl border border-zinc-200/80 bg-zinc-50 p-0.5 min-[380px]:flex min-[460px]:gap-1 min-[460px]:rounded-2xl min-[460px]:p-1">
+      {customer && <NotificationBell items={notifications.items} unread={notifications.unread} markRead={notifications.markRead} />}
       {([{ href: "/wishlist", label: t("nav.wishlist"), count: wishlistCount, kind: "heart" }, { href: "/cart", label: t("nav.cart"), count: cartCount, kind: "cart" }] as const).map(item => (
         <Link key={item.kind} href={item.href} aria-label={`${item.label}: ${item.count}`} title={item.label}
           className="group relative flex h-11 w-11 items-center justify-center rounded-lg text-zinc-600 transition hover:bg-white hover:text-red-600 hover:shadow-sm motion-reduce:transition-none min-[460px]:w-12 min-[460px]:rounded-xl">

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { poNumberSchema } from "./company";
 import { isApproximatelyInYangon, isMyanmarCountry, normalizeMyanmarRegion, normalizeYangonTownship } from "./delivery-country";
 import { isPreviousLocalCalendarDate } from "./delivery-date";
 
@@ -124,6 +125,8 @@ export const orderInputSchema = z
       .optional()
       .nullable(),
     notes: z.string().trim().max(1000).optional().nullable(),
+    // Wholesale buyers only (ignored for everyone else): their own PO reference.
+    po_number: poNumberSchema,
     selected_cart_item_ids: z.array(z.string().uuid()).min(1).max(100).optional(),
     // The total the client last displayed. Used only to detect price drift
     // (409 response); the authoritative total is always recomputed server-side.
@@ -273,6 +276,12 @@ const returnReasonCode = z.enum([
 export const customerOrderActionSchema = z.union([
   z.object({
     action: z.literal("request_cancellation"),
+    reason: orderRequestReason,
+  }),
+  // Cancels straight away when the shop has not checked the order yet,
+  // otherwise becomes a normal request (see cancelOwnOrder).
+  z.object({
+    action: z.literal("cancel_order"),
     reason: orderRequestReason,
   }),
   z.object({
@@ -697,6 +706,16 @@ export const adminDeliveryProgressSchema = z
   })
   .strict();
 
+/** Courier and tracking only: what a packer saves before handing the parcel over. */
+export const adminCourierUpdateSchema = z
+  .object({
+    action: z.literal("update_courier"),
+    courier_name: z.string().trim().min(1, "Enter the courier name.").max(120),
+    tracking_number: z.string().trim().min(1, "Enter the tracking or reference number.").max(120),
+    estimated_delivery_at: z.string().datetime({ offset: true }).optional().nullable(),
+  })
+  .strict();
+
 export const orderMutationSchema = z.union([
   orderStatusSchema,
   customerOrderActionSchema,
@@ -706,6 +725,7 @@ export const orderMutationSchema = z.union([
   adminDeliveryUpdateSchema,
   adminReceiptResendSchema,
   adminDeliveryProgressSchema,
+  adminCourierUpdateSchema,
   adminDeliveryAttemptSchema,
   adminPaymentVerificationSchema,
   cancellationRefundDetailsSchema,

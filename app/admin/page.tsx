@@ -1,5 +1,14 @@
 "use client";
 
+import CourierForm from "./CourierForm";
+import FeedbackPanel from "./FeedbackPanel";
+import MfaGate from "./MfaGate";
+import ReauthDialog from "./ReauthDialog";
+import SecurityPanel from "./SecurityPanel";
+import { fetchWithReauth } from "./reauth";
+import ActivityPanel from "./ActivityPanel";
+import CustomersPanel from "./CustomersPanel";
+import { useNewOrderAlerts } from "./useNewOrderAlerts";
 import OrderFilterBar from "./OrderFilterBar";
 import { emptyOrderFilters, filterOrders, ORDER_PAGE_SIZE, paginate, type OrderFilters } from "@/app/lib/admin-order-filter";
 import { useAdminText } from "../lib/useAdminText";
@@ -124,6 +133,7 @@ type AdminOrderItem = {
 
 type AdminOrder = {
   id: string;
+  po_number?: string | null;
   user_id: string;
   status: OrderStatus;
   total_amount: number;
@@ -396,13 +406,15 @@ export default function AdminPage() {
       : "forbidden";
   const isAdmin = currentUser?.role === "admin";
   const isStaff = currentUser?.role === "staff";
+  const newOrders = useNewOrderAlerts(authStatus === "ready");
 
   const [activePanel, setActivePanel] = useState<
-    "dashboard" | "products" | "orders" | "queue" | "locations" | "support" | "ads" | "wholesale" | "pricing" | "sync" | "staff"
+    "dashboard" | "products" | "orders" | "queue" | "locations" | "support" | "ads" | "wholesale" | "pricing" | "sync" | "staff" | "feedback" | "customers" | "activity" | "security"
   >("dashboard");
 
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [courierOrder, setCourierOrder] = useState<AdminOrder | null>(null);
   const [orderFilters, setOrderFilters] = useState<OrderFilters>(emptyOrderFilters);
   const [orderPage, setOrderPage] = useState(1);
   const [deliveryOrder, setDeliveryOrder] = useState<AdminOrder | null>(null);
@@ -445,10 +457,14 @@ export default function AdminPage() {
         panel === "wholesale" ||
         panel === "pricing" ||
         panel === "sync" ||
-        panel === "staff"
+        panel === "staff" ||
+        panel === "feedback" ||
+        panel === "customers" ||
+        panel === "activity" ||
+        panel === "security"
       ) {
         const requested = panel === "cases" ? "queue" : panel;
-        const adminOnly = requested === "locations" || requested === "wholesale" || requested === "pricing" || requested === "staff";
+        const adminOnly = requested === "locations" || requested === "wholesale" || requested === "pricing" || requested === "staff" || requested === "feedback" || requested === "customers" || requested === "activity";
         setActivePanel(!isAdmin && adminOnly ? "dashboard" : requested);
       }
       if (isAdmin && panel === "products" && params.get("action") === "add") {
@@ -655,7 +671,7 @@ export default function AdminPage() {
     setError("");
 
     try {
-      const response = await fetch(`/api/products/${product.id}`, {
+      const response = await fetchWithReauth(`/api/products/${product.id}`, {
         method: "DELETE",
         headers: authHeaders(),
       });
@@ -1088,6 +1104,11 @@ export default function AdminPage() {
     }
   }
 
+  // Signed in, but a two-step code is still owed (or must be set up): show only that.
+  if (currentUser?.mfa?.pending) {
+    return <MfaGate pending={currentUser.mfa.pending} onLogout={handleLogout} />;
+  }
+
   if (authStatus === "checking") {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#f4f6f9] text-zinc-700">
@@ -1121,6 +1142,7 @@ export default function AdminPage() {
 
   return (
     <main className="min-h-screen bg-[#f4f6f9] text-zinc-900">
+      <ReauthDialog />
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-zinc-800 bg-[#111115] text-white lg:flex">
         <div className="flex h-16 shrink-0 items-center bg-white px-4">
           <BrandLogo />
@@ -1155,7 +1177,8 @@ export default function AdminPage() {
             active={activePanel === "orders"}
             icon="🧾"
             label={t("admin.purchases")}
-            onClick={() => setActivePanel("orders")}
+            badge={newOrders.count}
+            onClick={() => { setActivePanel("orders"); newOrders.markSeen(); }}
           />
           <SidebarButton
             active={activePanel === "queue"}
@@ -1202,6 +1225,30 @@ export default function AdminPage() {
             onClick={() => setActivePanel("sync")}
           />
           {isAdmin && <SidebarButton
+            active={activePanel === "customers"}
+            icon="🧑"
+            label={a("Customers")}
+            onClick={() => setActivePanel("customers")}
+          />}
+          {isAdmin && <SidebarButton
+            active={activePanel === "feedback"}
+            icon="⭐"
+            label={a("Customer feedback")}
+            onClick={() => setActivePanel("feedback")}
+          />}
+          {isAdmin && <SidebarButton
+            active={activePanel === "activity"}
+            icon="📜"
+            label={a("Activity log")}
+            onClick={() => setActivePanel("activity")}
+          />}
+          <SidebarButton
+            active={activePanel === "security"}
+            icon="🔐"
+            label={a("Security")}
+            onClick={() => setActivePanel("security")}
+          />
+          {isAdmin && <SidebarButton
             active={activePanel === "staff"}
             icon="👤"
             label={a("Staff access")}
@@ -1231,6 +1278,16 @@ export default function AdminPage() {
               <LanguageSwitcher />
 
               <button
+                type="button"
+                onClick={newOrders.toggleSound}
+                aria-pressed={newOrders.soundOn}
+                title={newOrders.soundOn ? a("New-order sound is on") : a("Play a sound for new orders")}
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${newOrders.soundOn ? "border-emerald-300 bg-emerald-50 text-emerald-800" : ""}`}
+              >
+                {newOrders.soundOn ? "🔔 " : "🔕 "}{a("Order alert sound")}
+              </button>
+
+              <button
                 onClick={loadDashboardData}
                 disabled={isLoadingData}
                 className="rounded-full border px-3 py-1.5 text-xs font-semibold disabled:bg-zinc-100"
@@ -1248,6 +1305,21 @@ export default function AdminPage() {
           </div>
         </header>
 
+        {newOrders.count > 0 && (
+          <div role="status" className="flex flex-wrap items-center justify-between gap-3 border-b border-red-200 bg-red-50 px-4 py-3 text-sm">
+            <p className="font-bold text-red-800">
+              🔔 {newOrders.count}{newOrders.capped ? "+" : ""} {newOrders.count === 1 ? a("new order") : a("new orders")}
+              <span className="ml-2 font-normal text-red-700">
+                {newOrders.preview.map((order) => `${order.shipping_name} (${formatCurrency(order.total_amount)})`).join(" · ")}
+              </span>
+            </p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => { void loadDashboardData(); setActivePanel("orders"); newOrders.markSeen(); }} className="rounded-full bg-red-600 px-4 py-1.5 font-bold text-white">{a("View orders")}</button>
+              <button type="button" onClick={newOrders.markSeen} className="rounded-full border border-red-300 bg-white px-4 py-1.5 font-semibold text-red-800">{a("Dismiss")}</button>
+            </div>
+          </div>
+        )}
+
         <nav aria-label={a("Admin panels")} className="space-y-3 border-b bg-white p-4 lg:hidden">
           <label className="block text-sm font-semibold">
             {t("admin.manage")}
@@ -1260,6 +1332,10 @@ export default function AdminPage() {
                 ...(isAdmin ? [["wholesale", "admin.wholesale"], ["pricing", "admin.priceLists"]] as const : []),
                 ["sync", "admin.sheetSync"],
               ] as const).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
+              {isAdmin && <option value="customers">{a("Customers")}</option>}
+              {isAdmin && <option value="feedback">{a("Customer feedback")}</option>}
+              {isAdmin && <option value="activity">{a("Activity log")}</option>}
+              <option value="security">{a("Security")}</option>
               {isAdmin && <option value="staff">{a("Staff access")}</option>}
             </select>
           </label>
@@ -1310,6 +1386,33 @@ export default function AdminPage() {
                      {a("&times;")} </button>
                 </div>
 
+                {isStaff ? (
+                <form onSubmit={handleSaveProduct} className="space-y-4 p-5">
+                  <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{a("Staff can change the stock quantity only. Ask an administrator to change prices or product details.")}</p>
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-zinc-500">{a("Product")}</p>
+                    <p className="break-words font-semibold">{productForm.name}</p>
+                    <p className="text-sm text-zinc-500">{productForm.brand}</p>
+                  </div>
+                  <div>
+                    <label htmlFor="staff-stock-quantity" className="mb-1 block text-sm font-semibold">{a("Stock Quantity")}</label>
+                    <input
+                      id="staff-stock-quantity"
+                      type="number"
+                      min={0}
+                      value={productForm.stockQuantity}
+                      onChange={(event) => setProductForm({ ...productForm, stockQuantity: event.target.value })}
+                      className="w-full rounded-xl border px-4 py-3 outline-none focus:border-red-500"
+                    />
+                  </div>
+                  <div className="flex gap-3">
+                    <button type="submit" disabled={isSavingProduct} className="flex-1 rounded-full bg-red-600 px-5 py-3 font-semibold text-white disabled:bg-zinc-400">
+                      {isSavingProduct ? a("Saving...") : a("Save stock")}
+                    </button>
+                    <button type="button" onClick={() => { setIsProductFormOpen(false); setProductForm(emptyProductForm()); }} className="rounded-full border px-5 py-3 font-semibold">{a("Cancel")}</button>
+                  </div>
+                </form>
+              ) : (
                 <form onSubmit={handleSaveProduct} className="space-y-4 p-5">
                   <div>
                     <label className="mb-1 block text-sm font-semibold">
@@ -1531,6 +1634,7 @@ export default function AdminPage() {
                        {a("Cancel")} </button>
                   </div>
                 </form>
+              )}
               </div>
               )}
 
@@ -1583,6 +1687,11 @@ export default function AdminPage() {
                    {a("Confirm COD purchases, manage delivery, and review cancellation or return requests.")} </p>
               </div>
 
+              {courierOrder && <CourierForm key={courierOrder.id} order={courierOrder}
+                onClose={() => setCourierOrder(null)} onSaved={async () => {
+                  await loadDashboardData(); setCourierOrder(null);
+                  setMessage("Courier and tracking saved.");
+                }} />}
               {isAdmin && deliveryOrder && <CodDeliveryForm key={deliveryOrder.id} order={deliveryOrder}
                 onClose={() => setDeliveryOrder(null)} onSaved={async () => {
                   await loadDashboardData(); setDeliveryOrder(null);
@@ -1606,6 +1715,7 @@ export default function AdminPage() {
                 onResolveRequest={openOrderRequestResolution}
                 onWorkflow={openOrderWorkflow}
                 onDelivery={handleDeliveryUpdate}
+                onCourier={(order) => { setError(""); setMessage(""); setCourierOrder(order); }}
                 onResendReceipt={handleResendReceipt}
                 resendingOrderId={resendingOrderId}
               />
@@ -1625,6 +1735,10 @@ export default function AdminPage() {
           {isAdmin && activePanel === "pricing" && <PricingPanel />}
 
           {isAdmin && activePanel === "staff" && <StaffPanel />}
+          {isAdmin && activePanel === "feedback" && <FeedbackPanel />}
+          {isAdmin && activePanel === "customers" && <CustomersPanel />}
+          {isAdmin && activePanel === "activity" && <ActivityPanel />}
+          {activePanel === "security" && <SecurityPanel isAdmin={isAdmin} />}
 
           {activePanel === "sync" && (
             <section className="mt-6 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-100">
@@ -1759,6 +1873,12 @@ function SidebarIcon({ icon }: { icon: string }) {
     "🏢": "M4 21V7h9v14M13 3h7v18M2 21h20M7 11h3m-3 4h3m6-8h1m-1 4h1m-1 4h1",
     "🏷️": "m3 3 9 0 9 9-9 9-9-9V3Zm4 4h.01",
     "🔄": "M20 8a8 8 0 0 0-14-3L3 8m0-5v5h5M4 16a8 8 0 0 0 14 3l3-3m0 5v-5h-5",
+    "🖼️": "M3 4h18v16H3zM3 16l5-5 5 5 3-3 5 5M8.5 9h.01",
+    "🧑": "M17 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M10 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM21 20v-2a4 4 0 0 0-3-3.9M15 2.1a4 4 0 0 1 0 7.8",
+    "⭐": "m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9L12 3Z",
+    "📜": "M12 7v5l3 2M3 12a9 9 0 1 0 3-6.7M3 4v5h5",
+    "🔐": "M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3ZM9 12l2 2 4-4",
+    "👤": "M20 21a8 8 0 0 0-16 0M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
     store: "M3 10h18l-2-7H5l-2 7Zm2 0v11h14V10M9 21v-7h6v7",
     logout: "M9 4H4v16h5M10 12h11m-4-4 4 4-4 4",
   };
@@ -1769,11 +1889,13 @@ function SidebarButton({
   active,
   icon,
   label,
+  badge = 0,
   onClick,
 }: {
   active: boolean;
   icon: string;
   label: string;
+  badge?: number;
   onClick: () => void;
 }) {
   return (
@@ -1789,7 +1911,8 @@ function SidebarButton({
     >
       <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition ${active ? "bg-red-500 text-white shadow-lg shadow-red-950/30" : "bg-white/[0.03] text-zinc-500 group-hover:text-zinc-200"}`}><SidebarIcon icon={icon} /></span>
       <span className="text-xs font-medium">{label}</span>
-      {active && <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" />}
+      {badge > 0 && <span className="ml-auto min-w-5 rounded-full bg-red-500 px-1.5 py-0.5 text-center text-[10px] font-black leading-none text-white" aria-label={`${badge} new`}>{badge > 99 ? "99+" : badge}</span>}
+      {active && badge === 0 && <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" />}
     </button>
   );
 }
@@ -1901,6 +2024,7 @@ function OrdersTable({
   onResolveRequest,
   onWorkflow,
   onDelivery,
+  onCourier,
   onResendReceipt,
   resendingOrderId,
 }: {
@@ -1915,6 +2039,7 @@ function OrdersTable({
   ) => void;
   onWorkflow: (order: AdminOrder, action: OrderWorkflowAction) => void;
   onDelivery: (order: AdminOrder) => void;
+  onCourier: (order: AdminOrder) => void;
   onResendReceipt: (order: AdminOrder) => void;
   resendingOrderId: string | null;
 }) {
@@ -1953,9 +2078,11 @@ function OrdersTable({
             <tr key={order.id} className="align-top max-lg:block max-lg:overflow-hidden max-lg:rounded-2xl max-lg:border max-lg:border-zinc-200 max-lg:bg-white max-lg:shadow-sm">
               <td data-label={t("adminTable.order")} className="p-4 max-lg:block max-lg:border-t max-lg:border-zinc-100 max-lg:px-4 max-lg:py-3 max-lg:first:border-t-0 max-lg:before:mb-1 max-lg:before:block max-lg:before:text-[10px] max-lg:before:font-bold max-lg:before:uppercase max-lg:before:tracking-wide max-lg:before:text-zinc-400 max-lg:before:content-[attr(data-label)]">
                 <p className="font-bold">#{order.id.slice(0, 8)}</p>
+                {order.po_number && <p className="text-xs font-semibold text-blue-700">PO {order.po_number}</p>}
                 <p className="text-xs text-zinc-500">
                   {formatDateTime(order.created_at)}
                 </p>
+                <a href={`/admin/slip/${order.id}`} target="_blank" rel="noreferrer" className="mt-2 inline-block rounded-full border px-3 py-1.5 text-xs font-bold hover:border-red-500 hover:text-red-600">🖨 {a("Packing slip")}</a>
               </td>
 
               <td data-label={t("adminTable.customer")} className="p-4 max-lg:block max-lg:border-t max-lg:border-zinc-100 max-lg:px-4 max-lg:py-3 max-lg:first:border-t-0 max-lg:before:mb-1 max-lg:before:block max-lg:before:text-[10px] max-lg:before:font-bold max-lg:before:uppercase max-lg:before:tracking-wide max-lg:before:text-zinc-400 max-lg:before:content-[attr(data-label)]">
@@ -1987,7 +2114,7 @@ function OrdersTable({
 
               <td data-label={t("adminTable.status")} className="p-4 max-lg:block max-lg:border-t max-lg:border-zinc-100 max-lg:px-4 max-lg:py-3 max-lg:first:border-t-0 max-lg:before:mb-1 max-lg:before:block max-lg:before:text-[10px] max-lg:before:font-bold max-lg:before:uppercase max-lg:before:tracking-wide max-lg:before:text-zinc-400 max-lg:before:content-[attr(data-label)]">
                 <p className="mb-2 text-xs font-bold text-blue-700">{a(orderTracking(order).label)}</p>
-                {!staffMode && <select
+                <select
                   value={order.status === "cancelled" || order.status === "returned"
                     ? order.status
                     : trackingSteps[Math.max(0, orderTracking(order).step)]}
@@ -2006,16 +2133,34 @@ function OrdersTable({
                       key={stage}
                       value={stage}
                       disabled={
-                        stage !== "cancelled" &&
-                        stage !== "returned" &&
-                        trackingSteps.indexOf(stage) !== Math.max(0, orderTracking(order).step) &&
-                        trackingSteps.indexOf(stage) !== Math.max(0, orderTracking(order).step) + 1
+                        (staffMode && stage === "verified") ||
+                        (stage !== "cancelled" &&
+                          stage !== "returned" &&
+                          trackingSteps.indexOf(stage) !== Math.max(0, orderTracking(order).step) &&
+                          trackingSteps.indexOf(stage) !== Math.max(0, orderTracking(order).step) + 1)
                       }
                     >
                       {stage === "cancelled" || stage === "returned" ? a(stage) : t(`tracking.${stage}`)}
                     </option>
                   ))}
-                </select>}
+                </select>
+                {staffMode && orderTracking(order).step < 1 && (
+                  <p className="mt-1 max-w-[12rem] text-[10px] font-semibold text-amber-700">{a("Waiting for an administrator to verify this order.")}</p>
+                )}
+                {staffMode && (order.status === "confirmed" || order.status === "shipped") && (
+                  <>
+                    {(order.courier_name || order.delivery_tracking_number) && (
+                      <p className="mt-2 text-xs font-semibold text-zinc-700">{[order.courier_name, order.delivery_tracking_number].filter(Boolean).join(" · ")}</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onCourier(order)}
+                      className="mt-2 block rounded-full bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                    >
+                      🚚 {order.courier_name ? a("Edit courier & tracking") : a("Add courier & tracking")}
+                    </button>
+                  </>
+                )}
                 {!staffMode && (order.status === "pending" || order.status === "confirmed") && (
                   <button
                     type="button"
@@ -2029,7 +2174,7 @@ function OrdersTable({
                 {!staffMode && (order.status === "pending" || order.status === "confirmed") && order.payment_method !== "cash_on_delivery" && !["verified", "rejected"].includes(order.payment_verification_status ?? "pending") && (
                   <p className="mt-1 max-w-[11rem] text-[10px] font-semibold text-amber-700">{a("Finish checking payment before cancelling")}</p>
                 )}
-                {!staffMode && order.status === "shipped" && (
+                {order.status === "shipped" && (
                   <button
                     type="button"
                     onClick={() => onWorkflow(order, "delivery_attempt")}
@@ -2037,7 +2182,7 @@ function OrdersTable({
                   >
                      {a("Delivery attempt failed")} </button>
                 )}
-                {!staffMode && failedDeliveryAttempts(order) > 0 && (
+                {failedDeliveryAttempts(order) > 0 && (
                   <p className="mt-2 text-[10px] font-bold uppercase text-amber-700">
                     {failedDeliveryAttempts(order)}  {a("of")} {MAX_DELIVERY_ATTEMPTS}  {a("attempts failed")} {failedDeliveryAttempts(order) >= MAX_DELIVERY_ATTEMPTS && a(" — consider cancelling")}
                   </p>

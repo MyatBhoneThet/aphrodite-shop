@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import BrandLogo from "../components/BrandLogo";
+import PhoneNotificationsToggle from "../components/PhoneNotificationsToggle";
 import {
   LiquidBackdrop,
   authButtonClass,
@@ -437,10 +438,12 @@ export default function SettingsPage() {
               </select>
             </label>
 
+            <div className="mt-5"><PhoneNotificationsToggle /></div>
+
             <div className="mt-5 space-y-3">
               <SettingsCheckbox
                 label={t("settings.orderUpdates")}
-                description="Receive important purchase and delivery updates."
+                description="Receive important purchase and delivery updates, by email and on your phone."
                 checked={settings.order_updates_enabled}
                 onChange={(checked) =>
                   updateField("order_updates_enabled", checked)

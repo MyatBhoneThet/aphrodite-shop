@@ -2,13 +2,14 @@
 
 import Image from "next/image";
 import OrderTracking from "../components/OrderTracking";
-import OrderHelpButton from "../components/OrderHelpButton";
+import OrderHelpCenter from "../components/OrderHelpCenter";
 import ReturnWizard from "../components/ReturnWizard";
 import RefundTracker from "../components/RefundTracker";
 import NextStep from "../components/NextStep";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import OrderItemsList, { type OrderLine } from "../components/OrderItemsList";
+import { invoiceKind } from "../lib/company";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
 import { formatCurrency, formatDateTime } from "../lib/format";
@@ -60,6 +61,7 @@ type ItemReturn = {
 
 type Order = {
   id: string;
+  po_number?: string | null;
   status: OrderStatus;
   total_amount: number;
   shipping_address: string;
@@ -144,7 +146,6 @@ export default function OrdersView() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [itemReturns, setItemReturns] = useState<ItemReturn[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [cancellationReasons, setCancellationReasons] = useState<Record<string, string>>({});
   const [processingOrderId, setProcessingOrderId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -254,22 +255,19 @@ export default function OrdersView() {
     return () => { active = false; controller.abort(); window.clearInterval(interval); window.removeEventListener("focus", refresh); };
   }, [userStatus, user, refreshReturns]);
 
-  async function submitRequest(order: Order, body: Record<string, unknown>) {
-    setError(""); setMessage(""); setProcessingOrderId(order.id);
-    try {
-      const response = await fetch(`/api/orders/${order.id}`, {
-        method: "PATCH",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = (await response.json().catch(() => null)) as { order?: Order; error?: string } | null;
-      if (!response.ok || !data?.order) throw new Error(data?.error ?? "Unable to submit your request.");
-      setOrders((current) => current.map((item) => item.id === order.id ? data.order! : item));
-      setCancellationReasons((current) => ({ ...current, [order.id]: "" }));
-      setMessage("Cancellation request sent for administrator review.");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to submit your request.");
-    } finally { setProcessingOrderId(null); }
+  /** "Cancel my order": cancelled at once when the shop has not checked it yet, otherwise sent as a request. */
+  async function cancelFromHelp(order: Order, reason: string) {
+    const response = await fetch(`/api/orders/${order.id}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "cancel_order", reason }),
+    });
+    const data = (await response.json().catch(() => null)) as { order?: Order; mode?: "cancelled" | "requested"; error?: string } | null;
+    if (!response.ok || !data?.order) throw new Error(data?.error ?? "We could not cancel this order. Please try again.");
+    setOrders((current) => current.map((item) => (item.id === order.id ? data.order! : item)));
+    return data.mode === "cancelled"
+      ? "Your order has been cancelled. You will not be charged."
+      : "Your cancellation request has been sent. The shop will answer it soon and arrange any refund.";
   }
 
   async function submitCancellationRefundDetails(order: Order) {
@@ -321,12 +319,6 @@ export default function OrdersView() {
     } finally {
       setProcessingOrderId(null);
     }
-  }
-
-  async function submitCancellation(order: Order) {
-    const reason = cancellationReasons[order.id]?.trim() ?? "";
-    if (reason.length < 3) { setError("Please enter a short reason for the cancellation."); return; }
-    await submitRequest(order, { action: "request_cancellation", reason });
   }
 
   /** Asks a second person to look at a declined return again. */
@@ -425,7 +417,6 @@ export default function OrdersView() {
           <section aria-label="Order details" className="min-w-0">
             {!orderId ? <div className="flex min-h-72 items-center justify-center p-8 text-center text-zinc-500">Select an order to see its details.</div> : !orders.some((order) => order.id === orderId) ? <p className="p-10 text-center text-zinc-500">We couldn&apos;t find that order.</p> : (
           <div>{orders.filter((order) => order.id === orderId).map((order) => {
-            const canCancel = (order.status === "pending" || order.status === "confirmed") && !["requested", "approved"].includes(order.cancellation_request_status);
             // Bank transfer and MMQR are checked against a slip, so the COD
             // callback wording below does not apply to them.
             const isPrepaid =
@@ -443,7 +434,7 @@ export default function OrdersView() {
               order.status === "shipped" &&
               deliveryEvents[deliveryEvents.length - 1]?.stage === "delivery_failed";
             return <article id={`order-${order.id}`} key={order.id} className="min-w-0 overflow-hidden bg-white">
-              <div className="flex flex-wrap items-start justify-between gap-4 border-b p-6"><div><p className="text-xl font-black">Order #{order.id.slice(0, 8).toUpperCase()}</p><p className="mt-1 text-sm text-zinc-500">{formatDateTime(order.created_at)}</p>{order.receipt_number && <p className="mt-1 text-xs font-semibold text-zinc-500">Receipt {order.receipt_number}</p>}</div><div className="flex flex-wrap items-center gap-2">{order.receipt_number && <Link href={`/orders/${order.id}/receipt`} className="rounded-full border px-4 py-2 text-xs font-bold hover:border-red-500 hover:text-red-600">View / print receipt</Link>}<span className={`rounded-full px-3 py-2 text-xs font-bold capitalize ${statusStyles[order.status]}`}>{order.status}</span></div></div>
+              <div className="flex flex-wrap items-start justify-between gap-4 border-b p-6"><div><p className="text-xl font-black">Order #{order.id.slice(0, 8).toUpperCase()}</p><p className="mt-1 text-sm text-zinc-500">{formatDateTime(order.created_at)}</p>{order.receipt_number && <p className="mt-1 text-xs font-semibold text-zinc-500">Receipt {order.receipt_number}</p>}{order.po_number && <p className="mt-1 text-xs font-semibold text-zinc-500">PO {order.po_number}</p>}</div><div className="flex flex-wrap items-center gap-2">{user?.role === "wholesale" && order.status !== "cancelled" && <Link href={`/orders/${order.id}/invoice`} className="rounded-full border px-4 py-2 text-xs font-bold hover:border-red-500 hover:text-red-600">{invoiceKind(order) === "invoice" ? "View / print invoice" : "Proforma invoice"}</Link>}{order.receipt_number && <Link href={`/orders/${order.id}/receipt`} className="rounded-full border px-4 py-2 text-xs font-bold hover:border-red-500 hover:text-red-600">View / print receipt</Link>}<span className={`rounded-full px-3 py-2 text-xs font-bold capitalize ${statusStyles[order.status]}`}>{order.status}</span></div></div>
               <div className="p-6">
                 {/* The one thing to do next, derived from this order rather
                     than stored — see lib/next-step.ts. */}
@@ -636,20 +627,12 @@ export default function OrdersView() {
                   </div>
                 )}
 
-                <div className="mt-6 flex flex-wrap gap-2 border-t pt-6">
-                  <OrderHelpButton orderId={order.id} />
-                  {canReturn && returnOrderId !== order.id && (
-                    <button
-                      type="button"
-                      onClick={() => setReturnOrderId(order.id)}
-                      className="rounded-full bg-red-600 px-5 py-2.5 text-xs font-bold text-white"
-                    >
-                      {t("return.start")}
-                    </button>
-                  )}
-                  <Link href="/returns" className="self-center text-xs font-semibold text-red-600 hover:underline">
-                    {t("nav.returnPolicy")}
-                  </Link>
+                <div className="mt-6 border-t pt-6">
+                  <OrderHelpCenter
+                    order={order}
+                    onStartReturn={() => setReturnOrderId(order.id)}
+                    onCancel={(reason) => cancelFromHelp(order, reason)}
+                  />
                 </div>
 
                 {canReturn && returnOrderId === order.id && (
@@ -671,7 +654,6 @@ export default function OrdersView() {
                   <p className="mt-4 rounded-xl bg-zinc-100 p-3 text-sm text-zinc-600">{t("return.deadlinePassed")}</p>
                 )}
 
-                {canCancel && <div className="mt-6 border-t pt-6"><label htmlFor={`cancel-${order.id}`} className="block text-sm font-semibold">Why are you cancelling this order?</label><textarea id={`cancel-${order.id}`} rows={2} maxLength={500} value={cancellationReasons[order.id] ?? ""} onChange={(event) => setCancellationReasons((current) => ({ ...current, [order.id]: event.target.value }))} className="mt-2 w-full rounded-xl border px-4 py-3 outline-none focus:border-red-500" /><button type="button" disabled={processingOrderId === order.id} onClick={() => submitCancellation(order)} className="mt-3 rounded-full border border-red-600 px-5 py-2 text-sm font-bold text-red-600 disabled:opacity-50">{processingOrderId === order.id ? "Sending request..." : "Request cancellation"}</button></div>}
               </div>
             </article>;
           })}</div>

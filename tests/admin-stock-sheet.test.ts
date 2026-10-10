@@ -163,8 +163,10 @@ describe("admin saves a new stock quantity", () => {
 
     await patchProduct(admin(), 216, { stockQuantity: 3 });
 
-    expect(selectProductByIdService).not.toHaveBeenCalled();
+    // Edits read the product first so the activity log can show before/after,
+    // but the Google Sheet itself must stay untouched.
     expect(setSheetProductQuantity).not.toHaveBeenCalled();
+    expect(setSheetStockBaselines).not.toHaveBeenCalled();
     expect(updateProduct).toHaveBeenCalled();
   });
 });

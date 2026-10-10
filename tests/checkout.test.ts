@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // backend.ts is exercised for real; only the Supabase data layer is mocked.
 vi.mock("../app/lib/supabase", async (importOriginal) => {
@@ -14,16 +14,23 @@ vi.mock("../app/lib/supabase", async (importOriginal) => {
     checkoutOrderRpc: vi.fn(),
     selectOrderById: vi.fn(),
     clearCart: vi.fn(),
+    selectShopSetting: vi.fn(),
+    updateOrderPoNumber: vi.fn(),
+    selectCompanyDetails: vi.fn(),
   };
 });
 
 import { createOrder, getCart, productDTO } from "../app/lib/backend";
+import { resetWholesaleRulesCache } from "../app/lib/wholesale-b2b";
 import { AppError } from "../app/lib/errors";
 import {
   checkoutOrderRpc,
   clearCart,
   selectCart,
   selectOrderById,
+  selectShopSetting,
+  selectCompanyDetails,
+  updateOrderPoNumber,
   selectPriceListById,
   selectProductsByIdsService,
   selectTiersForProducts,
@@ -127,6 +134,9 @@ const SHIPPING = {
   shipping_state: "Yangon",
 };
 
+// Wholesale buyers pay by bank transfer first (the shop's default rule).
+const WHOLESALE_SHIPPING = { ...SHIPPING, payment_method: "bank_transfer" as const, payment_account: "kbz" as const };
+
 beforeEach(() => {
   vi.mocked(selectCart).mockReset().mockResolvedValue([cartRow()]);
   vi.mocked(selectPriceListById).mockReset().mockResolvedValue({
@@ -182,7 +192,7 @@ describe("checkout pricing authority", () => {
   });
 
   it("approved wholesale account gets its assigned price list tier", async () => {
-    await createOrder(approvedWholesaleUser(), SHIPPING);
+    await createOrder(approvedWholesaleUser(), WHOLESALE_SHIPPING);
 
     expect(selectPriceListById).toHaveBeenCalledWith("list-1", "token-abc");
 
@@ -194,7 +204,7 @@ describe("checkout pricing authority", () => {
   it("approved wholesale below the tier minimum pays retail", async () => {
     vi.mocked(selectCart).mockResolvedValue([cartRow({ quantity: 9 })]);
 
-    await createOrder(approvedWholesaleUser(), SHIPPING);
+    await createOrder(approvedWholesaleUser(), WHOLESALE_SHIPPING);
 
     const line = vi.mocked(checkoutOrderRpc).mock.calls[0][0].lines[0];
     expect(line.unit_price).toBe(RETAIL);
@@ -209,14 +219,14 @@ describe("checkout pricing authority", () => {
       is_active: false,
     });
 
-    await createOrder(approvedWholesaleUser(), SHIPPING);
+    await createOrder(approvedWholesaleUser(), WHOLESALE_SHIPPING);
 
     expect(vi.mocked(checkoutOrderRpc).mock.calls[0][0].lines[0].unit_price).toBe(RETAIL);
   });
 
   it("ignores browser-supplied prices and totals", async () => {
     await createOrder(approvedWholesaleUser(), {
-      ...SHIPPING,
+      ...WHOLESALE_SHIPPING,
       // Injected junk a malicious client might send; none of it is read.
       unit_price: 1,
       total_amount: 1,
@@ -229,7 +239,7 @@ describe("checkout pricing authority", () => {
   });
 
   it("stores a full pricing snapshot on every line", async () => {
-    await createOrder(approvedWholesaleUser(), SHIPPING);
+    await createOrder(approvedWholesaleUser(), WHOLESALE_SHIPPING);
 
     expect(vi.mocked(checkoutOrderRpc).mock.calls[0][0].lines[0]).toEqual({
       product_id: 1,
@@ -327,7 +337,7 @@ describe("checkout safety", () => {
   it("returns 409 when the authoritative total differs from what the client saw", async () => {
     await expect(
       createOrder(approvedWholesaleUser(), {
-        ...SHIPPING,
+        ...WHOLESALE_SHIPPING,
         expected_total: 999,
       })
     ).rejects.toMatchObject({ status: 409 });
@@ -336,7 +346,7 @@ describe("checkout safety", () => {
 
   it("accepts a matching expected_total", async () => {
     await createOrder(approvedWholesaleUser(), {
-      ...SHIPPING,
+      ...WHOLESALE_SHIPPING,
       expected_total: 48_000 * 10,
     });
 
@@ -429,12 +439,101 @@ describe("promotional checkout", () => {
   });
   it("does not stack the sale and wholesale discounts", async () => {
     setPromotion();
-    await createOrder(approvedWholesaleUser(), SHIPPING);
+    await createOrder(approvedWholesaleUser(), WHOLESALE_SHIPPING);
     expect(vi.mocked(checkoutOrderRpc).mock.calls[0][0].lines[0]).toMatchObject({ unit_price: 40000, tier_id: null, price_list_id: null });
   });
   it("rejects an outdated checkout total after a promotion expires", async () => {
     setPromotion("2020-01-01T00:00:00Z");
     await expect(createOrder(user(), { ...SHIPPING, expected_total: 400000 })).rejects.toThrow("Prices were updated");
     expect(checkoutOrderRpc).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("wholesale terms at checkout", () => {
+  beforeEach(() => {
+    resetWholesaleRulesCache();
+    vi.mocked(selectShopSetting).mockReset().mockResolvedValue(null); // shop defaults: pay first, no minimum
+    vi.mocked(updateOrderPoNumber).mockReset().mockResolvedValue(undefined);
+  });
+
+  it("makes wholesale pay by bank transfer first by default", async () => {
+    await expect(createOrder(approvedWholesaleUser(), SHIPPING)).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/bank transfer/) });
+    await expect(createOrder(approvedWholesaleUser(), { ...SHIPPING, payment_method: "mmqr", payment_account: "mmqr" })).rejects.toMatchObject({ status: 400 });
+    expect(checkoutOrderRpc).not.toHaveBeenCalled();
+  });
+
+  it("never applies those rules to ordinary retail customers", async () => {
+    await createOrder(user(), SHIPPING);
+    expect(checkoutOrderRpc).toHaveBeenCalled();
+  });
+
+  it("lets the shop allow wholesale cash on delivery again", async () => {
+    vi.mocked(selectShopSetting).mockResolvedValue({ min_amount: 0, min_units: 0, prepay_required: false });
+    await createOrder(approvedWholesaleUser(), SHIPPING);
+    expect(checkoutOrderRpc).toHaveBeenCalled();
+  });
+
+  it("enforces a minimum order amount, using the real recomputed total", async () => {
+    vi.mocked(selectShopSetting).mockResolvedValue({ min_amount: 1_000_000, min_units: 0, prepay_required: true });
+    await expect(createOrder(approvedWholesaleUser(), WHOLESALE_SHIPPING)).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/start at MMK 1,000,000/) });
+    expect(checkoutOrderRpc).not.toHaveBeenCalled();
+  });
+
+  it("enforces a minimum number of items", async () => {
+    vi.mocked(selectShopSetting).mockResolvedValue({ min_amount: 0, min_units: 25, prepay_required: true });
+    await expect(createOrder(approvedWholesaleUser(), WHOLESALE_SHIPPING)).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/at least 25 items/) });
+  });
+
+  it("keeps the PO number on a wholesale order only", async () => {
+    vi.mocked(checkoutOrderRpc).mockResolvedValue({ order_id: "order-9", total_amount: 480000 });
+    await createOrder(approvedWholesaleUser(), { ...WHOLESALE_SHIPPING, po_number: "PO-2026-001" });
+    expect(updateOrderPoNumber).toHaveBeenCalledWith("order-9", "PO-2026-001");
+
+    vi.mocked(updateOrderPoNumber).mockClear();
+    await createOrder(user(), { ...SHIPPING, po_number: "PO-X" });
+    expect(updateOrderPoNumber).not.toHaveBeenCalled();
+  });
+
+  it("does not fail the order when the PO number cannot be saved", async () => {
+    vi.mocked(checkoutOrderRpc).mockResolvedValue({ order_id: "order-9", total_amount: 480000 });
+    vi.mocked(updateOrderPoNumber).mockRejectedValue(new Error("column does not exist"));
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(createOrder(approvedWholesaleUser(), { ...WHOLESALE_SHIPPING, po_number: "PO-1" })).resolves.toBeTruthy();
+    spy.mockRestore();
+  });
+
+  it("shows the rules on the cart", async () => {
+    vi.mocked(selectShopSetting).mockResolvedValue({ min_amount: 750_000, min_units: 5, prepay_required: true });
+    const cart = await getCart(approvedWholesaleUser());
+    expect(cart.minimumOrder).toEqual({ minAmount: 750_000, minUnits: 5 });
+    expect(cart.prepayRequired).toBe(true);
+    const retail = await getCart(user());
+    expect(retail.minimumOrder).toBeNull();
+    expect(retail.prepayRequired).toBe(false);
+  });
+});
+
+describe("optional business licence requirement", () => {
+  beforeEach(() => {
+    resetWholesaleRulesCache();
+    vi.mocked(selectShopSetting).mockReset().mockResolvedValue(null);
+  });
+  afterEach(() => { delete process.env.WHOLESALE_REQUIRE_LICENCE; });
+
+  it("is off by default: an approved account gets wholesale prices", async () => {
+    expect((await getCart(approvedWholesaleUser())).wholesale).toBe(true);
+  });
+
+  it("when on, withholds wholesale prices until the licence is verified", async () => {
+    process.env.WHOLESALE_REQUIRE_LICENCE = "true";
+    for (const status of ["none", "pending", "rejected"] as const) {
+      vi.mocked(selectCompanyDetails).mockResolvedValue({ licence_status: status } as never);
+      expect((await getCart(approvedWholesaleUser())).wholesale).toBe(false);
+    }
+    vi.mocked(selectCompanyDetails).mockResolvedValue(null as never);
+    expect((await getCart(approvedWholesaleUser())).wholesale).toBe(false);
+    vi.mocked(selectCompanyDetails).mockResolvedValue({ licence_status: "verified" } as never);
+    expect((await getCart(approvedWholesaleUser())).wholesale).toBe(true);
   });
 });

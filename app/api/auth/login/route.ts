@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { registerSignIn } from "@/app/lib/admin-signin";
 import { getProfile, loginUser } from "@/app/lib/supabase";
 import { checkRateLimit } from "@/app/lib/rate-limit";
 import { setSessionCookies } from "@/app/lib/session-cookies";
@@ -34,8 +35,10 @@ export async function POST(request: NextRequest) {
     // logging in at /login and then visiting /admin works without a second
     // sign-in at /admin/login. The role comes from the profiles table
     // (server-side), never from the request.
+    const { mfaPending } = await registerSignIn(request, { accessToken: session.access_token, profile, method: "Email and password" });
+
     return setSessionCookies(
-      NextResponse.json({ profile, user: profile }),
+      NextResponse.json({ profile, user: profile, mfa_pending: mfaPending }),
       session.access_token,
       { isBackoffice: profile?.role === "admin" || profile?.role === "staff" }
     );

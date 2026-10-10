@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { recordAdminAction } from "@/app/lib/admin-audit";
 import { authenticate } from "@/app/lib/backend";
 import { handleRouteError } from "@/app/lib/errors";
 import { autoSyncStatus, runProductSync } from "@/app/lib/product-sync";
@@ -28,7 +29,11 @@ export async function POST(request: NextRequest) {
       dryRun?: boolean;
     } | null;
 
-    return NextResponse.json(await runProductSync({ dryRun: Boolean(body?.dryRun) }));
+    const result = await runProductSync({ dryRun: Boolean(body?.dryRun) });
+    if (!body?.dryRun) {
+      await recordAdminAction({ actorId: user.id, action: "product.sync", targetType: "product_sync", targetId: "google-sheet", next: { products: result.count } });
+    }
+    return NextResponse.json(result);
   } catch (error) {
     return handleRouteError("admin.sync-products", error);
   }

@@ -10,14 +10,14 @@ import type { ReturnRequestRow, ReturnRequestStatus } from "./supabase";
 
 export type ReturnEmailEvent = ReturnRequestStatus | "refund_plan_updated";
 
-type StatusCopy = {
+export type StatusCopy = {
   heading: string;
   summary: string;
   burmeseHeading: string;
   burmeseSummary: string;
 };
 
-const STATUS_COPY: Record<ReturnEmailEvent, StatusCopy> = {
+export const STATUS_COPY: Record<ReturnEmailEvent, StatusCopy> = {
   requested: {
     heading: "Return request received",
     summary: "We received your request and our team will review the information you sent.",

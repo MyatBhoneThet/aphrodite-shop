@@ -6,6 +6,8 @@ import { useCallback, useEffect, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
 import { formatDateTime } from "../lib/format";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
+import CompanyCard from "./CompanyCard";
+import WholesaleRulesCard from "./WholesaleRulesCard";
 
 type PriceList = {
   id: string;
@@ -71,6 +73,7 @@ export default function WholesalePanel() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showAudit, setShowAudit] = useState(false);
+  const [companyOpenId, setCompanyOpenId] = useState<string | null>(null);
   const [businessDraft, setBusinessDraft] = useState<{ account: Account; priceListId: string; name: string; note: string; verified: boolean } | null>(null);
   const [saving, setSaving] = useState(false);
   const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([]);
@@ -245,6 +248,7 @@ export default function WholesalePanel() {
 
   return (
     <section className="mt-6 space-y-6">
+      <WholesaleRulesCard />
       {businessDraft && <form onSubmit={event => {
         event.preventDefault();
         if (!businessDraft.verified || saving) return;
@@ -449,6 +453,7 @@ export default function WholesalePanel() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="font-bold">{account.email}</p>
+                      {account.business_name && <p className="text-sm font-semibold text-zinc-700">{account.business_name}</p>}
                       <p className="text-xs text-zinc-500">
                         {account.full_name || a("No name")}
                         {account.created_at
@@ -566,8 +571,19 @@ export default function WholesalePanel() {
                              {a("Revoke")} </button>
                         </>
                       )}
+                      {status !== "not_applied" && (
+                        <button
+                          type="button"
+                          aria-expanded={companyOpenId === account.id}
+                          onClick={() => setCompanyOpenId(companyOpenId === account.id ? null : account.id)}
+                          className="rounded-full border px-4 py-2 text-xs font-semibold hover:border-red-500 hover:text-red-600"
+                        >
+                          {companyOpenId === account.id ? a("Hide company") : a("Company & licence")}
+                        </button>
+                      )}
                     </div>
                   </div>
+                  {companyOpenId === account.id && <div className="mt-4 rounded-xl bg-zinc-50 p-4"><CompanyCard userId={account.id} /></div>}
                 </div>
               );
             })}

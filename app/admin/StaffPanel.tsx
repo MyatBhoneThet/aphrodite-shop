@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
 import { formatDateTime } from "../lib/format";
+import { fetchWithReauth } from "./reauth";
 
 type StaffAccount = {
   id: string;
@@ -41,7 +42,7 @@ export default function StaffPanel() {
     event.preventDefault();
     setBusy("grant"); setError(""); setMessage("");
     try {
-      const response = await fetch("/api/admin/staff", {
+      const response = await fetchWithReauth("/api/admin/staff", {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
@@ -59,7 +60,7 @@ export default function StaffPanel() {
     if (!window.confirm(`Delete staff account ${account.email}? This removes the login permanently.`)) return;
     setBusy(account.id); setError(""); setMessage("");
     try {
-      const response = await fetch(`/api/admin/staff/${account.id}`, { method: "DELETE", headers: authHeaders() });
+      const response = await fetchWithReauth(`/api/admin/staff/${account.id}`, { method: "DELETE", headers: authHeaders() });
       if (!response.ok) throw new Error(await responseError(response));
       setMessage("Staff account deleted.");
       await load();

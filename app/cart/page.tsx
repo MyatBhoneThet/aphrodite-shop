@@ -16,6 +16,7 @@ import DeliveryEstimateBadge from "../components/DeliveryEstimateBadge";
 import { estimateDelivery } from "../lib/delivery-estimate";
 import { PaymentLogo, PaymentQr } from "../components/PaymentLogo";
 import OrderPlacedView from "../components/OrderPlacedView";
+import { wholesaleOrderProblem } from "../lib/company";
 import { useLanguage } from "../lib/language";
 import {
   paymentAccountsFor,
@@ -89,6 +90,8 @@ type CartSummary = {
   retailSubtotal: number;
   totalSavings: number;
   wholesale: boolean;
+  minimumOrder: { minAmount: number; minUnits: number } | null;
+  prepayRequired: boolean;
 };
 
 export default function CartPage() {
@@ -113,6 +116,7 @@ export default function CartPage() {
   const [postalCode, setPostalCode] = useState("");
   const shippingCountry = "Myanmar";
   const [notes, setNotes] = useState("");
+  const [poNumber, setPoNumber] = useState("");
   const [codConfirmed, setCodConfirmed] = useState(false);
   const [codContactConfirmed, setCodContactConfirmed] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash_on_delivery");
@@ -149,10 +153,26 @@ export default function CartPage() {
   );
   const selectedSavings = selectedItems.reduce((sum, item) => sum + item.pricing.savings, 0);
   const selectedQuantity = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
+  // Wholesale terms set by the shop: pay by bank transfer first, and a minimum order.
+  const payFirst = Boolean(cart?.wholesale && cart.prepayRequired);
+  const wholesaleProblem = cart?.wholesale
+    ? wholesaleOrderProblem(
+        { minAmount: cart.minimumOrder?.minAmount ?? 0, minUnits: cart.minimumOrder?.minUnits ?? 0, prepayRequired: false },
+        { total: selectedTotal, units: selectedQuantity, paymentMethod }
+      )
+    : null;
   const hasPendingPrices = selectedItems.some((item) => !Number.isFinite(item.product.price) || item.product.price <= 0);
   const savedAddressDeliveryEstimate = selectedAddressId && deliveryLocation && shippingCity
     ? estimateDelivery(deliveryLocation.latitude, deliveryLocation.longitude, shippingCity)
     : null;
+
+  // Wholesale buyers pay first: never leave cash on delivery selected.
+  useEffect(() => {
+    if (payFirst && paymentMethod === "cash_on_delivery") {
+      const timer = window.setTimeout(() => { setPaymentMethod("bank_transfer"); setPaymentAccount("kbz"); }, 0);
+      return () => window.clearTimeout(timer);
+    }
+  }, [payFirst, paymentMethod]);
 
   const loadCart = useCallback(async () => {
     setIsLoading(true);
@@ -536,6 +556,7 @@ export default function CartPage() {
           delivery_location_consent: Boolean(deliveryLocation),
           delivery_location: deliveryLocation,
           notes: notes.trim() || null,
+          po_number: cart?.wholesale ? poNumber.trim() || null : undefined,
           selected_cart_item_ids: [...selectedItemIds],
           // Server detects price drift against this and answers 409;
           // authoritative prices are always recomputed server-side.
@@ -906,10 +927,17 @@ export default function CartPage() {
                 </fieldset>}
                 {addressSaveMessage && <p role="status" className="rounded-xl bg-green-50 p-4 text-sm font-semibold text-green-800">✓ {addressSaveMessage}</p>}
 
+                {cart?.wholesale && <div>
+                  <label htmlFor="po-number" className="mb-1 block text-sm font-semibold">{text("Your purchase order (PO) number (optional)")}</label>
+                  <input id="po-number" value={poNumber} onChange={(event) => setPoNumber(event.target.value)} maxLength={60} placeholder="e.g. PO-2026-014" className="w-full rounded-xl border bg-white px-4 py-3 outline-none focus:border-red-500" />
+                  <p className="mt-1 text-xs text-zinc-500">{text("It is printed on your invoice so your accountant can match it.")}</p>
+                </div>}
+
                 <fieldset className="rounded-2xl border border-green-200 bg-green-50 p-4">
                   <legend className="px-1 text-sm font-bold">{t("cart.paymentMethod")}</legend>
 
-                  <label className="flex cursor-pointer items-start gap-3">
+                  {payFirst && <p className="mb-3 rounded-xl bg-white p-3 text-sm font-semibold text-green-900">{text("Wholesale orders are paid by bank transfer before delivery.")}</p>}
+                  {!payFirst && <label className="flex cursor-pointer items-start gap-3">
                     <input type="radio" name="payment-method" value="cash_on_delivery"
                       checked={paymentMethod === "cash_on_delivery"}
                       onChange={() => { setPaymentMethod("cash_on_delivery"); setPaymentAccount(null); }}
@@ -918,9 +946,9 @@ export default function CartPage() {
                       <span className="block font-semibold">{t("payment.method.cash_on_delivery")}</span>
                       <span className="block text-xs text-zinc-600">{t("payment.method.cash_on_delivery.help")}</span>
                     </span>
-                  </label>
+                  </label>}
 
-                  <label className="mt-4 flex cursor-pointer items-start gap-3">
+                  <label className={`${payFirst ? "" : "mt-4 "}flex cursor-pointer items-start gap-3`}>
                     <input type="radio" name="payment-method" value="bank_transfer"
                       checked={paymentMethod === "bank_transfer"}
                       onChange={() => { setPaymentMethod("bank_transfer"); setPaymentAccount("kbz"); }}
@@ -983,9 +1011,11 @@ export default function CartPage() {
                   </div>}
                 </fieldset>
 
+                {wholesaleProblem && <p role="alert" className="rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900">{wholesaleProblem}</p>}
+
                 <button
                   type="submit"
-                  disabled={isPlacingOrder || hasPendingPrices}
+                  disabled={isPlacingOrder || hasPendingPrices || Boolean(wholesaleProblem)}
                   className="w-full rounded-full bg-red-600 px-5 py-4 font-semibold text-white disabled:bg-zinc-400"
                 >
                   {isPlacingOrder

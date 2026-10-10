@@ -30,6 +30,13 @@ describe("admin order filtering", () => {
     expect(filterOrders(orders, { ...emptyOrderFilters, query: "954-678" }, admin)).toHaveLength(1);
   });
 
+  it("finds a wholesale order by its PO number, for staff too", () => {
+    const withPo = [order("aaaaaaaa-0000-4000-8000-000000000003", { po_number: "PO-2026-014" })];
+    expect(filterOrders(withPo, { ...emptyOrderFilters, query: "po-2026-014" }, admin)).toHaveLength(1);
+    expect(filterOrders(withPo, { ...emptyOrderFilters, query: "po-2026" }, staff)).toHaveLength(1);
+    expect(filterOrders(withPo, { ...emptyOrderFilters, query: "po-9999" }, admin)).toHaveLength(0);
+  });
+
   it("finds by email for admins", () => {
     expect(filterOrders(orders, { ...emptyOrderFilters, query: "aye@example" }, admin)).toHaveLength(1);
   });

@@ -9,6 +9,7 @@ import { conflict, serviceUnavailable } from "./errors";
 import type { SupabaseSocialProvider } from "./oauth";
 import type { SavedAddress, SavedAddressInput } from "./address-book";
 import type { FeedbackInput } from "./feedback";
+import { computeMfaState, type AuthFactor, type MfaState } from "./mfa";
 import {
   normalizeHomepageAdPlacement,
   type HomepageAdPlacement,
@@ -51,6 +52,8 @@ export type CurrentUser = {
   role: UserRole;
   profile: Profile;
   accessToken: string;
+  /** Set for every authenticated request (see app/lib/mfa.ts). */
+  mfa?: MfaState;
 };
 
 export type ProductRow = {
@@ -328,6 +331,8 @@ export type OrderRow = {
   payment_method: "cash_on_delivery" | "bank_transfer" | "mmqr";
   payment_status: "unpaid" | "collected" | "refunded";
   payment_account?: "kbz" | "aya" | "mmqr" | null;
+  /** Wholesale buyers' purchase-order reference. */
+  po_number?: string | null;
   payment_reference?: string | null;
   payment_verification_status?: PaymentVerificationStatus;
   payment_verified_at?: string | null;
@@ -462,9 +467,11 @@ type AuthUserResponse = {
   user?: {
     id: string;
     email?: string;
+    factors?: AuthFactor[] | null;
   };
   id?: string;
   email?: string;
+  factors?: AuthFactor[] | null;
 };
 
 type AuthSessionResponse = {
@@ -1580,7 +1587,9 @@ export async function getAuthUser(token: string) {
     throw unauthorized();
   }
 
-  return { user };
+  const factors = (data.user?.factors ?? data.factors ?? []) as AuthFactor[];
+
+  return { user, factors };
 }
 
 export async function getProfile(userId: string, accessToken?: string) {
@@ -1627,19 +1636,26 @@ export async function requireUserFromRequest(request: Request) {
     throw unauthorized();
   }
 
-  const { user } = await getAuthUser(token);
+  const { user, factors } = await getAuthUser(token);
   const profile = await getProfile(user.id, token);
 
   if (!profile) {
     throw notFound("Profile not found.");
   }
 
+  const mfa = computeMfaState({ role: profile.role, factors, token });
+  // An admin or staff account that has two-step login but has not confirmed a
+  // code yet is treated as an ordinary customer everywhere, so no route can
+  // forget to check. The two-step screens use mfa.realRole to let them finish.
+  const held = mfa.pending !== null;
+
   return {
     id: user.id,
     email: profile.email ?? user.email ?? "",
-    role: profile.role,
-    profile,
+    role: held ? "normal" : profile.role,
+    profile: held ? { ...profile, role: "normal" } : profile,
     accessToken: token,
+    mfa,
   } satisfies CurrentUser;
 }
 
@@ -2694,7 +2710,8 @@ export async function selectSalesReportOrders(start: string, end: string) {
 export async function updateOrderStatus(
   id: string,
   status: OrderRow["status"],
-  accessToken: string,
+  /** The admin's own token, or null to write with the service role (staff accounts). */
+  accessToken: string | null,
   options: {
     paymentStatus?: OrderRow["payment_status"];
     confirmedAt?: string;
@@ -2727,8 +2744,8 @@ export async function updateOrderStatus(
           : {}),
       }),
     },
-    accessToken,
-    anonKey
+    accessToken ?? undefined,
+    accessToken ? anonKey : undefined
   ).catch(throwCodError);
 
   return rows[0] ?? null;
@@ -3718,6 +3735,13 @@ export async function resolveOrderActionRpc(payload: {
   );
 }
 
+export async function customerCancelOrderRpc(payload: { user_id: string; order_id: string; reason: string }) {
+  return supabaseRest<{ ok: true }>("rpc/customer_cancel_order", {
+    method: "POST",
+    body: JSON.stringify({ p_user_id: payload.user_id, p_order_id: payload.order_id, p_reason: payload.reason }),
+  });
+}
+
 export async function adminCancelOrderRpc(payload: {
   actor_id: string;
   order_id: string;
@@ -3984,4 +4008,497 @@ export async function upsertSiteFeedback(userId: string, input: FeedbackInput) {
     }
   );
   return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Admin reporting reads (service role; callers gate with requireAdmin /
+// requireBackoffice in app/lib/admin-reports.ts).
+// ---------------------------------------------------------------------------
+
+export type ExportOrderRow = {
+  id: string;
+  user_id: string;
+  status: OrderRow["status"];
+  total_amount: number;
+  po_number: string | null;
+  payment_method: string | null;
+  payment_status: string | null;
+  payment_account: string | null;
+  created_at: string;
+  delivered_at: string | null;
+  receipt_number: string | null;
+  shipping_name: string;
+  shipping_phone: string;
+  shipping_address: string;
+  shipping_city: string | null;
+  courier_name: string | null;
+  delivery_tracking_number: string | null;
+  profiles: { email: string | null; full_name: string | null } | null;
+  order_items: { quantity: number; unit_price: number; products: { name: string } | null }[] | null;
+};
+
+export const MAX_EXPORT_ORDERS = 20000;
+
+/** Pages through PostgREST (it caps a response at ~1000 rows) until the range is read. */
+export async function selectOrdersForExport(startIso: string, endIso: string, includePo = true): Promise<{ rows: ExportOrderRow[]; truncated: boolean }> {
+  const pageSize = 1000;
+  const rows: ExportOrderRow[] = [];
+  for (let offset = 0; offset <= MAX_EXPORT_ORDERS; offset += pageSize) {
+    const params = new URLSearchParams({
+      select:
+        `id,user_id,status,total_amount,${includePo ? "po_number," : ""}payment_method,payment_status,payment_account,created_at,delivered_at,receipt_number,shipping_name,shipping_phone,shipping_address,shipping_city,courier_name,delivery_tracking_number,profiles!orders_user_id_fkey(email,full_name),order_items(quantity,unit_price,products(name))`,
+      order: "created_at.asc,id.asc",
+      limit: String(pageSize),
+      offset: String(offset),
+    });
+    params.append("created_at", `gte.${startIso}`);
+    params.append("created_at", `lt.${endIso}`);
+    let page: ExportOrderRow[];
+    try {
+      page = await supabaseRest<ExportOrderRow[]>(`orders?${params.toString()}`);
+    } catch (error) {
+      // The PO-number column comes from the wholesale migration; until it has
+      // been run, export without it rather than failing the whole report.
+      if (includePo && String(error instanceof Error ? error.message : error).includes("po_number")) {
+        const result = await selectOrdersForExport(startIso, endIso, false);
+        return { rows: result.rows.map((row) => ({ ...row, po_number: null })), truncated: result.truncated };
+      }
+      throw error;
+    }
+    rows.push(...page);
+    if (page.length < pageSize) return { rows, truncated: false };
+  }
+  return { rows: rows.slice(0, MAX_EXPORT_ORDERS), truncated: true };
+}
+
+export type SiteFeedbackRow = {
+  id: string;
+  order_id: string;
+  rating: number;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+  profiles: { full_name: string | null; email: string | null } | null;
+};
+
+export async function selectSiteFeedback(limit: number) {
+  return supabaseRest<SiteFeedbackRow[]>(
+    `site_feedback?select=id,order_id,rating,note,created_at,updated_at,profiles(full_name,email)&order=created_at.desc&limit=${Math.min(Math.max(1, Math.trunc(limit)), 1000)}`
+  );
+}
+
+export type LowStockRow = {
+  id: number;
+  name: string;
+  brand: string | null;
+  category: string | null;
+  image: string | null;
+  stock_quantity: number | null;
+  source_sheet: string | null;
+};
+
+export async function selectLowStockProducts(threshold: number) {
+  return supabaseRest<LowStockRow[]>(
+    `products?select=id,name,brand,category,image,stock_quantity,source_sheet&stock_quantity=lte.${Math.trunc(threshold)}&order=stock_quantity.asc,name.asc&limit=500`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Admin activity log, customer list/notes and new-order polling (service role;
+// gated by requireAdmin / requireBackoffice in app/lib/admin-ops.ts).
+// ---------------------------------------------------------------------------
+
+export type ActivityRow = AuditLogRow & {
+  profiles: { full_name: string | null; email: string | null } | null;
+};
+
+export async function selectActivityLog(filters: { limit: number; offset: number; prefixes?: readonly string[] }) {
+  const params = new URLSearchParams({
+    select: "id,actor_id,action,target_type,target_id,previous_data,new_data,created_at,profiles(full_name,email)",
+    order: "created_at.desc,id.desc",
+    limit: String(Math.min(Math.max(1, Math.trunc(filters.limit)), 100)),
+    offset: String(Math.max(0, Math.trunc(filters.offset))),
+  });
+  if (filters.prefixes?.length) {
+    params.set("or", `(${filters.prefixes.map((prefix) => `action.like.${prefix}*`).join(",")})`);
+  }
+  return supabaseRest<ActivityRow[]>(`audit_log?${params.toString()}`);
+}
+
+export type CustomerProfileRow = {
+  id: string;
+  email: string;
+  full_name: string | null;
+  phone: string | null;
+  role: "normal" | "wholesale";
+  wholesale_status: string | null;
+  created_at: string;
+};
+
+const CUSTOMER_COLUMNS = "id,email,full_name,phone,role,wholesale_status,created_at";
+
+/** Strips characters that have a meaning inside a PostgREST filter. */
+function filterSafe(text: string) {
+  return text.replace(/[,()*%\\:"']/g, " ").replace(/\s+/g, " ").trim().slice(0, 60);
+}
+
+export async function selectCustomersPage(search: string, limit: number, offset: number) {
+  const term = filterSafe(search);
+  const params = new URLSearchParams({
+    select: CUSTOMER_COLUMNS,
+    role: "in.(normal,wholesale)",
+    order: "created_at.desc,id.desc",
+    limit: String(Math.min(Math.max(1, Math.trunc(limit)), 50)),
+    offset: String(Math.max(0, Math.trunc(offset))),
+  });
+  const countParams = new URLSearchParams({ select: "id", role: "in.(normal,wholesale)" });
+  if (term) {
+    const or = `(email.ilike.*${term}*,full_name.ilike.*${term}*,phone.ilike.*${term}*)`;
+    params.set("or", or);
+    countParams.set("or", or);
+  }
+  const [rows, total] = await Promise.all([
+    supabaseRest<CustomerProfileRow[]>(`profiles?${params.toString()}`),
+    supabaseCount(`profiles?${countParams.toString()}`),
+  ]);
+  return { rows, total };
+}
+
+export type CustomerOrderRow = {
+  id: string;
+  user_id: string;
+  status: OrderRow["status"];
+  total_amount: number;
+  created_at: string;
+};
+
+export async function selectOrderSummariesForUsers(userIds: string[]) {
+  if (!userIds.length) return [];
+  return supabaseRest<CustomerOrderRow[]>(
+    `orders?select=id,user_id,status,total_amount,created_at&user_id=in.(${userIds.map(encodeURIComponent).join(",")})&order=created_at.desc&limit=2000`
+  );
+}
+
+export async function selectCustomerProfile(id: string) {
+  const rows = await supabaseRest<CustomerProfileRow[]>(
+    `profiles?select=${CUSTOMER_COLUMNS}&id=eq.${encodeURIComponent(id)}&role=in.(normal,wholesale)&limit=1`
+  );
+  return rows[0] ?? null;
+}
+
+export type CustomerOrderDetailRow = CustomerOrderRow & {
+  payment_method: string | null;
+  payment_status: string | null;
+  shipping_address: string | null;
+  order_items: { quantity: number; products: { name: string } | null }[] | null;
+};
+
+export async function selectOrdersOfCustomer(userId: string) {
+  return supabaseRest<CustomerOrderDetailRow[]>(
+    `orders?select=id,user_id,status,total_amount,created_at,payment_method,payment_status,shipping_address,order_items(quantity,products(name))&user_id=eq.${encodeURIComponent(userId)}&order=created_at.desc&limit=200`
+  );
+}
+
+export type CustomerNoteRow = {
+  id: string;
+  customer_id: string;
+  author_id: string;
+  body: string;
+  created_at: string;
+  profiles: { full_name: string | null; email: string | null } | null;
+};
+
+export async function selectCustomerNotes(customerId: string) {
+  return supabaseRest<CustomerNoteRow[]>(
+    `customer_notes?select=id,customer_id,author_id,body,created_at,profiles(full_name,email)&customer_id=eq.${encodeURIComponent(customerId)}&order=created_at.desc&limit=100`
+  );
+}
+
+export async function insertCustomerNote(entry: { customer_id: string; author_id: string; body: string }) {
+  const rows = await supabaseRest<Omit<CustomerNoteRow, "profiles">[]>("customer_notes", {
+    method: "POST",
+    body: JSON.stringify(entry),
+  });
+  return rows[0] ?? null;
+}
+
+export type NewOrderRow = { id: string; created_at: string; total_amount: number; shipping_name: string };
+
+export async function selectOrdersSince(sinceIso: string) {
+  const params = new URLSearchParams({
+    select: "id,created_at,total_amount,shipping_name",
+    order: "created_at.desc",
+    limit: "50",
+  });
+  params.append("created_at", `gt.${sinceIso}`);
+  return supabaseRest<NewOrderRow[]>(`orders?${params.toString()}`);
+}
+
+
+// ---------------------------------------------------------------------------
+// Two-step login (Supabase Auth MFA, TOTP). All calls use the signed-in user's
+// own token, except the service-role lookup used by the admin security page.
+// ---------------------------------------------------------------------------
+
+export type TotpEnrollment = { id: string; qr_code: string; secret: string; uri: string };
+
+export async function mfaEnrollTotp(accessToken: string, friendlyName: string): Promise<TotpEnrollment> {
+  const { anonKey } = requireSupabaseConfig();
+  const data = await supabaseAuth<{ id: string; totp: { qr_code: string; secret: string; uri: string } }>(
+    "factors",
+    { method: "POST", body: JSON.stringify({ factor_type: "totp", friendly_name: friendlyName, issuer: "Aphrodite Admin" }) },
+    accessToken,
+    anonKey
+  );
+  return { id: data.id, ...data.totp };
+}
+
+/** Confirms a six-digit code. On success Supabase returns a new, stronger (aal2) session. */
+export async function mfaChallengeAndVerify(accessToken: string, factorId: string, code: string) {
+  const { anonKey } = requireSupabaseConfig();
+  const challenge = await supabaseAuth<{ id: string }>(
+    `factors/${encodeURIComponent(factorId)}/challenge`,
+    { method: "POST", body: JSON.stringify({}) },
+    accessToken,
+    anonKey
+  );
+  return supabaseAuth<AuthSessionResponse>(
+    `factors/${encodeURIComponent(factorId)}/verify`,
+    { method: "POST", body: JSON.stringify({ challenge_id: challenge.id, code }) },
+    accessToken,
+    anonKey
+  );
+}
+
+export async function mfaUnenroll(accessToken: string, factorId: string) {
+  const { url, anonKey } = requireSupabaseConfig();
+  const response = await fetch(`${url}/auth/v1/factors/${encodeURIComponent(factorId)}`, {
+    method: "DELETE",
+    headers: { apikey: anonKey, Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+    signal: upstreamSignal(undefined),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+}
+
+/** Service-role read of one account's authenticator factors (admin security page only). */
+export async function selectAuthFactorsService(userId: string) {
+  const data = await supabaseAuth<{ factors?: AuthFactor[] | null; user?: { factors?: AuthFactor[] | null } }>(
+    `admin/users/${encodeURIComponent(userId)}`,
+    { method: "GET" }
+  );
+  return (data.user?.factors ?? data.factors ?? []) as AuthFactor[];
+}
+
+export async function selectBackofficeProfiles() {
+  return supabaseRest<Pick<Profile, "id" | "email" | "full_name" | "role" | "created_at">[]>(
+    "profiles?select=id,email,full_name,role,created_at&role=in.(admin,staff)&order=created_at.asc"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Wholesale (B2B): company details, business licence files, settings, PO number
+// (service role; gated in app/lib/wholesale-b2b.ts).
+// ---------------------------------------------------------------------------
+
+export type CompanyDetailsRow = {
+  user_id: string;
+  tax_id: string | null;
+  address: string | null;
+  billing_name: string | null;
+  billing_phone: string | null;
+  billing_email: string | null;
+  licence_status: "none" | "pending" | "verified" | "rejected";
+  licence_path: string | null;
+  licence_file_name: string | null;
+  licence_content_type: string | null;
+  licence_submitted_at: string | null;
+  licence_reviewed_at: string | null;
+  licence_reviewed_by: string | null;
+  licence_review_note: string | null;
+  updated_at: string;
+};
+
+export async function selectCompanyDetails(userId: string) {
+  const rows = await supabaseRest<CompanyDetailsRow[]>(
+    `company_details?select=*&user_id=eq.${encodeURIComponent(userId)}&limit=1`
+  );
+  return rows[0] ?? null;
+}
+
+/** Creates or updates only the fields given; other columns (the licence) are left alone. */
+export async function upsertCompanyDetails(userId: string, fields: Partial<Omit<CompanyDetailsRow, "user_id" | "updated_at">>) {
+  const rows = await supabaseRest<CompanyDetailsRow[]>("company_details?on_conflict=user_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify({ user_id: userId, ...fields, updated_at: new Date().toISOString() }),
+  });
+  return rows[0] ?? null;
+}
+
+const BUSINESS_LICENCE_BUCKET = "business-licences";
+
+export async function uploadBusinessLicenceObject(path: string, bytes: ArrayBuffer, contentType: string) {
+  const { url, serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
+  const response = await fetch(`${url}/storage/v1/object/${BUSINESS_LICENCE_BUCKET}/${encodeStoragePath(path)}`, {
+    method: "POST",
+    headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}`, "Content-Type": contentType, "x-upsert": "false" },
+    body: bytes,
+    cache: "no-store",
+    signal: upstreamSignal(),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+}
+
+export async function createBusinessLicenceSignedUrl(path: string) {
+  const { url, serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
+  const response = await fetch(`${url}/storage/v1/object/sign/${BUSINESS_LICENCE_BUCKET}/${encodeStoragePath(path)}`, {
+    method: "POST",
+    headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ expiresIn: 300 }),
+    cache: "no-store",
+    signal: upstreamSignal(),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  const result = (await response.json()) as { signedURL?: string; signedUrl?: string };
+  const signedPath = result.signedURL ?? result.signedUrl;
+  if (!signedPath) throw new Error("Storage did not return a signed URL.");
+  return signedPath.startsWith("http") ? signedPath : `${url}/storage/v1${signedPath.startsWith("/") ? "" : "/"}${signedPath}`;
+}
+
+export async function deleteBusinessLicenceObject(path: string) {
+  const { url, serviceRoleKey } = requireSupabaseConfig({ requireServiceRole: true });
+  await fetch(`${url}/storage/v1/object/${BUSINESS_LICENCE_BUCKET}/${encodeStoragePath(path)}`, {
+    method: "DELETE",
+    headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+    cache: "no-store",
+    signal: upstreamSignal(),
+  }).catch(() => undefined);
+}
+
+export async function selectShopSetting(key: string) {
+  const rows = await supabaseRest<{ key: string; value: unknown }[]>(
+    `shop_settings?select=key,value&key=eq.${encodeURIComponent(key)}&limit=1`
+  );
+  return rows[0]?.value ?? null;
+}
+
+export async function upsertShopSetting(key: string, value: unknown, updatedBy: string) {
+  await supabaseRest("shop_settings?on_conflict=key", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ key, value, updated_by: updatedBy, updated_at: new Date().toISOString() }),
+  });
+}
+
+export async function updateOrderPoNumber(orderId: string, poNumber: string) {
+  await supabaseRest(`orders?id=eq.${encodeURIComponent(orderId)}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ po_number: poNumber }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Customer notifications: the in-app bell and phone (web push) subscriptions.
+// Service role; every function is scoped by user id by its caller.
+// ---------------------------------------------------------------------------
+
+export type NotificationRow = {
+  id: string;
+  user_id: string;
+  kind: string;
+  title: string;
+  body: string;
+  link: string | null;
+  dedupe_key: string | null;
+  created_at: string;
+  read_at: string | null;
+};
+
+/** Returns the new row, or null when the same event (dedupe key) was already recorded. */
+export async function insertNotification(entry: {
+  user_id: string;
+  kind: string;
+  title: string;
+  body: string;
+  link: string | null;
+  dedupe_key: string | null;
+}) {
+  const rows = await supabaseRest<NotificationRow[]>("notifications?on_conflict=user_id,dedupe_key", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+    body: JSON.stringify(entry),
+  });
+  return rows[0] ?? null;
+}
+
+export async function selectNotifications(userId: string, limit = 30) {
+  return supabaseRest<NotificationRow[]>(
+    `notifications?select=*&user_id=eq.${encodeURIComponent(userId)}&order=created_at.desc&limit=${Math.min(Math.max(1, Math.trunc(limit)), 100)}`
+  );
+}
+
+export async function countUnreadNotifications(userId: string) {
+  return supabaseCount(`notifications?select=id&user_id=eq.${encodeURIComponent(userId)}&read_at=is.null`);
+}
+
+/** Marks the given notifications (or all of the user's) as read. Only ever touches the caller's own rows. */
+export async function markNotificationsRead(userId: string, ids: string[] | "all") {
+  const scope = `user_id=eq.${encodeURIComponent(userId)}&read_at=is.null`;
+  const filter = ids === "all" ? "" : `&id=in.(${ids.map(encodeURIComponent).join(",")})`;
+  if (ids !== "all" && ids.length === 0) return;
+  await supabaseRest(`notifications?${scope}${filter}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ read_at: new Date().toISOString() }),
+  });
+}
+
+export type PushSubscriptionRow = {
+  id: string;
+  user_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  user_agent: string | null;
+};
+
+export async function selectPushSubscriptions(userId: string) {
+  return supabaseRest<PushSubscriptionRow[]>(
+    `push_subscriptions?select=id,user_id,endpoint,p256dh,auth,user_agent&user_id=eq.${encodeURIComponent(userId)}`
+  );
+}
+
+/** One row per browser. Subscribing again (or from another account on the same browser) takes the row over. */
+export async function upsertPushSubscription(entry: { user_id: string; endpoint: string; p256dh: string; auth: string; user_agent: string | null }) {
+  await supabaseRest("push_subscriptions?on_conflict=endpoint", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify(entry),
+  });
+}
+
+export async function deletePushSubscriptionByEndpoint(endpoint: string, userId?: string) {
+  await supabaseRest(
+    `push_subscriptions?endpoint=eq.${encodeURIComponent(endpoint)}${userId ? `&user_id=eq.${encodeURIComponent(userId)}` : ""}`,
+    { method: "DELETE", headers: { Prefer: "return=minimal" } }
+  );
+}
+
+export async function touchPushSubscription(endpoint: string) {
+  await supabaseRest(`push_subscriptions?endpoint=eq.${encodeURIComponent(endpoint)}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ last_success_at: new Date().toISOString() }),
+  });
+}
+
+/** Creates a shop setting only if it does not exist yet (safe if two servers start at once). */
+export async function insertShopSettingIfMissing(key: string, value: unknown) {
+  await supabaseRest("shop_settings?on_conflict=key", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+    body: JSON.stringify({ key, value }),
+  });
 }

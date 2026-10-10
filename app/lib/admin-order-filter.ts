@@ -15,6 +15,7 @@ type FilterableOrder = {
   created_at: string;
   shipping_name: string;
   shipping_phone: string;
+  po_number?: string | null;
   profiles?: { email?: string | null } | null;
 };
 
@@ -46,6 +47,7 @@ export function filterOrders<T extends FilterableOrder>(
     if (!query) return true;
     if (order.id.toLowerCase().startsWith(query)) return true;
     if (order.shipping_name.toLowerCase().includes(query)) return true;
+    if ((order.po_number ?? "").toLowerCase().includes(query)) return true;
     if (!includeContact) return false;
     if (queryDigits.length >= 3 && digits(order.shipping_phone).includes(queryDigits)) return true;
     return (order.profiles?.email ?? "").toLowerCase().includes(query);

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
 import { useLanguage } from "../lib/language";
 import { orderTracking, trackingSteps } from "../lib/order-tracking";
-import { deliveredBannerHasExpired } from "../lib/order-status-visibility";
+import { statusBannerHasExpired } from "../lib/order-status-visibility";
 import { refundSteps, refundTracking, type RefundStep } from "../lib/refund-tracking";
 import type { TranslationKey } from "../lib/translations";
 
@@ -16,6 +16,8 @@ type HeaderOrder = {
   updated_at?: string | null;
   delivered_at?: string | null;
   delivery_last_event_at?: string | null;
+  cancellation_resolved_at?: string | null;
+  return_resolved_at?: string | null;
   return_request_status?: "none" | "requested" | "approved" | "pickup_scheduled" | "received" | "refunded" | "rejected";
   delivery_events?: { stage: string; happened_at: string }[];
   order_items?: {
@@ -34,6 +36,7 @@ type HeaderReturn = {
   expected_refund_at?: string | null;
   delay_reason?: string | null;
   refund_sent_at?: string | null;
+  updated_at?: string | null;
 };
 const returnStatusKeys: Record<HeaderReturn["status"], TranslationKey> = {
   requested: "return.status.requested",
@@ -104,9 +107,11 @@ export default function LastOrderStatusBar({ enabled }: { enabled: boolean }) {
         const displayedOrder = latestReturn
           ? recentOrders.find((candidate) => candidate.id === latestReturn.order_id) ?? latestOrder
           : latestOrder;
-        // A delivered order's bar is only useful for a day; after that it just
-        // confuses people, so it disappears (returns stay until they finish).
-        const expired = !latestReturn && deliveredBannerHasExpired(displayedOrder);
+        // A finished order, cancellation or refund stays for a day, then the bar
+        // goes away. Anything still in progress (including a refund on its way)
+        // stays until it is done.
+        const shownReturn = latestReturn?.order_id === displayedOrder?.id ? latestReturn : null;
+        const expired = statusBannerHasExpired(displayedOrder, shownReturn);
         if (active && expired) {
           setOrder(null);
           setItemReturn(null);

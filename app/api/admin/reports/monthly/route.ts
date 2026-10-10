@@ -1,16 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { authenticate, getMonthlySalesReport } from "@/app/lib/backend";
+import { csvRow } from "@/app/lib/csv";
 import { handleRouteError } from "@/app/lib/errors";
 
-function csvCell(value: unknown) {
-  let text = value == null ? "" : String(value);
-  if (/^[=+\-@]/.test(text)) text = `'${text}`;
-  return `"${text.replaceAll('"', '""')}"`;
-}
-
-function row(values: unknown[]) {
-  return values.map(csvCell).join(",");
-}
+const row = csvRow;
 
 export async function GET(request: NextRequest) {
   try {

@@ -33,9 +33,12 @@ export function setSessionCookies(
     path: "/",
   };
 
+  // The two cookies carry the same token, so a back-office account gets the
+  // shorter admin lifetime on both; otherwise the customer cookie would keep
+  // the admin signed in for days.
   response.cookies.set(USER_SESSION_COOKIE, accessToken, {
     ...shared,
-    maxAge: USER_SESSION_MAX_AGE_SECONDS,
+    maxAge: isBackoffice ? ADMIN_SESSION_MAX_AGE_SECONDS : USER_SESSION_MAX_AGE_SECONDS,
   });
 
   if (isBackoffice) {

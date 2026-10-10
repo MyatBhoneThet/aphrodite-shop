@@ -11,6 +11,8 @@ const LIMITS: Record<string, number> = {
   login: 10,
   register: 5,
   "admin-login": 8,
+  // Six-digit codes: keep guessing impractical (1,000,000 possibilities).
+  mfa: 6,
   // Each reset request sends an email from the shop's own Gmail account, and
   // an unthrottled endpoint would let a stranger flood someone's inbox.
   "forgot-password": 4,
@@ -41,7 +43,7 @@ type Bucket = { count: number; resetAt: number };
 const buckets = new Map<string, Bucket>();
 let lastSweepAt = 0;
 
-function clientIp(request: NextRequest) {
+export function clientIp(request: NextRequest) {
   const forwarded = request.headers.get("x-forwarded-for");
   return (forwarded?.split(",")[0]?.trim() || "unknown").slice(0, 128);
 }

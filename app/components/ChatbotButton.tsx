@@ -64,6 +64,13 @@ export default function ChatbotButton({ currentUser, products }: { language?: "e
   const { t } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setMode] = useState<"assistant" | "live">("assistant");
+  // Lets other pages (e.g. "Chat with us now" in an order's help panel) open the chat.
+  useEffect(() => {
+    const open = () => { setIsOpen(true); setMode("live"); };
+    window.addEventListener("aphrodite:open-chat", open);
+    if (window.location.hash === "#chat") open(); // arriving from a support-reply notification
+    return () => window.removeEventListener("aphrodite:open-chat", open);
+  }, []);
   const [localMessages, setLocalMessages] = useState<LocalMessage[]>([{ id: 1, role: "assistant", body: "Hello! I am the Aphrodite shopping assistant. Ask me about products, prices, delivery, receipts or returns — and your own orders once you are logged in." }]);
   const [assistantSource, setAssistantSource] = useState<AssistantSource>("rules");
   const [isThinking, setIsThinking] = useState(false);

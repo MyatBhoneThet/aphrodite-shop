@@ -1242,4 +1242,209 @@ grant select, insert, update, delete on table public.site_feedback to service_ro
 
 
 
+create table if not exists public.customer_notes (
+  id uuid primary key default gen_random_uuid(),
+  customer_id uuid not null references public.profiles(id) on delete cascade,
+  author_id uuid not null references public.profiles(id) on delete restrict,
+  body text not null check (char_length(trim(body)) between 1 and 2000),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists customer_notes_customer_idx
+  on public.customer_notes (customer_id, created_at desc);
+
+-- Staff-only data: reachable only through the admin API routes (service role).
+alter table public.customer_notes enable row level security;
+revoke all on public.customer_notes from anon, authenticated;
+grant select, insert, update, delete on table public.customer_notes to service_role;
+
+
+
+-- Wholesale (B2B) additions: company details + business licence review,
+-- purchase-order numbers on orders, and a small settings table for the
+-- wholesale minimum order / pay-first rule.
+--
+-- Everything here is reached only through the server's admin and account
+-- routes (service role): customers have no direct table rights.
+
+create table if not exists public.company_details (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  tax_id text check (tax_id is null or char_length(tax_id) <= 60),
+  address text check (address is null or char_length(address) <= 400),
+  billing_name text check (billing_name is null or char_length(billing_name) <= 160),
+  billing_phone text check (billing_phone is null or char_length(billing_phone) <= 40),
+  billing_email text check (billing_email is null or char_length(billing_email) <= 200),
+  licence_status text not null default 'none'
+    check (licence_status in ('none', 'pending', 'verified', 'rejected')),
+  licence_path text,
+  licence_file_name text,
+  licence_content_type text,
+  licence_submitted_at timestamptz,
+  licence_reviewed_at timestamptz,
+  licence_reviewed_by uuid references public.profiles(id) on delete set null,
+  licence_review_note text check (licence_review_note is null or char_length(licence_review_note) <= 500),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.company_details enable row level security;
+revoke all on table public.company_details from anon, authenticated;
+grant select, insert, update, delete on table public.company_details to service_role;
+
+alter table public.orders
+  add column if not exists po_number text
+  check (po_number is null or char_length(po_number) between 1 and 60);
+
+create table if not exists public.shop_settings (
+  key text primary key,
+  value jsonb not null,
+  updated_at timestamptz not null default now(),
+  updated_by uuid references public.profiles(id) on delete set null
+);
+
+alter table public.shop_settings enable row level security;
+revoke all on table public.shop_settings from anon, authenticated;
+grant select, insert, update, delete on table public.shop_settings to service_role;
+
+-- Private bucket for business licence scans (reads are signed server-side).
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'business-licences',
+  'business-licences',
+  false,
+  10485760,
+  array['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+)
+on conflict (id) do update set
+  public = false,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+
+
+-- A customer can cancel an order straight away while the shop has not checked
+-- it yet (status 'pending') and no money can have changed hands. Anything
+-- later still goes through the existing cancellation request.
+--
+-- One transaction: stock goes back and the order is closed together, exactly as
+-- admin_cancel_order does. Only the server (service role) can call it.
+
+create or replace function public.customer_cancel_order(
+  p_user_id uuid,
+  p_order_id uuid,
+  p_reason text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_order public.orders%rowtype;
+begin
+  select * into v_order
+  from public.orders
+  where id = p_order_id and user_id = p_user_id
+  for update;
+
+  if not found then
+    raise exception 'ORDER_NOT_FOUND' using errcode = 'P0001';
+  end if;
+  if length(trim(coalesce(p_reason, ''))) < 3 then
+    raise exception 'INVALID_REQUEST_REASON' using errcode = 'P0001';
+  end if;
+
+  -- Not the instant path: already checked, closed, with a request open, or
+  -- possibly paid. The server falls back to a normal cancellation request.
+  if v_order.status <> 'pending'
+     or v_order.cancellation_request_status in ('requested', 'approved') then
+    raise exception 'CANCEL_NOT_INSTANT' using errcode = 'P0001';
+  end if;
+  if v_order.payment_method in ('bank_transfer', 'mmqr') then
+    if coalesce(v_order.payment_verification_status, 'pending') = 'verified'
+       or exists (select 1 from public.payment_slips where order_id = p_order_id) then
+      raise exception 'CANCEL_NOT_INSTANT' using errcode = 'P0001';
+    end if;
+  end if;
+
+  update public.products as product
+  set stock_quantity = product.stock_quantity + items.quantity
+  from public.order_items as items
+  where items.order_id = p_order_id and product.id = items.product_id;
+
+  update public.orders set
+    status = 'cancelled',
+    cancellation_request_status = 'approved',
+    cancellation_source = 'customer',
+    cancellation_reason_code = 'customer_request',
+    cancellation_reason = trim(p_reason),
+    cancellation_requested_at = now(),
+    cancellation_resolved_at = now()
+  where id = p_order_id;
+
+  insert into public.audit_log (
+    actor_id, action, target_type, target_id, previous_data, new_data
+  ) values (
+    p_user_id,
+    'order.cancel.self',
+    'order',
+    p_order_id::text,
+    jsonb_build_object('status', v_order.status),
+    jsonb_build_object('status', 'cancelled', 'reason', trim(p_reason))
+  );
+
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+revoke execute on function public.customer_cancel_order(uuid, uuid, text) from public, anon, authenticated;
+grant execute on function public.customer_cancel_order(uuid, uuid, text) to service_role;
+
+
+
+-- Customer notifications: the in-app bell list and phone (web push) subscriptions.
+-- Reached only through the server's account routes (service role).
+
+create table if not exists public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  kind text not null check (char_length(kind) between 1 and 60),
+  title text not null check (char_length(title) between 1 and 200),
+  body text not null default '' check (char_length(body) <= 500),
+  link text check (link is null or (char_length(link) <= 300 and link like '/%')),
+  -- The same event is only announced once (e.g. "delivered" saved twice).
+  dedupe_key text check (dedupe_key is null or char_length(dedupe_key) <= 200),
+  created_at timestamptz not null default now(),
+  read_at timestamptz
+);
+
+create index if not exists notifications_user_time_idx
+  on public.notifications (user_id, created_at desc);
+create index if not exists notifications_user_unread_idx
+  on public.notifications (user_id) where read_at is null;
+create unique index if not exists notifications_dedupe_idx
+  on public.notifications (user_id, dedupe_key) where dedupe_key is not null;
+
+alter table public.notifications enable row level security;
+revoke all on table public.notifications from anon, authenticated;
+grant select, insert, update, delete on table public.notifications to service_role;
+
+create table if not exists public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  endpoint text not null unique check (char_length(endpoint) <= 1000),
+  p256dh text not null,
+  auth text not null,
+  user_agent text check (user_agent is null or char_length(user_agent) <= 300),
+  created_at timestamptz not null default now(),
+  last_success_at timestamptz
+);
+
+create index if not exists push_subscriptions_user_idx on public.push_subscriptions (user_id);
+
+alter table public.push_subscriptions enable row level security;
+revoke all on table public.push_subscriptions from anon, authenticated;
+grant select, insert, update, delete on table public.push_subscriptions to service_role;
+
+
+
 notify pgrst, 'reload schema';

@@ -8,6 +8,8 @@ import { authHeaders } from "@/app/lib/client-auth";
 import type { UserRole } from "@/app/data/products";
 import { formatCurrency, formatDateTime } from "@/app/lib/format";
 import { useAdminText } from "@/app/lib/useAdminText";
+import LowStockCard from "./LowStockCard";
+import OrderExportCard from "./OrderExportCard";
 
 type AdminPanel = "dashboard" | "products" | "orders" | "queue" | "locations" | "support" | "ads" | "wholesale" | "pricing" | "sync" | "staff";
 
@@ -340,6 +342,11 @@ export default function AdminOverviewPanel({ role, onNavigate }: AdminOverviewPa
               </button>
               <p className="mt-3 text-xs leading-5 text-slate-500">Revenue is order value and does not subtract business expenses, because expense and cost data is not currently tracked.</p>
             </section>
+          </div>
+
+          <div className="grid gap-5 lg:grid-cols-2">
+            <LowStockCard onOpenProducts={() => onNavigate("products")} />
+            {role === "admin" && <OrderExportCard />}
           </div>
         </>
       ) : null}

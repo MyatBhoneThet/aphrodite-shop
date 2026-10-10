@@ -3,6 +3,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { codReviewError } from "./cod-verification";
 import { orderTracking, trackingLabels, trackingSteps } from "./order-tracking";
 import { reviewOrderDeliveryRpc } from "./supabase";
+import { productChange, recordAdminAction } from "./admin-audit";
+import { requireFreshAuth } from "./mfa";
+import { licenceRequired, wholesaleOrderProblem, type WholesaleRules } from "./company";
+import { canCancelInstantly } from "./order-help";
+import { notifyOrderCustomer, notifyReturnCustomer, notifySupportReply } from "./notifications";
+import { getWholesaleRules } from "./wholesale-b2b";
 import { isApproximatelyInYangon, isMyanmarCountry, normalizeMyanmarRegion, normalizeYangonTownship } from "./delivery-country";
 import type { Product } from "../data/products";
 import { isSameVariantGroup, productVariant, variantOptions } from "./product-variants";
@@ -27,6 +33,9 @@ import {
   insertPaymentSlip,
   selectPaymentSlipById,
   updateOrderPaymentService,
+  customerCancelOrderRpc,
+  updateOrderPoNumber,
+  selectCompanyDetails,
   uploadPaymentSlipObject,
   createPaymentSlipSignedUrl,
   deactivateInviteCodeService,
@@ -211,6 +220,10 @@ export type CartSummary = {
   retailSubtotal: number;
   totalSavings: number;
   wholesale: boolean;
+  /** Wholesale only: the smallest order allowed, when one is set. */
+  minimumOrder: { minAmount: number; minUnits: number } | null;
+  /** Wholesale only: orders must be paid by bank transfer first. */
+  prepayRequired: boolean;
 };
 
 function cleanQuantity(quantity: unknown) {
@@ -286,6 +299,8 @@ export type WholesaleContext = {
   /** "% off retail" bands for this list: list-wide rows plus any per-product
    *  overrides. Empty for lists that still use fixed per-product prices. */
   percentBands: PercentBandRow[];
+  /** Minimum order and pay-first rules for wholesale orders. */
+  rules: WholesaleRules;
 };
 
 export async function wholesaleContext(
@@ -293,6 +308,12 @@ export async function wholesaleContext(
   productIds: number[]
 ): Promise<WholesaleContext | null> {
   if (!user || !isWholesaleApproved(user.profile)) return null;
+
+  // Optional: hold wholesale prices back until an admin has verified the business licence.
+  if (licenceRequired()) {
+    const company = await selectCompanyDetails(user.id).catch(() => null);
+    if (company?.licence_status !== "verified") return null;
+  }
 
   const priceList = await selectPriceListById(
     user.profile.price_list_id as string,
@@ -316,7 +337,7 @@ export async function wholesaleContext(
     tiersByProduct.set(tier.product_id, list);
   }
 
-  return { priceList, tiersByProduct, percentBands };
+  return { priceList, tiersByProduct, percentBands, rules: await getWholesaleRules() };
 }
 
 function cartResponse(
@@ -380,6 +401,11 @@ function cartResponse(
     retailSubtotal,
     totalSavings: items.reduce((sum, item) => sum + item.pricing.savings, 0),
     wholesale: context !== null,
+    minimumOrder:
+      context && (context.rules.minAmount > 0 || context.rules.minUnits > 0)
+        ? { minAmount: context.rules.minAmount, minUnits: context.rules.minUnits }
+        : null,
+    prepayRequired: Boolean(context?.rules.prepayRequired),
   };
 }
 
@@ -872,6 +898,13 @@ export async function adminPricePreview(
 export async function createProduct(user: CurrentUser, product: Partial<Product>) {
   requireAdmin(user);
   const row = await insertProduct(product);
+  await recordAdminAction({
+    actorId: user.id,
+    action: "product.create",
+    targetType: "product",
+    targetId: row.id,
+    next: { name: row.name, brand: row.brand, price: row.price },
+  });
   return mapProductRow(row);
 }
 
@@ -890,8 +923,18 @@ export async function patchProduct(
   product: Partial<Product>
 ) {
   requireBackoffice(user);
-  const editableProduct = { ...product };
-  if (user.role === "staff") delete editableProduct.wholesalePrice;
+  let editableProduct = { ...product };
+  if (user.role === "staff") {
+    // Staff keep the shelves honest, they do not set prices: only the stock
+    // fields get through, whatever else the form sent along.
+    editableProduct = {
+      ...(product.stock !== undefined ? { stock: product.stock } : {}),
+      ...(product.stockQuantity !== undefined ? { stockQuantity: product.stockQuantity } : {}),
+    };
+    if (Object.keys(editableProduct).length === 0) {
+      throw forbidden("Staff can change stock only. Ask an administrator to change prices or product details.");
+    }
+  }
 
   // A stock change for a sheet product writes the sheet, the product and the
   // sync baseline, so it takes turns with the product sync (sheet-stock-lock.ts).
@@ -904,6 +947,7 @@ async function saveProduct(user: CurrentUser, id: number, product: Partial<Produ
   let sheetStock: AdminStockSheetUpdate | null = null;
   let sheetSourceKey: string | null = null;
   let previousWebsiteQuantity = 0;
+  const before = await selectProductByIdService(id).catch(() => null);
 
   // Stock for products that come from the Google Sheet belongs to the sheet:
   // the sync caps website stock at the sheet, so a number saved only here
@@ -992,12 +1036,33 @@ async function saveProduct(user: CurrentUser, id: number, product: Partial<Produ
     });
   }
 
+  const change = productChange(before as Record<string, unknown> | null, product as Record<string, unknown>);
+  if (Object.keys(change.next).length) {
+    await recordAdminAction({
+      actorId: user.id,
+      action: "product.update",
+      targetType: "product",
+      targetId: id,
+      previous: change.previous ? { name: before?.name, ...change.previous } : { name: before?.name },
+      next: change.next,
+    });
+  }
+
   return { product: mapProductRow(row), sheetStock };
 }
 
 export async function removeProduct(user: CurrentUser, id: number) {
   requireAdmin(user);
+  requireFreshAuth(user);
+  const before = await selectProductByIdService(id).catch(() => null);
   await deleteProduct(id);
+  await recordAdminAction({
+    actorId: user.id,
+    action: "product.delete",
+    targetType: "product",
+    targetId: id,
+    previous: { name: before?.name ?? null, price: before?.price ?? null },
+  });
 }
 
 export async function getCart(user: CurrentUser) {
@@ -1378,6 +1443,8 @@ export async function createOrder(
     payment_method?: PaymentMethod;
     payment_account?: "kbz" | "aya" | "mmqr" | null;
     notes?: string | null;
+    /** Wholesale buyers' own purchase-order reference. */
+    po_number?: string | null;
     cod_confirmation?: true;
     cod_contact_confirmation?: true;
     delivery_location_consent?: boolean;
@@ -1507,6 +1574,16 @@ export async function createOrder(
   const paymentMethod: PaymentMethod = body.payment_method ?? "cash_on_delivery";
   const prepaid = isPrepaidMethod(paymentMethod);
 
+  // Wholesale terms: a minimum order, and (by default) pay by bank transfer first.
+  if (context) {
+    const problem = wholesaleOrderProblem(context.rules, {
+      total: totalAmount,
+      units: lines.reduce((sum, line) => sum + line.quantity, 0),
+      paymentMethod,
+    });
+    if (problem) throw badRequest(problem);
+  }
+
   // Single transaction: order + items + inventory deduction + cart clear all
   // succeed or all roll back (see checkout_order in supabase/schema.sql).
   let result: { order_id: string };
@@ -1530,6 +1607,14 @@ export async function createOrder(
     });
   } catch (error) {
     throw mapCheckoutError(error, selectedCart);
+  }
+
+  // The buyer's purchase-order number is only for wholesale accounts. The order
+  // is already committed, so a failure here is logged, never reported as a failed checkout.
+  if (context && body.po_number) {
+    await updateOrderPoNumber(result.order_id, body.po_number).catch((error) =>
+      console.error("[orders] could not save the PO number", { order_id: result.order_id, error: error instanceof Error ? error.message : String(error) })
+    );
   }
 
   // Geolocation is optional and collected only after an explicit checkout
@@ -1964,6 +2049,7 @@ export async function adminListStaff(user: CurrentUser) {
 
 export async function adminGrantStaff(user: CurrentUser, email: string) {
   requireAdmin(user);
+  requireFreshAuth(user);
   const normalizedEmail = email.trim().toLowerCase();
   const profile = await selectProfileByEmailService(normalizedEmail);
   if (!profile) throw notFound("No account exists with that email address.");
@@ -1984,6 +2070,7 @@ export async function adminGrantStaff(user: CurrentUser, email: string) {
 
 export async function adminDeleteStaff(user: CurrentUser, staffId: string) {
   requireAdmin(user);
+  requireFreshAuth(user);
   if (staffId === user.id) throw conflict("You cannot delete your own account.");
   const profile = await selectProfileByIdService(staffId);
   if (!profile || profile.role !== "staff") throw notFound("Staff account not found.");
@@ -2434,12 +2521,58 @@ export async function adminAuditLog(user: CurrentUser, limit = 100) {
   return selectAuditLog(limit, user.accessToken);
 }
 
+/**
+ * Admins write order rows under their own token (and the table's policies);
+ * staff have no write rights of their own, so the server writes for them with
+ * the service role -- but only for the fulfilment steps allowed below.
+ */
+function orderWriteToken(user: CurrentUser) {
+  return user.role === "staff" ? null : user.accessToken;
+}
+
+/** Saves the courier name, tracking number and ETA. Admins and staff (it is part of handing a parcel over). */
+export async function saveCourierDetails(
+  user: CurrentUser,
+  id: string,
+  input: { courier_name: string; tracking_number: string; estimated_delivery_at?: string | null }
+) {
+  requireBackoffice(user);
+  const existing = await selectOrderById(user, id);
+  if (!existing) return null;
+  if (existing.status === "cancelled" || existing.status === "returned") {
+    throw conflict("Courier details cannot be changed for a closed order.");
+  }
+
+  await updateOrderDeliveryService(id, {
+    courier_name: input.courier_name,
+    delivery_tracking_number: input.tracking_number,
+    ...(input.estimated_delivery_at !== undefined ? { estimated_delivery_at: input.estimated_delivery_at } : {}),
+  });
+  await recordAdminAction({
+    actorId: user.id,
+    action: "order.courier.update",
+    targetType: "order",
+    targetId: id,
+    previous: { courier: existing.courier_name ?? null, tracking: existing.delivery_tracking_number ?? null },
+    next: { courier: input.courier_name, tracking: input.tracking_number },
+  });
+
+  const updated = await selectOrderById(user, id);
+  return updated ? orderResponse(updated) : null;
+}
+
+/** Staff may pack, hand over, deliver and report failed attempts. Approving the order (COD / payment check) stays with admins. */
+const STAFF_STATUS_TARGETS = new Set<OrderStatus>(["shipped", "delivered"]);
+
 export async function patchOrderStatus(
   user: CurrentUser,
   id: string,
   status: Extract<OrderStatus, "pending" | "confirmed" | "shipped" | "delivered">
 ) {
-  requireAdmin(user);
+  requireBackoffice(user);
+  if (user.role === "staff" && !STAFF_STATUS_TARGETS.has(status)) {
+    throw forbidden("Only an administrator can approve an order.");
+  }
 
   const existing = await selectOrderById(user, id);
   if (!existing) return null;
@@ -2487,7 +2620,7 @@ export async function patchOrderStatus(
       ? existing.receipt_number ?? makeReceiptNumber(existing.id)
       : undefined;
 
-  await updateOrderStatus(id, status, user.accessToken, {
+  await updateOrderStatus(id, status, orderWriteToken(user), {
     paymentStatus: status === "delivered" ? "collected" : undefined,
     confirmedAt: status === "confirmed" ? now : undefined,
     deliveredAt: status === "delivered" ? now : undefined,
@@ -2522,7 +2655,10 @@ export async function advanceOrderDeliveryProgress(
   id: string,
   stage: Exclude<DeliveryProgressStage, "order_placed">
 ) {
-  requireAdmin(user);
+  requireBackoffice(user);
+  if (user.role === "staff" && stage === "verified") {
+    throw forbidden("Only an administrator can verify an order.");
+  }
 
   const existing = await selectOrderById(user, id);
   if (!existing) return null;
@@ -2659,7 +2795,7 @@ async function emailDeliveredReceipt(
   options: { idempotencySuffix?: string } = {}
 ): Promise<DeliveredReceiptOutcome> {
   if (!(await wantsOrderUpdates(order.user_id))) {
-    await updateOrderStatus(order.id, "delivered", user.accessToken, {
+    await updateOrderStatus(order.id, "delivered", orderWriteToken(user), {
       receiptEmailStatus: "not_sent",
       receiptSentAt: null,
       receiptEmailError: null,
@@ -2673,7 +2809,7 @@ async function emailDeliveredReceipt(
     idempotencySuffix: options.idempotencySuffix,
   });
 
-  await updateOrderStatus(order.id, "delivered", user.accessToken, {
+  await updateOrderStatus(order.id, "delivered", orderWriteToken(user), {
     receiptEmailStatus: result.status,
     receiptSentAt: result.status === "sent" ? result.sentAt : null,
     receiptEmailError: result.status === "failed" ? result.error : null,
@@ -2725,6 +2861,7 @@ export async function resendOrderReceipt(user: CurrentUser, id: string) {
 export async function notifyOrderPlaced(user: CurrentUser, orderId: string) {
   try {
     const order = await selectOrderById(user, orderId);
+    if (order) await notifyOrderCustomer(order, { type: "placed" });
     if (!order || !(await wantsOrderUpdates(order.user_id))) return;
 
     const result = await sendOrderEmail(await withCustomerContact(order), {
@@ -2750,6 +2887,7 @@ export async function notifyOrderCancelled(user: CurrentUser, orderId: string) {
   try {
     const order = await selectOrderById(user, orderId);
     if (!order || order.status !== "cancelled") return;
+    await notifyOrderCustomer(order, { type: "cancelled" });
     if (!(await wantsOrderUpdates(order.user_id))) return;
 
     const result = await sendOrderEmail(await withCustomerContact(order), {
@@ -2783,6 +2921,7 @@ export async function notifyCancellationRefundSent(
       order.cancellation_refund_status !== "sent" ||
       order.payment_status !== "refunded"
     ) return;
+    await notifyOrderCustomer(order, { type: "refund_sent" });
     if (!(await wantsOrderUpdates(order.user_id))) return;
 
     const result = await sendOrderEmail(await withCustomerContact(order), {
@@ -2814,6 +2953,7 @@ export async function notifyOrderProgress(
 ) {
   try {
     const order = await selectOrderById(user, orderId);
+    if (order) await notifyOrderCustomer(order, { type: "stage", stage });
     if (!order || !(await wantsOrderUpdates(order.user_id))) return;
 
     const result = await sendOrderEmail(await withCustomerContact(order), {
@@ -2847,6 +2987,7 @@ export async function notifyOrderDelivered(user: CurrentUser, orderId: string) {
   try {
     const order = await selectOrderById(user, orderId);
     if (!order || order.status !== "delivered") return;
+    await notifyOrderCustomer(order, { type: "stage", stage: "delivered" });
 
     // Re-submitting "delivered" must not email the customer a second time.
     if (order.receipt_email_status === "sent") return;
@@ -3020,6 +3161,8 @@ export async function verifyOrderPayment(
   });
 
   const updated = await selectOrderById(user, id);
+  // Tell the customer about the decision (bell and phone); it never blocks or fails the review.
+  if (updated) await notifyOrderCustomer(updated, { type: "payment", decision: input.decision });
   return updated ? orderResponse(updated) : null;
 }
 
@@ -3051,7 +3194,7 @@ export async function recordFailedDeliveryAttempt(
     admin_note?: string | null;
   }
 ) {
-  requireAdmin(user);
+  requireBackoffice(user);
 
   const existing = await selectOrderById(user, id);
   if (!existing) return null;
@@ -3133,6 +3276,7 @@ export async function notifyDeliveryAttemptFailed(
 ) {
   try {
     const order = await selectOrderById(user, orderId);
+    if (order) await notifyOrderCustomer(order, { type: "attempt_failed", attempt: failedAttemptCount(order) });
     if (!order || !(await wantsOrderUpdates(order.user_id))) return;
 
     const result = await sendOrderEmail(await withCustomerContact(order), {
@@ -3158,6 +3302,39 @@ export async function notifyDeliveryAttemptFailed(
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+/**
+ * "Cancel my order". If the shop has not checked it yet and no payment can be
+ * on its way, it is cancelled at once (stock goes back in the same step).
+ * Otherwise it falls back to a normal cancellation request for the shop to
+ * answer, so the customer never has to know which path applied.
+ */
+export async function cancelOwnOrder(user: CurrentUser, id: string, reason: string) {
+  if (user.role === "admin" || user.role === "staff") throw forbidden("Back-office accounts cannot cancel as a customer.");
+  const existing = await selectOrderById(user, id);
+  if (!existing) return null;
+
+  const request = async () => {
+    const order = await requestOrderAction(user, id, { action: "request_cancellation", reason });
+    return order ? { mode: "requested" as const, order } : null;
+  };
+
+  if (!canCancelInstantly(existing)) return request();
+
+  try {
+    await customerCancelOrderRpc({ user_id: user.id, order_id: id, reason });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // Not eligible any more (someone checked it a moment ago), or the database
+    // function has not been created yet: a request still works.
+    if (message.includes("CANCEL_NOT_INSTANT") || message.includes("customer_cancel_order")) return request();
+    throw mapOrderLifecycleError(error);
+  }
+
+  await restoreSheetStockForCancelledOrder(user.id, existing);
+  const updated = await selectOrderById(user, id);
+  return updated ? { mode: "cancelled" as const, order: orderResponse(updated) } : null;
 }
 
 export async function requestOrderAction(
@@ -3998,6 +4175,7 @@ export async function notifyReturnProgress(
 ) {
   try {
     const request = await selectReturnRequestById(requestId);
+    if (request) await notifyReturnCustomer(request.customer_id, { id: request.id, order_id: request.order_id }, event, idempotencySuffix);
     if (!request || !(await wantsOrderUpdates(request.customer_id))) return;
 
     // Some databases do not expose the joined profile to the service query.
@@ -4946,6 +5124,7 @@ export async function sendAdminSupportMessage(
       sender_role: "admin",
       body,
     });
+    await notifySupportReply(conversation.customer_id);
 
     if (!conversation.assigned_admin_id) {
       await updateSupportConversation(conversation.id, {

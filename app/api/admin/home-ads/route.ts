@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
+import { recordAdminAction } from "@/app/lib/admin-audit";
 import { authenticate } from "@/app/lib/backend";
 import { badRequest, handleRouteError } from "@/app/lib/errors";
 import { isHomepageAdPlacement } from "@/app/lib/homepage-ads";
@@ -74,6 +75,7 @@ export async function POST(request: NextRequest) {
       // administrator identifier in it.
       created_by: null,
     });
+    await recordAdminAction({ actorId: user.id, action: "home_ad.create", targetType: "home_ad", targetId: ad.id, next: { title, placement } });
     return NextResponse.json({ ad }, { status: 201 });
   } catch (error) {
     if (uploadedPath) await deleteHomepageAdObject(uploadedPath).catch(() => {});

@@ -12,6 +12,8 @@ import {
   notifyOrderDelivered,
   notifyOrderProgress,
   recordFailedDeliveryAttempt,
+  saveCourierDetails,
+  cancelOwnOrder,
   patchOrderStatus,
   requestOrderAction,
   submitCancellationRefundDetails,
@@ -86,6 +88,22 @@ export async function PATCH(
         return NextResponse.json({ error: "Order not found." }, { status: 404 });
       }
       return NextResponse.json({ order: verified });
+    }
+
+    if ("action" in parsed.data && parsed.data.action === "cancel_order") {
+      const result = await cancelOwnOrder(user, id, parsed.data.reason);
+      if (!result) {
+        return NextResponse.json({ error: "Order not found." }, { status: 404 });
+      }
+      return NextResponse.json({ order: result.order, mode: result.mode });
+    }
+
+    if ("action" in parsed.data && parsed.data.action === "update_courier") {
+      const saved = await saveCourierDetails(user, id, parsed.data);
+      if (!saved) {
+        return NextResponse.json({ error: "Order not found." }, { status: 404 });
+      }
+      return NextResponse.json({ order: saved });
     }
 
     if ("action" in parsed.data && parsed.data.action === "advance_delivery_progress") {

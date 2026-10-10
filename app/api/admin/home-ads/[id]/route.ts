@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { recordAdminAction } from "@/app/lib/admin-audit";
 import { authenticate } from "@/app/lib/backend";
 import { badRequest, handleRouteError, notFound } from "@/app/lib/errors";
 import { readJsonBody } from "@/app/lib/request";
@@ -50,8 +51,10 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     const user = await authenticate(request);
     requireBackoffice(user);
     const { id } = await context.params;
-    const ad = await updateHomepageAd(id, safeFields(await readJsonBody(request)));
+    const fields = safeFields(await readJsonBody(request));
+    const ad = await updateHomepageAd(id, fields);
     if (!ad) throw notFound("Advertisement not found.");
+    await recordAdminAction({ actorId: user.id, action: "home_ad.update", targetType: "home_ad", targetId: id, next: { title: ad.title, ...fields } });
     return NextResponse.json({ ad });
   } catch (error) {
     return handleRouteError("admin.home-ads.update", error);
@@ -67,6 +70,7 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     if (!existing) throw notFound("Advertisement not found.");
     await deleteHomepageAd(id);
     await deleteHomepageAdObject(existing.storage_path);
+    await recordAdminAction({ actorId: user.id, action: "home_ad.delete", targetType: "home_ad", targetId: id, previous: { title: existing.title, placement: existing.placement } });
     return NextResponse.json({ deleted: true });
   } catch (error) {
     return handleRouteError("admin.home-ads.delete", error);

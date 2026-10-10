@@ -23,7 +23,7 @@ export default function AdminLoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (status === "ready" && (user?.role === "admin" || user?.role === "staff")) {
+    if (status === "ready" && (user?.role === "admin" || user?.role === "staff" || user?.mfa?.pending)) {
       window.location.assign("/admin/dashboard");
     }
   }, [status, user]);

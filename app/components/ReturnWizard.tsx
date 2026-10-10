@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
 import { formatCurrency, formatDateTime } from "../lib/format";
 import { useLanguage } from "../lib/language";
+import { evidenceFileProblem } from "../lib/order-help";
 
 type WizardItem = {
   id: string;
@@ -88,6 +89,23 @@ export default function ReturnWizard({
   const [preferredServiceDate, setPreferredServiceDate] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
+  const [fileProblems, setFileProblems] = useState<string[]>([]);
+  // A request is saved before its files go up. If a file then fails, pressing
+  // Send again must finish the job, not create the request a second time.
+  const savedRequests = useRef<Map<string, string>>(new Map()); // order item id -> saved request id
+  const uploadedFiles = useRef<Set<string>>(new Set());
+
+  function chooseFiles(chosen: File[]) {
+    const problems: string[] = [];
+    const accepted: File[] = [];
+    for (const file of chosen) {
+      const problem = evidenceFileProblem(file);
+      if (problem) problems.push(problem);
+      else accepted.push(file);
+    }
+    setFiles(accepted);
+    setFileProblems(problems);
+  }
 
   const selectedItems = items.filter((item) => selectedQuantities[item.id] > 0);
   const deadline = order.delivered_at
@@ -150,6 +168,8 @@ export default function ReturnWizard({
     try {
       const requestIds: string[] = [];
       for (const selectedItem of selectedItems) {
+        const saved = savedRequests.current.get(selectedItem.id);
+        if (saved) { requestIds.push(saved); continue; } // created on an earlier try
         const response = await fetch("/api/returns", {
           method: "POST",
           headers: { ...authHeaders(), "Content-Type": "application/json" },
@@ -180,12 +200,15 @@ export default function ReturnWizard({
           throw new Error(data?.error ?? "Unable to send your return request.");
         }
         requestIds.push(data.request.id);
+        savedRequests.current.set(selectedItem.id, data.request.id);
       }
 
       // Files go up one at a time against the saved request, so a rejected
       // file never loses the request the customer already filled in.
       for (const requestId of requestIds) {
         for (const file of files) {
+          const uploadKey = `${requestId}:${file.name}:${file.size}`;
+          if (uploadedFiles.current.has(uploadKey)) continue;
           const upload = new FormData();
           upload.set("file", file);
           upload.set(
@@ -207,8 +230,18 @@ export default function ReturnWizard({
             const uploadError = (await uploaded.json().catch(() => null)) as
               | { error?: string }
               | null;
-            throw new Error(uploadError?.error ?? "Unable to upload your evidence.");
+            // Hosting rejects very large uploads before our server sees them,
+            // with a page instead of our usual message.
+            const tooLarge = uploaded.status === 413;
+            throw new Error(
+              `${t("return.savedButFile")} ${
+                tooLarge
+                  ? `"${file.name}" is too large to upload.`
+                  : uploadError?.error ?? `"${file.name}" could not be uploaded.`
+              } ${t("return.retryHelp")}`
+            );
           }
+          uploadedFiles.current.add(uploadKey);
         }
       }
 
@@ -340,11 +373,21 @@ export default function ReturnWizard({
                 type="file"
                 multiple
                 accept={`${PHOTO_TYPES},${VIDEO_TYPES}`}
-                onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
+                onChange={(event) => chooseFiles(Array.from(event.target.files ?? []))}
                 className="mt-2 block w-full rounded-xl border border-red-300 bg-white px-4 py-3 text-sm text-zinc-900"
               />
             </label>
             <p className="mt-2 text-xs text-zinc-500">{t("return.fileLimit")}</p>
+            {files.length > 0 && (
+              <ul className="mt-2 space-y-1 text-xs text-zinc-700" aria-label="Files ready to send">
+                {files.map((file) => <li key={`${file.name}-${file.size}`}>✓ {file.name} ({Math.round((file.size / (1024 * 1024)) * 10) / 10} MB)</li>)}
+              </ul>
+            )}
+            {fileProblems.length > 0 && (
+              <ul role="alert" className="mt-2 space-y-1 rounded-lg bg-red-50 p-3 text-xs font-semibold text-red-700">
+                {fileProblems.map((problem) => <li key={problem}>{problem}</li>)}
+              </ul>
+            )}
 
             <label className="mt-3 block text-sm font-semibold">
               {t("return.evidenceLink")}

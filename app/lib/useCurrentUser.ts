@@ -21,6 +21,8 @@ export type CurrentUser = {
   support_updates_enabled?: boolean;
   marketing_emails_enabled?: boolean;
   role: UserRole;
+  /** Back-office accounts only: a two-step code may still be owed (role is "normal" until then). */
+  mfa?: { pending: "verify" | "enroll" | null; enrolled: boolean; realRole: "admin" | "staff" };
   wholesale_status?:
     | "not_applied"
     | "pending"

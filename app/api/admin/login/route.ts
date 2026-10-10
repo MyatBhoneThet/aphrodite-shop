@@ -6,6 +6,7 @@ import {
 import { handleRouteError } from "@/app/lib/errors";
 import { checkRateLimit } from "@/app/lib/rate-limit";
 import { readJsonBody } from "@/app/lib/request";
+import { registerSignIn } from "@/app/lib/admin-signin";
 import { getProfile, loginUser } from "@/app/lib/supabase";
 import { loginInputSchema } from "@/app/lib/validation";
 
@@ -51,7 +52,8 @@ export async function POST(request: NextRequest) {
 
     // Tokens live only in httpOnly cookies -- never in the JSON body where
     // client JS could persist them to localStorage.
-    const response = NextResponse.json({ ok: true, user: profile });
+    const { mfaPending } = await registerSignIn(request, { accessToken: session.access_token, profile, method: "Email and password" });
+    const response = NextResponse.json({ ok: true, user: profile, mfa_pending: mfaPending });
 
     response.cookies.set(ADMIN_SESSION_COOKIE, session.access_token, {
       httpOnly: true,

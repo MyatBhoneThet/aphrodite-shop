@@ -28,6 +28,14 @@ vi.mock("../app/lib/supabase", async (importOriginal) => {
 // Replaced outright rather than spread from the original: loading the real
 // module would pull in the mail transport (and nodemailer) for a test that
 // only cares which address the email was addressed to.
+// The bell/phone notification has its own tests; keep it out of this one so
+// the profile-read count below only measures the receipt email.
+vi.mock("../app/lib/notifications", () => ({
+  notifyOrderCustomer: vi.fn(),
+  notifyReturnCustomer: vi.fn(),
+  notifySupportReply: vi.fn(),
+}));
+
 vi.mock("../app/lib/receipt-email", () => ({
   makeReceiptNumber: (id: string) => `AP-${id}`,
   sendOrderEmail: vi.fn(),

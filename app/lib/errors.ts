@@ -9,12 +9,20 @@ import { NextResponse } from "next/server";
  */
 export class AppError extends Error {
   status: number;
+  /** Machine-readable reason the browser can act on (e.g. ask for a code again). */
+  code?: string;
 
-  constructor(message: string, status = 400) {
+  constructor(message: string, status = 400, code?: string) {
     super(message);
     this.name = "AppError";
     this.status = status;
+    this.code = code;
   }
+}
+
+/** A risky admin action needs a freshly confirmed password or authenticator code. */
+export function reauthRequired(message = "Please confirm it's you to continue.") {
+  return new AppError(message, 403, "reauth_required");
 }
 
 export function unauthorized(message = "Unauthorized") {
@@ -51,7 +59,10 @@ export function unsupportedMediaType(message = "Content-Type must be application
 
 export function handleRouteError(scope: string, error: unknown) {
   if (error instanceof AppError) {
-    return NextResponse.json({ error: error.message }, { status: error.status });
+    return NextResponse.json(
+      error.code ? { error: error.message, code: error.code } : { error: error.message },
+      { status: error.status }
+    );
   }
 
   console.error(`[${scope}] unexpected error`, error);
