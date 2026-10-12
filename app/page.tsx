@@ -6,7 +6,6 @@ import Navbar from "./components/Navbar";
 import HeroSlider from "./components/HeroSlider";
 import CategoryGrid from "./components/CategoryGrid";
 import ProductSection from "./components/ProductSection";
-import { groupProductVariants } from "./lib/product-variants";
 import ChatbotButton from "./components/ChatbotButton";
 import SiteContact from "./components/SiteContact";
 import ProductFilters from "./components/ProductFilters";
@@ -264,7 +263,7 @@ export default function HomePage() {
         brands={brands}
         categories={categories}
         filters={filters}
-        resultCount={groupProductVariants(visibleProducts).length}
+        resultCount={visibleProducts.length}
         onChange={setFilters}
       />
 

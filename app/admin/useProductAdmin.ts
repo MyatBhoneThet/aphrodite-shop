@@ -65,6 +65,8 @@ export function useProductAdmin({ loadDashboardData, setMessage, setError }: Opt
       const payload: Partial<Product> = {
         name: productForm.name.trim(),
         type: productForm.type,
+        // Only a new product is placed in a sheet tab; edits never move it.
+        ...(productForm.id ? {} : { sourceSheet: productForm.sourceSheet }),
         category: productForm.category.trim(),
         brand: productForm.brand.trim(),
         price,
@@ -93,6 +95,7 @@ export function useProductAdmin({ loadDashboardData, setMessage, setError }: Opt
       }
 
       const data = (await response.json().catch(() => null)) as {
+        product?: Product;
         sheetStock?: {
           sheet: string;
           cells: { row: number; from: number; to: number }[];
@@ -119,7 +122,9 @@ export function useProductAdmin({ loadDashboardData, setMessage, setError }: Opt
         setMessage(
           productForm.id
             ? "Product updated successfully."
-            : "Product added successfully."
+            : data?.product?.sourceSheet
+              ? `Product added to the website and to the "${data.product.sourceSheet}" tab of the Google Sheet.`
+              : "Product added successfully."
         );
       }
     } catch (err) {
@@ -130,7 +135,11 @@ export function useProductAdmin({ loadDashboardData, setMessage, setError }: Opt
   }
 
   async function handleDeleteProduct(product: Product) {
-    const confirmed = window.confirm(`Delete ${product.name}?`);
+    const confirmed = window.confirm(
+      product.sourceSheet
+        ? `Delete ${product.name}?\n\nIts row is also deleted from the "${product.sourceSheet}" tab of the Google Sheet.`
+        : `Delete ${product.name}?`
+    );
 
     if (!confirmed) return;
 
@@ -147,8 +156,17 @@ export function useProductAdmin({ loadDashboardData, setMessage, setError }: Opt
         throw new Error(await getErrorMessage(response));
       }
 
+      const data = (await response.json().catch(() => null)) as {
+        sheetRows?: { status: string; sheet?: string; rows?: number[] } | null;
+      } | null;
+      const sheetRows = data?.sheetRows;
+
       await loadDashboardData();
-      setMessage("Product deleted successfully.");
+      setMessage(
+        sheetRows?.status === "deleted"
+          ? `Product deleted. Row ${sheetRows.rows?.join(", ")} was also deleted from the "${sheetRows.sheet}" tab of the Google Sheet.`
+          : "Product deleted successfully."
+      );
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Unable to delete product."

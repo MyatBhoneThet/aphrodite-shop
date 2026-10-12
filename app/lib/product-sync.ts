@@ -1,10 +1,15 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { serviceUnavailable } from "./errors";
-import { fetchProductsSheet, hasGoogleSheetsConfig } from "./google-sheets";
+import {
+  appendSheetProduct,
+  fetchProductsSheet,
+  hasGoogleSheetsConfig,
+  type SheetProductInput,
+} from "./google-sheets";
 import { withSheetStockLock } from "./sheet-stock-lock";
 import { sendTriggeredProductAlertEmails } from "./product-alert-email";
 import {
-  markRemovedProductsOutOfStock,
+  archiveRemovedProducts,
   previewStockCorrections,
   syncSheetWholesale,
   upsertProductionProducts,
@@ -32,7 +37,7 @@ function heldBackWarnings(plan: StockCorrectionPlan | null) {
 
   return [...bySheet].map(
     ([sheet, count]) =>
-      `${count} products from the "${sheet}" tab are missing from the sheet but still in stock on the website. They were left unchanged because that many missing rows can mean the sheet did not load fully. Check the sheet, then sync again.`
+      `${count} products from the "${sheet}" tab are missing from the sheet but still shown on the website. They were left unchanged because that many missing rows can mean the sheet did not load fully. Check the sheet, then sync again.`
   );
 }
 
@@ -88,9 +93,9 @@ async function applySheetSnapshot(sheet: SheetSnapshot) {
   }
 
   // Stock above the sheet was already capped inside the upsert; products
-  // deleted from the sheet are handled here.
+  // deleted from the sheet are taken off the website here.
   if (stockCorrections) {
-    await markRemovedProductsOutOfStock(stockCorrections.removedFromSheet);
+    await archiveRemovedProducts(stockCorrections.removedFromSheet);
   }
 
   // Price and stock watches are checked only after the authoritative sheet
@@ -129,13 +134,48 @@ export async function runProductSync({ dryRun }: { dryRun: boolean }) {
     };
   }
 
+  return withSheetStockLock(async () => (await syncSheetNow()).report);
+}
+
+/** Reads the sheet and saves it. The caller holds the sheet stock lock. */
+async function syncSheetNow() {
+  const sheet = await fetchProductsSheet();
+  const report = await applySheetSnapshot(sheet);
+  // The automatic sync can skip this sheet: it is saved now.
+  rememberSavedSheet(sheet, report.count);
+  return { sheet, report };
+}
+
+/**
+ * The admin "Add Product" form. The product is written to its workbook tab
+ * first and then synced like any other row, so the sheet, the database and
+ * the shop pages all list the same products. Returns the new product's key.
+ */
+export async function addProductThroughSheet(input: SheetProductInput) {
   return withSheetStockLock(async () => {
-    const sheet = await fetchProductsSheet();
-    const report = await applySheetSnapshot(sheet);
-    // The automatic sync can skip this sheet: it is saved now.
-    rememberSavedSheet(sheet, report.count);
-    return report;
+    const added = await appendSheetProduct(input);
+
+    try {
+      const { sheet } = await syncSheetNow();
+      const product = sheet.products.find(
+        (item) => item.sourceSheet === added.sheet && item.sourceRows.includes(added.row)
+      );
+      if (!product) throw new Error("the new row was not found after the sync");
+      return { ...added, sourceKey: product.sourceKey };
+    } catch (error) {
+      console.error("[product-sync] sync after adding a product failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw serviceUnavailable(
+        `The product was added to the "${added.sheet}" tab of the Google Sheet (row ${added.row}), but the website could not be updated. Click Sync Products to finish.`
+      );
+    }
   });
+}
+
+/** After rows were deleted from the sheet outside a sync, the next check must save. */
+export function forgetSavedSheet() {
+  autoSyncState().fingerprint = null;
 }
 
 // ---------------------------------------------------------------------------

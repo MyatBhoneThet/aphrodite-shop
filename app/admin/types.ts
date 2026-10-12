@@ -161,6 +161,8 @@ export type ProductFormState = {
   id?: number;
   name: string;
   type: ProductType;
+  /** Google Sheet tab a new product is added to. */
+  sourceSheet: "Laptops" | "Accessories" | "PC Parts";
   category: string;
   brand: string;
   price: string;

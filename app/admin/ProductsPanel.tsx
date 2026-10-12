@@ -1,15 +1,18 @@
 "use client";
 
 import type { Dispatch, FormEvent, SetStateAction } from "react";
-import type { Product, ProductType } from "../data/products";
+import type { Product } from "../data/products";
 import { useAdminText } from "../lib/useAdminText";
 import ProductPhotoUploader from "./ProductPhotoUploader";
 import ProductsTable from "./ProductsTable";
-import { emptyProductForm, productToForm } from "./product-form";
+import { useState } from "react";
+import { categoriesForSheet, emptyProductForm, productToForm, switchSheetTab } from "./product-form";
 import type { ProductFormState } from "./types";
 
 type Props = {
   products: Product[];
+  /** Every product, whatever the search box says: the source of the category list. */
+  allProducts: Product[];
   productForm: ProductFormState;
   setProductForm: Dispatch<SetStateAction<ProductFormState>>;
   isProductFormOpen: boolean;
@@ -26,6 +29,7 @@ type Props = {
 /** The product list with its add / edit form. */
 export default function ProductsPanel({
   products: filteredProducts,
+  allProducts,
   productForm,
   setProductForm,
   isProductFormOpen,
@@ -39,6 +43,13 @@ export default function ProductsPanel({
   isStaff,
 }: Props) {
   const a = useAdminText();
+  const [isNewCategory, setIsNewCategory] = useState(false);
+  const categoryOptions = categoriesForSheet(allProducts, productForm.sourceSheet);
+  // A category typed by hand, or one the list does not know yet, uses the text box.
+  const typesCategory =
+    productForm.sourceSheet !== "Laptops" &&
+    (isNewCategory ||
+      (productForm.category !== "" && !categoryOptions.includes(productForm.category)));
 
   return (
       <section
@@ -112,26 +123,53 @@ export default function ProductsPanel({
               />
             </div>
 
+            {!productForm.id && (
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                   {a("Google Sheet tab")} </label>
+                <select
+                  value={productForm.sourceSheet}
+                  onChange={(event) => {
+                    setIsNewCategory(false);
+                    setProductForm(
+                      switchSheetTab(productForm, event.target.value as ProductFormState["sourceSheet"])
+                    );
+                  }}
+                  className="w-full rounded-xl border px-4 py-3 outline-none focus:border-red-500"
+                >
+                  <option value="Laptops">{a("Laptops")}</option>
+                  <option value="Accessories">{a("Accessories")}</option>
+                  <option value="PC Parts">{a("PC Parts")}</option>
+                </select>
+                <p className="mt-1 text-xs text-zinc-500">
+                   {a("The product is added as a new row in this tab, then shown on the website.")} </p>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-sm font-semibold">
                    {a("Type")} </label>
                 <select
-                  value={productForm.type}
-                  onChange={(event) =>
-                    setProductForm({
-                      ...productForm,
-                      type: event.target.value as ProductType,
-                      category:
-                        event.target.value === "laptop"
-                          ? "Laptop"
-                          : "Accessories",
-                    })
-                  }
+                  value={productForm.sourceSheet}
+                  onChange={(event) => {
+                    const sourceSheet = event.target.value as ProductFormState["sourceSheet"];
+                    setIsNewCategory(false);
+                    setProductForm(
+                      productForm.id
+                        ? {
+                            ...productForm,
+                            sourceSheet,
+                            type: sourceSheet === "Laptops" ? "laptop" : "accessory",
+                          }
+                        : switchSheetTab(productForm, sourceSheet)
+                    );
+                  }}
                   className="w-full rounded-xl border px-4 py-3 outline-none focus:border-red-500"
                 >
-                  <option value="laptop">{a("Laptop")}</option>
-                  <option value="accessory">{a("Accessory")}</option>
+                  <option value="Laptops">{a("Laptop")}</option>
+                  <option value="Accessories">{a("Accessory")}</option>
+                  <option value="PC Parts">{a("PC Part")}</option>
                 </select>
               </div>
 
@@ -174,17 +212,42 @@ export default function ProductsPanel({
               <div>
                 <label className="mb-1 block text-sm font-semibold">
                    {a("Category")} </label>
-                <input
-                  value={productForm.category}
-                  onChange={(event) =>
+                <select
+                  value={typesCategory ? "__new__" : productForm.category}
+                  disabled={productForm.sourceSheet === "Laptops"}
+                  onChange={(event) => {
+                    const isNew = event.target.value === "__new__";
+                    setIsNewCategory(isNew);
                     setProductForm({
                       ...productForm,
-                      category: event.target.value,
-                    })
-                  }
-                  className="w-full rounded-xl border px-4 py-3 outline-none focus:border-red-500"
-                  placeholder={a("Gaming Laptop")}
-                />
+                      category: isNew ? "" : event.target.value,
+                    });
+                  }}
+                  className="w-full rounded-xl border px-4 py-3 outline-none focus:border-red-500 disabled:bg-zinc-100"
+                >
+                  {productForm.sourceSheet !== "Laptops" && (
+                    <option value="">{a("Choose a category")}</option>
+                  )}
+                  {categoryOptions.map((category) => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
+                  {productForm.sourceSheet !== "Laptops" && (
+                    <option value="__new__">{a("+ New category…")}</option>
+                  )}
+                </select>
+                {typesCategory && (
+                  <input
+                    value={productForm.category}
+                    onChange={(event) =>
+                      setProductForm({
+                        ...productForm,
+                        category: event.target.value,
+                      })
+                    }
+                    className="mt-2 w-full rounded-xl border px-4 py-3 outline-none focus:border-red-500"
+                    placeholder={a("New category name")}
+                  />
+                )}
               </div>
             </div>
 
@@ -339,6 +402,7 @@ export default function ProductsPanel({
                 <button
                   onClick={() => {
                     setProductForm(emptyProductForm());
+                    setIsNewCategory(false);
                     setIsProductFormOpen(true);
                   }}
                   className="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700"
@@ -352,7 +416,8 @@ export default function ProductsPanel({
             products={filteredProducts}
             onEdit={(product) => {
               setProductForm(productToForm(product));
-              setIsProductFormOpen(true);
+              setIsNewCategory(false);
+                    setIsProductFormOpen(true);
               window.scrollTo({ top: 0, behavior: "smooth" });
             }}
             onDelete={isAdmin ? handleDeleteProduct : undefined}

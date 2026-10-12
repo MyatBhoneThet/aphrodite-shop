@@ -286,6 +286,7 @@ export default function AdminPage() {
           {activePanel === "products" && (
             <ProductsPanel
               products={filteredProducts}
+              allProducts={products}
               productForm={productAdmin.productForm}
               setProductForm={productAdmin.setProductForm}
               isProductFormOpen={productAdmin.isProductFormOpen}

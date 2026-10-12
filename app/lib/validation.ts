@@ -8,6 +8,8 @@ const productJsonSchema = z.record(z.string(), z.unknown());
 const productFields = {
   name: z.string().trim().min(1, "Product name is required."),
   type: z.enum(["laptop", "accessory"]),
+  // Which Google Sheet tab a new product is added to.
+  sourceSheet: z.enum(["Laptops", "Accessories", "PC Parts"]).optional(),
   category: z.string().trim().min(1, "Category is required."),
   brand: z.string().trim().min(1, "Brand is required."),
   price: z.number().int().nonnegative("Retail price must be 0 or more."),

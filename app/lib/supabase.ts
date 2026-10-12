@@ -1702,10 +1702,35 @@ export function sanitizePagination(
 }
 
 /** Every version of one model (see product-variants.ts), public columns only. */
+/**
+ * A product whose row was removed from the Google Sheet is archived: it stays
+ * in the database for old orders but is left out of every product list. The
+ * sync clears the mark when the row comes back (see archiveRemovedProducts).
+ */
+const NOT_ARCHIVED = ["full_specs->>archived", "is.null"] as const;
+
+/**
+ * Matches belongsToCatalogSection: a workbook tab also lists products that
+ * were added by hand (no source sheet) and have the matching type.
+ */
+function applySourceSheetFilter(params: URLSearchParams, sourceSheet: string) {
+  const manualType =
+    sourceSheet === "Laptops" ? "laptop" : sourceSheet === "Accessories" ? "accessory" : null;
+  if (!manualType) {
+    params.set("source_sheet", `eq.${sourceSheet}`);
+    return;
+  }
+  params.set(
+    "or",
+    `(source_sheet.eq.${sourceSheet},and(source_sheet.is.null,type.eq.${manualType}))`
+  );
+}
+
 export async function selectProductVariants(group: string) {
   const params = new URLSearchParams({
     select: PUBLIC_PRODUCT_COLUMNS,
     "full_specs->variant->>group": `eq.${group}`,
+    [NOT_ARCHIVED[0]]: NOT_ARCHIVED[1],
     order: "id.asc",
     limit: "50",
   });
@@ -1725,13 +1750,12 @@ export async function selectProducts(filters: {
   const params = new URLSearchParams({
     select: PUBLIC_PRODUCT_COLUMNS,
     order: "id.asc",
+    [NOT_ARCHIVED[0]]: NOT_ARCHIVED[1],
   });
 
   if (filters.type) params.set("type", `eq.${filters.type}`);
   if (filters.category) params.set("category", `eq.${filters.category}`);
-  if (filters.sourceSheet) {
-    params.set("source_sheet", `eq.${filters.sourceSheet}`);
-  }
+  if (filters.sourceSheet) applySourceSheetFilter(params, filters.sourceSheet);
   if (filters.stock) params.set("stock", `eq.${filters.stock}`);
 
   const search = filters.search?.trim().toLowerCase();
@@ -1773,13 +1797,15 @@ export async function selectProductsService(filters: {
   limit?: number | null;
   offset?: number | null;
 } = {}) {
-  const params = new URLSearchParams({ select: "*", order: "id.asc" });
+  const params = new URLSearchParams({
+    select: "*",
+    order: "id.asc",
+    [NOT_ARCHIVED[0]]: NOT_ARCHIVED[1],
+  });
 
   if (filters.type) params.set("type", `eq.${filters.type}`);
   if (filters.category) params.set("category", `eq.${filters.category}`);
-  if (filters.sourceSheet) {
-    params.set("source_sheet", `eq.${filters.sourceSheet}`);
-  }
+  if (filters.sourceSheet) applySourceSheetFilter(params, filters.sourceSheet);
   if (filters.stock) params.set("stock", `eq.${filters.stock}`);
 
   const search = filters.search?.trim().toLowerCase();
@@ -1847,6 +1873,14 @@ export async function selectProductByIdService(id: number) {
   return rows[0] ?? null;
 }
 
+export async function selectProductBySourceKeyService(sourceKey: string) {
+  const rows = await supabaseRest<ProductRow[]>(
+    `products?select=*&source_key=eq.${encodeURIComponent(sourceKey)}&limit=1`
+  );
+
+  return rows[0] ?? null;
+}
+
 export async function selectProductsByIdsService(ids: number[]) {
   const idList = Array.from(
     new Set(ids.filter((id) => Number.isInteger(id) && id > 0))
@@ -1861,7 +1895,10 @@ export async function selectProductsByIdsService(ids: number[]) {
 
 export async function countProducts(stock?: "In Stock" | "Out of Stock") {
   const { anonKey } = requireSupabaseConfig();
-  const params = new URLSearchParams({ select: "id" });
+  const params = new URLSearchParams({
+    select: "id",
+    [NOT_ARCHIVED[0]]: NOT_ARCHIVED[1],
+  });
 
   if (stock) params.set("stock", `eq.${stock}`);
 
@@ -1961,7 +1998,7 @@ export type StockCorrection = {
 export type StockCorrectionPlan = {
   /** Website showed more units than the sheet; the sync lowers them. */
   aboveSheet: StockCorrection[];
-  /** No longer in the sheet but still in stock; marked out of stock. */
+  /** No longer in the sheet; taken off the website (archived, not deleted). */
   removedFromSheet: StockCorrection[];
   /** Missing from the sheet, but too many at once to trust; left unchanged. */
   heldBack: StockCorrection[];
@@ -1974,6 +2011,8 @@ export type SyncedStockRow = {
   source_key: string;
   stock_quantity: number | null;
   sheet_stock_quantity: number | null;
+  /** Set once the product was taken off the website; see archiveRemovedProducts. */
+  archived?: unknown;
 };
 
 /**
@@ -2017,7 +2056,7 @@ export function planStockCorrections(
   const missingBySheet = new Map<string, StockCorrection[]>();
 
   for (const row of dbRows) {
-    if (sheetKeys.has(row.source_key) || (row.stock_quantity ?? 0) <= 0) continue;
+    if (sheetKeys.has(row.source_key) || row.archived) continue;
 
     const sheet = row.source_sheet ?? "Unknown";
     const list = missingBySheet.get(sheet) ?? [];
@@ -2036,7 +2075,9 @@ export function planStockCorrections(
     const loadedFromSheet = sheetProducts.filter(
       (product) => product.sourceSheet === sheet
     ).length;
-    const onWebsite = dbRows.filter((row) => row.source_sheet === sheet).length;
+    const onWebsite = dbRows.filter(
+      (row) => row.source_sheet === sheet && !row.archived
+    ).length;
     // A handful of deleted rows is normal. Many at once more likely means the
     // tab did not load fully, and marking them out of stock would empty the
     // shop -- so hold those back and warn instead.
@@ -2060,13 +2101,13 @@ export async function previewStockCorrections(
 
   try {
     rows = await supabaseRest<SyncedStockRow[]>(
-      "products?select=id,name,source_sheet,source_key,stock_quantity,sheet_stock_quantity&source_key=not.is.null&limit=10000"
+      "products?select=id,name,source_sheet,source_key,stock_quantity,sheet_stock_quantity,archived:full_specs->archived&source_key=not.is.null&limit=10000"
     );
   } catch (error) {
     if (!isMissingSheetBaselineColumn(error)) throw error;
     rows = (
       await supabaseRest<Omit<SyncedStockRow, "sheet_stock_quantity">[]>(
-        "products?select=id,name,source_sheet,source_key,stock_quantity&source_key=not.is.null&limit=10000"
+        "products?select=id,name,source_sheet,source_key,stock_quantity,archived:full_specs->archived&source_key=not.is.null&limit=10000"
       )
     ).map((row) => ({ ...row, sheet_stock_quantity: null }));
   }
@@ -2075,34 +2116,49 @@ export async function previewStockCorrections(
 }
 
 /**
- * Marks products that were deleted from the sheet as out of stock (they are
- * not deleted from the shop). The baseline is reset to 0 as well, so putting
- * the row back in the sheet with N units shows N again on the next sync.
+ * Takes products whose rows were deleted from the sheet off the website. They
+ * are archived, not deleted: old orders still point at them, and putting the
+ * row back in the sheet restores the product (with its photos) on the next
+ * sync. Stock and the baseline are reset to 0, so a returning row with N
+ * units shows N again.
  */
-export async function markRemovedProductsOutOfStock(corrections: StockCorrection[]) {
+export async function archiveRemovedProducts(corrections: StockCorrection[]) {
   const ids = corrections
     .map((correction) => correction.id)
     .filter((id): id is number => Number.isInteger(id));
   if (ids.length === 0) return 0;
 
-  const path = `products?id=in.(${ids.join(",")})`;
+  // The archive mark lives inside full_specs, so each row is written with its
+  // own specs. The plan caps how many rows one sync may remove.
+  const rows = await supabaseRest<Pick<ProductRow, "id" | "full_specs">[]>(
+    `products?select=id,full_specs&id=in.(${ids.join(",")})`
+  );
 
-  try {
-    await supabaseRest(path, {
-      method: "PATCH",
-      headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ stock_quantity: 0, sheet_stock_quantity: 0 }),
-    });
-  } catch (error) {
-    if (!isMissingSheetBaselineColumn(error)) throw error;
-    await supabaseRest(path, {
-      method: "PATCH",
-      headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ stock_quantity: 0 }),
-    });
+  for (const row of rows) {
+    const path = `products?id=eq.${row.id}`;
+    const archived = {
+      stock: "Out of Stock",
+      stock_quantity: 0,
+      full_specs: { ...(row.full_specs ?? {}), archived: true },
+    };
+
+    try {
+      await supabaseRest(path, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ ...archived, sheet_stock_quantity: 0 }),
+      });
+    } catch (error) {
+      if (!isMissingSheetBaselineColumn(error)) throw error;
+      await supabaseRest(path, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify(archived),
+      });
+    }
   }
 
-  return ids.length;
+  return rows.length;
 }
 
 function isMissingSheetBaselineColumn(error: unknown) {
@@ -4170,7 +4226,7 @@ export type LowStockRow = {
 
 export async function selectLowStockProducts(threshold: number) {
   return supabaseRest<LowStockRow[]>(
-    `products?select=id,name,brand,category,image,stock_quantity,source_sheet&stock_quantity=lte.${Math.trunc(threshold)}&order=stock_quantity.asc,name.asc&limit=500`
+    `products?select=id,name,brand,category,image,stock_quantity,source_sheet&stock_quantity=lte.${Math.trunc(threshold)}&${NOT_ARCHIVED[0]}=${NOT_ARCHIVED[1]}&order=stock_quantity.asc,name.asc&limit=500`
   );
 }
 

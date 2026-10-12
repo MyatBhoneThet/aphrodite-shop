@@ -93,9 +93,10 @@ export async function DELETE(
       return NextResponse.json({ error: "Product not found." }, { status: 404 });
     }
 
-    await removeProduct(user, productId);
+    const sheetRows = await removeProduct(user, productId);
 
-    return NextResponse.json({ ok: true });
+    // sheetRows says which Google Sheet rows were deleted with the product.
+    return NextResponse.json({ ok: true, sheetRows });
   } catch (error) {
     return handleRouteError("products.delete", error);
   }

@@ -169,9 +169,9 @@ export default function ProductPhotoUploader({ photos, onChange }: Props) {
                 type="button"
                 onClick={() => remove(index)}
                 aria-label={`Remove photo ${index + 1}`}
-                className="rounded-full px-2 text-lg leading-none text-zinc-400 hover:text-red-600"
+                className="shrink-0 rounded-full border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
               >
-                 {a("&times;")} </button>
+                 {a("Delete")} </button>
             </li>
           ))}
         </ul>

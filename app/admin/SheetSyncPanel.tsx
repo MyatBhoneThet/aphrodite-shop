@@ -95,7 +95,7 @@ export default function SheetSyncPanel({ isSyncing, autoSync, sheetSyncReport, o
                     ))}
                     {sheetSyncReport.stockCorrections.removedFromSheet.map((item) => (
                       <li key={`removed-${item.sourceKey}`}>
-                        <span className="font-semibold">{item.name}</span> ({item.sourceSheet}{a("): no longer in the sheet → Out of Stock")} </li>
+                        <span className="font-semibold">{item.name}</span> ({item.sourceSheet}{a("): no longer in the sheet → removed from the website")} </li>
                     ))}
                   </ul>
                 </div>

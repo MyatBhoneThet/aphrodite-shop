@@ -116,17 +116,18 @@ describe("planStockCorrections", () => {
     expect(plan.removedFromSheet).toEqual([]);
   });
 
-  it("marks an in-stock product deleted from the sheet as removed", () => {
+  it("removes every product deleted from the sheet, in stock or not, once", () => {
     const plan = planStockCorrections(
       [sheet("kept", 1)],
       [
         dbRow({ id: 1, source_key: "kept" }),
         dbRow({ id: 195, source_key: "deleted", stock_quantity: 1 }),
         dbRow({ id: 196, source_key: "deleted-and-empty", stock_quantity: 0 }),
+        dbRow({ id: 197, source_key: "already-archived", stock_quantity: 0, archived: true }),
       ]
     );
 
-    expect(plan.removedFromSheet.map((item) => item.id)).toEqual([195]);
+    expect(plan.removedFromSheet.map((item) => item.id)).toEqual([195, 196]);
     expect(plan.heldBack).toEqual([]);
   });
 

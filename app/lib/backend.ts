@@ -104,6 +104,7 @@ import {
   selectOrderIdsWithSlipsService,
   countOpenItemReturnsService,
   selectProductByIdService,
+  selectProductBySourceKeyService,
   selectProducts,
   selectProductVariants,
   selectProductsByIdsService,
@@ -191,6 +192,8 @@ import {
   serviceUnavailable,
 } from "./errors";
 import { withSheetStockLock } from "./sheet-stock-lock";
+import { normalizeGallery } from "./product-gallery";
+import { addProductThroughSheet, forgetSavedSheet } from "./product-sync";
 import { translate } from "./translations";
 import { isPrepaidMethod, type PaymentMethod } from "./payment-accounts";
 import {
@@ -198,6 +201,8 @@ import {
   hasGoogleSheetsConfig,
   incrementSheetQuantities,
   setSheetProductQuantity,
+  deleteSheetProductRows,
+  isProductionSheetName,
   readSheetDeductionRecord,
   sheetDeductionRecord,
   type SheetRestockItem,
@@ -901,7 +906,9 @@ export async function adminPricePreview(
 
 export async function createProduct(user: CurrentUser, product: Partial<Product>) {
   requireAdmin(user);
-  const row = await insertProduct(product);
+  const row = hasGoogleSheetsConfig()
+    ? await createSheetProduct(product)
+    : await insertProduct(product);
   await recordAdminAction({
     actorId: user.id,
     action: "product.create",
@@ -910,6 +917,53 @@ export async function createProduct(user: CurrentUser, product: Partial<Product>
     next: { name: row.name, brand: row.brand, price: row.price },
   });
   return mapProductRow(row);
+}
+
+/**
+ * With the Google Sheet connected, a new product is a new sheet row: the sync
+ * then creates it on the website, exactly like a row typed into the sheet.
+ * Photos and the legacy wholesale price are website-only and are added after.
+ */
+async function createSheetProduct(product: Partial<Product>) {
+  const sheet = isProductionSheetName(product.sourceSheet)
+    ? product.sourceSheet
+    : product.type === "laptop"
+      ? "Laptops"
+      : "Accessories";
+  const { sourceKey } = await addProductThroughSheet({
+    sheet,
+    name: product.name ?? "",
+    brand: product.brand ?? "",
+    category: product.category ?? sheet,
+    price: product.price ?? 0,
+    stockQuantity:
+      product.stock === "Out of Stock" ? 0 : Math.max(0, product.stockQuantity ?? 0),
+    specs: product.specs,
+    fullSpecs: product.fullSpecs,
+  });
+
+  const synced = await selectProductBySourceKeyService(sourceKey);
+  if (!synced) {
+    throw serviceUnavailable(
+      "The product was added to the Google Sheet, but it is not on the website yet. Click Sync Products to finish."
+    );
+  }
+
+  const gallery = normalizeGallery(product.fullSpecs?.gallery);
+  const extras: Partial<Product> = {
+    ...(gallery.length
+      ? {
+          image: gallery[0].url,
+          fullSpecs: { ...synced.full_specs, gallery, galleryManagedBy: "admin" },
+        }
+      : {}),
+    ...(product.wholesalePrice !== undefined ? { wholesalePrice: product.wholesalePrice } : {}),
+    ...(product.model3D ? { model3D: product.model3D } : {}),
+  };
+
+  return Object.keys(extras).length
+    ? (await updateProduct(synced.id, extras)) ?? synced
+    : synced;
 }
 
 export type AdminStockSheetUpdate = {
@@ -1055,18 +1109,64 @@ async function saveProduct(user: CurrentUser, id: number, product: Partial<Produ
   return { product: mapProductRow(row), sheetStock };
 }
 
+/** Old orders keep pointing at their products, so those cannot be deleted. */
+async function deleteProductRecord(id: number) {
+  try {
+    await deleteProduct(id);
+  } catch (error) {
+    if (error instanceof Error && /order_items|foreign key/i.test(error.message)) {
+      throw conflict(
+        "This product has orders, so it cannot be deleted. To take it off the website, delete its row in the Google Sheet (it is hidden on the next sync) or set its stock to 0."
+      );
+    }
+    throw error;
+  }
+}
+
 export async function removeProduct(user: CurrentUser, id: number) {
   requireAdmin(user);
   requireFreshAuth(user);
   const before = await selectProductByIdService(id).catch(() => null);
-  await deleteProduct(id);
+  const sourceKey = before?.source_key;
+  let sheetRows: Awaited<ReturnType<typeof deleteSheetProductRows>> | null = null;
+
+  if (sourceKey && hasGoogleSheetsConfig()) {
+    // A product that came from the Google Sheet is deleted there too;
+    // otherwise the next sync would bring it straight back. The database goes
+    // first: if the product cannot be deleted (it has orders), the sheet is
+    // left untouched.
+    sheetRows = await withSheetStockLock(async () => {
+      await deleteProductRecord(id);
+      try {
+        const deleted = await deleteSheetProductRows(sourceKey);
+        forgetSavedSheet();
+        return deleted;
+      } catch (error) {
+        console.error("[products] sheet row delete failed", {
+          product_id: id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw serviceUnavailable(
+          "The product was deleted from the website, but its row could not be deleted from the Google Sheet. Delete the row in the sheet, or the next sync will add the product again."
+        );
+      }
+    });
+  } else {
+    await deleteProductRecord(id);
+  }
+
   await recordAdminAction({
     actorId: user.id,
     action: "product.delete",
     targetType: "product",
     targetId: id,
     previous: { name: before?.name ?? null, price: before?.price ?? null },
+    ...(sheetRows?.status === "deleted"
+      ? { next: { sheet: sheetRows.sheet, deleted_rows: sheetRows.rows.join(", ") } }
+      : {}),
   });
+
+  return sheetRows;
 }
 
 export async function getCart(user: CurrentUser) {

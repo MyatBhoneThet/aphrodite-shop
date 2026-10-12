@@ -19,7 +19,6 @@ import BackToTopButton from "./BackToTopButton";
 import Navbar from "./Navbar";
 import ProductFilters from "./ProductFilters";
 import ProductSection from "./ProductSection";
-import { groupProductVariants } from "../lib/product-variants";
 import { useLanguage } from "../lib/language";
 import { activePromotion } from "../lib/promotions";
 import { useDeliveryEstimate } from "../lib/useDeliveryEstimate";
@@ -185,8 +184,7 @@ export default function CategoryCatalogPage({ section }: Props) {
     }
     return { promotionProducts, regularProducts };
   }, [visibleProducts, promotionTime]);
-  const resultCount = groupProductVariants(promotionProducts).length
-    + groupProductVariants(regularProducts).length;
+  const resultCount = visibleProducts.length;
   const sectionKey = `${section}-${search}-${JSON.stringify(filters)}`;
 
   const brands = useMemo(

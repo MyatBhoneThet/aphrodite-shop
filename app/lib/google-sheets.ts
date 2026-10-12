@@ -1,6 +1,6 @@
 import { createHash, createSign } from "crypto";
 import type { Product, ProductType } from "../data/products";
-import { badRequest } from "./errors";
+import { badRequest, conflict } from "./errors";
 import { parsePromotionDate, type Promotion } from "./promotions";
 
 type SheetsValueRange = {
@@ -764,7 +764,8 @@ function sheetNameFromRange(range: string | undefined) {
   return cleanText(range?.split("!")[0]).replace(/^'|'$/g, "");
 }
 
-export async function fetchProductsSheet() {
+/** Reads the three product tabs exactly as they are in the workbook. */
+async function fetchProductionValues() {
   const { spreadsheetId } = getGoogleSheetsConfig();
   const accessToken = await getAccessToken();
   const url = new URL(
@@ -811,7 +812,269 @@ export async function fetchProductsSheet() {
     values[sheet] = sheetValues;
   }
 
-  return parseProductionSheets(values);
+  return values;
+}
+
+export async function fetchProductsSheet() {
+  return parseProductionSheets(await fetchProductionValues());
+}
+
+// ---------------------------------------------------------------------------
+// Adding and deleting products from the admin panel
+// ---------------------------------------------------------------------------
+
+/** What the admin "Add Product" form supplies for a new workbook row. */
+export type SheetProductInput = {
+  sheet: ProductionSheetName;
+  name: string;
+  brand: string;
+  category: string;
+  price: number;
+  stockQuantity: number;
+  specs?: Product["specs"];
+  fullSpecs?: Product["fullSpecs"];
+};
+
+const PRODUCTION_SHEET_NAMES: readonly string[] = productionRanges.map(({ sheet }) => sheet);
+
+export function isProductionSheetName(value: unknown): value is ProductionSheetName {
+  return typeof value === "string" && PRODUCTION_SHEET_NAMES.includes(value);
+}
+
+// Website-only keys of full_specs; they are not product specifications.
+const NON_SPEC_KEYS = new Set([
+  "gallery",
+  "galleryManagedBy",
+  "photoSource",
+  "promotion",
+  "variant",
+  "archived",
+  "warranty",
+  "detail",
+]);
+
+// The laptop parser picks these fields out of the specs text by keyword, so a
+// bare value such as "8GB" is given the word that identifies it.
+const SPEC_KEYWORDS: Record<string, { pattern: RegExp; suffix: string }> = {
+  ram: { pattern: /\b(ram|memory|ddr\d*)\b/i, suffix: "RAM" },
+  storage: { pattern: /\b(ssd|hdd|nvme|storage)\b/i, suffix: "storage" },
+  display: { pattern: /\b(display|screen|inch|fhd|qhd|uhd|oled)\b/i, suffix: "display" },
+  graphics: { pattern: /\b(graphics|gpu|geforce|radeon|iris)\b/i, suffix: "graphics" },
+};
+
+/** Turns the form's specs into the workbook's "• part • part" specs text. */
+export function specsToSheetDetail(
+  specs: Product["specs"] = {},
+  fullSpecs: Product["fullSpecs"] = {}
+) {
+  const existing = cleanText((fullSpecs as Record<string, unknown>).detail ?? (specs as Record<string, unknown>).detail);
+  if (existing) return existing;
+
+  const parts: string[] = [];
+  const seen = new Set<string>();
+  const entries = [
+    ...Object.entries(fullSpecs as Record<string, unknown>),
+    ...Object.entries(specs as Record<string, unknown>),
+  ];
+
+  for (const [key, raw] of entries) {
+    if (NON_SPEC_KEYS.has(key)) continue;
+    if (typeof raw !== "string" && typeof raw !== "number") continue;
+    const value = cleanText(raw).replace(/•/g, "-");
+    if (!value || seen.has(value.toLowerCase())) continue;
+    seen.add(value.toLowerCase());
+
+    const keyword = SPEC_KEYWORDS[key];
+    if (keyword) {
+      parts.push(keyword.pattern.test(value) ? value : `${value} ${keyword.suffix}`);
+    } else if (key === "cpu" || key === "processor") {
+      parts.push(value);
+    } else {
+      const label = key.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/_/g, " ").toLowerCase();
+      parts.push(`${label.charAt(0).toUpperCase()}${label.slice(1)}: ${value}`);
+    }
+  }
+
+  return parts.length ? `• ${parts.join(" • ")}` : "";
+}
+
+/**
+ * The workbook row for a product added from the admin panel, and where it
+ * goes: directly under the tab's last used row. Cells left null are not
+ * written. Pure, so it can be tested without Google.
+ */
+export function buildSheetProductRow(values: unknown[][], input: SheetProductInput) {
+  const sheet = input.sheet;
+  const { headers, index: headerIndex } = findHeaderRow(
+    values,
+    sheet,
+    sheet === "Laptops"
+      ? ["pur_no", "brand", "model", "qty"]
+      : sheet === "Accessories"
+        ? ["pur_no", "category", "brand", "model"]
+        : ["pur_no", "category", "brand", "description"]
+  );
+  const cells: (string | number | null)[] = [];
+  const set = (column: number, value: string | number | null) => {
+    if (column < 0 || value === null || value === "") return;
+    while (cells.length <= column) cells.push(null);
+    cells[column] = value;
+  };
+  const quantity = Math.max(0, Math.floor(input.stockQuantity));
+  const price = input.price > 0 ? Math.round(input.price) : null;
+  const warranty = cleanText((input.fullSpecs as Record<string, unknown> | undefined)?.warranty);
+  const detail = specsToSheetDetail(input.specs, input.fullSpecs);
+
+  set(headers.indexOf("pur_no"), `WEB-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`);
+  set(requireColumn(headers, sheet, "brand"), cleanText(input.brand));
+  set(requireColumn(headers, sheet, "retail_price_mmk"), price);
+
+  if (sheet === "Laptops") {
+    set(requireColumn(headers, sheet, "model"), cleanText(input.name));
+    set(requireColumn(headers, sheet, "specs_detail"), detail);
+    set(requireColumn(headers, sheet, "warranty"), warranty);
+    set(requireColumn(headers, sheet, "qty"), quantity);
+  } else {
+    set(requireColumn(headers, sheet, "category"), cleanText(input.category));
+    set(headers.indexOf("remark"), "Added from the website admin panel");
+    if (sheet === "Accessories") {
+      set(requireColumn(headers, sheet, "model"), cleanText(input.name));
+      set(requireColumn(headers, sheet, "specs"), detail);
+      set(requireColumn(headers, sheet, "warranty"), warranty);
+    } else {
+      set(requireColumn(headers, sheet, "description"), cleanText(input.name));
+    }
+    set(
+      requireInventoryColumn({
+        values,
+        headerIndex,
+        headers,
+        sheet,
+        directAliases: ["closingqty", "closing_qty"],
+        groupPrefixes: ["closing_inv", "closing_inventory"],
+        subheaderAliases: ["qty", "quantity"],
+        label: "Closing Qty",
+      }),
+      quantity
+    );
+  }
+
+  return { rowNumber: values.length + 1, cells };
+}
+
+/**
+ * Adds a product to its workbook tab as a new row, so the sheet stays the one
+ * list of products. Refuses a product the sheet already has: that row would
+ * silently merge into the existing product instead of creating a new one.
+ * The caller holds the sheet stock lock and runs the sync afterwards.
+ */
+export async function appendSheetProduct(input: SheetProductInput) {
+  const { spreadsheetId } = getGoogleSheetsConfig();
+  const values = await fetchProductionValues();
+  const { rowNumber, cells } = buildSheetProductRow(values[input.sheet], input);
+
+  const preview = parseProductionSheets({
+    ...values,
+    [input.sheet]: [...values[input.sheet], cells],
+  });
+  const added = preview.products.find(
+    (product) => product.sourceSheet === input.sheet && product.sourceRows.includes(rowNumber)
+  );
+  if (!added) {
+    throw badRequest("This product could not be placed in the Google Sheet. Check its name.");
+  }
+  if (added.sourceRows.length > 1) {
+    const others = added.sourceRows.filter((row) => row !== rowNumber).join(", ");
+    throw conflict(
+      `The "${input.sheet}" tab already has this product (row ${others}). Change its stock there or edit the existing product instead of adding it again.`
+    );
+  }
+
+  const accessToken = await getAccessToken();
+  const range = `'${input.sheet}'!A${rowNumber}`;
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      // RAW: text typed in the form is never run as a spreadsheet formula.
+      body: JSON.stringify({ range, majorDimension: "ROWS", values: [cells] }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(GOOGLE_API_TIMEOUT_MS),
+    }
+  );
+
+  if (!response.ok) {
+    console.error("[google-sheets] product row write failed", { status: response.status });
+    throw badRequest(
+      "The product could not be written to the Google Sheet, so nothing was saved. Check that the sheet is shared with the service account as an editor."
+    );
+  }
+
+  return { sheet: input.sheet, row: rowNumber };
+}
+
+export type SheetRowDeletion =
+  | { status: "not_in_sheet" }
+  | { status: "deleted"; sheet: ProductionSheetName; rows: number[] };
+
+/**
+ * Deletes a product's rows from the workbook, so a product deleted in the
+ * admin panel does not come back on the next sync. The caller holds the sheet
+ * stock lock.
+ */
+export async function deleteSheetProductRows(sourceKey: string): Promise<SheetRowDeletion> {
+  const { spreadsheetId } = getGoogleSheetsConfig();
+  const { products } = await fetchProductsSheet();
+  const product = products.find((item) => item.sourceKey === sourceKey);
+  if (!product) return { status: "not_in_sheet" };
+
+  const accessToken = await getAccessToken();
+  const headers = { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" };
+  const metaResponse = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title)`,
+    { headers, cache: "no-store", signal: AbortSignal.timeout(GOOGLE_API_TIMEOUT_MS) }
+  );
+  const meta = metaResponse.ok
+    ? ((await metaResponse.json()) as {
+        sheets?: { properties?: { sheetId?: number; title?: string } }[];
+      })
+    : null;
+  const sheetId = meta?.sheets?.find(
+    (sheet) => sheet.properties?.title === product.sourceSheet
+  )?.properties?.sheetId;
+  if (sheetId === undefined) {
+    throw badRequest(`Unable to find the "${product.sourceSheet}" tab in the Google Sheet.`);
+  }
+
+  // Bottom row first, so deleting one row never moves the next one.
+  const rows = [...new Set(product.sourceRows)].sort((a, b) => b - a);
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        requests: rows.map((row) => ({
+          deleteDimension: {
+            range: { sheetId, dimension: "ROWS", startIndex: row - 1, endIndex: row },
+          },
+        })),
+      }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(GOOGLE_API_TIMEOUT_MS),
+    }
+  );
+
+  if (!response.ok) {
+    console.error("[google-sheets] product row delete failed", { status: response.status });
+    throw badRequest("The product's rows could not be deleted from the Google Sheet.");
+  }
+
+  return { status: "deleted", sheet: product.sourceSheet, rows: rows.reverse() };
 }
 
 export function hasGoogleSheetsConfig() {

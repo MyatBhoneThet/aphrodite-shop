@@ -16,7 +16,7 @@ vi.mock("../app/lib/supabase", async (importOriginal) => {
     previewStockCorrections: vi.fn(),
     upsertProductionProducts: vi.fn(),
     syncSheetWholesale: vi.fn(),
-    markRemovedProductsOutOfStock: vi.fn(),
+    archiveRemovedProducts: vi.fn(),
   };
 });
 
@@ -30,7 +30,7 @@ import {
 } from "../app/lib/product-sync";
 import { withSheetStockLock } from "../app/lib/sheet-stock-lock";
 import {
-  markRemovedProductsOutOfStock,
+  archiveRemovedProducts,
   previewStockCorrections,
   upsertProductionProducts,
 } from "../app/lib/supabase";
@@ -53,7 +53,7 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ aboveSheet: [], removedFromSheet: [], heldBack: [] });
   vi.mocked(upsertProductionProducts).mockReset().mockResolvedValue([{ id: 14 }] as never);
-  vi.mocked(markRemovedProductsOutOfStock).mockReset().mockResolvedValue(undefined as never);
+  vi.mocked(archiveRemovedProducts).mockReset().mockResolvedValue(undefined as never);
 });
 
 describe("automatic sync", () => {
@@ -114,7 +114,7 @@ describe("dry run", () => {
 
     expect(report).toMatchObject({ dryRun: true, count: 1 });
     expect(upsertProductionProducts).not.toHaveBeenCalled();
-    expect(markRemovedProductsOutOfStock).not.toHaveBeenCalled();
+    expect(archiveRemovedProducts).not.toHaveBeenCalled();
   });
 });
 
