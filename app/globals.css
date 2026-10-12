@@ -75,6 +75,15 @@ a {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Floating buttons follow the visible bottom edge on iPhone; --vv-shift is
+   set by FloatingControlsPin and is 0 on every other browser. */
+@layer base {
+  /* In the base layer so a hover lift utility still wins. */
+  .floating-control {
+    translate: 0 var(--vv-shift, 0px);
+  }
+}
+
 :focus-visible {
   outline: 3px solid #ef4444;
   outline-offset: 3px;

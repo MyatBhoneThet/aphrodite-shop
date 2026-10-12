@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import LocationSharing from "./components/LocationSharing";
+import FloatingControlsPin from "./components/FloatingControlsPin";
 import { LanguageProvider } from "./lib/language";
 import { publicSiteUrl } from "./lib/site-url";
 
@@ -42,6 +43,7 @@ export default function RootLayout({
         <LanguageProvider>
           {children}
           <LocationSharing />
+          <FloatingControlsPin />
         </LanguageProvider>
       </body>
     </html>

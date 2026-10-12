@@ -63,7 +63,7 @@ export default function RecentlyViewedSection({
       <button
         type="button"
         onClick={scrollToHistory}
-        className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-3 z-40 flex h-12 min-w-12 items-center justify-center rounded-full border border-zinc-200 bg-white px-3 text-sm font-bold shadow-xl transition hover:-translate-y-1 hover:border-red-500 sm:bottom-5 sm:right-5 sm:h-auto sm:px-4 sm:py-3"
+        className="floating-control fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-3 z-40 flex h-12 min-w-12 items-center justify-center rounded-full border border-zinc-200 bg-white px-3 text-sm font-bold shadow-xl transition hover:-translate-y-1 hover:border-red-500 sm:bottom-5 sm:right-5 sm:h-auto sm:px-4 sm:py-3"
         aria-label={t("recent.title")}
       >
         <span className="sm:hidden" aria-hidden="true">🕘 {products.length}</span>
