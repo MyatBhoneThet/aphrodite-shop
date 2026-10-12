@@ -65,7 +65,7 @@ export default function AccountControls({ user, wishlistCount, cartCount, onLogo
       {customer && <NotificationBell items={notifications.items} unread={notifications.unread} markRead={notifications.markRead} />}
       {([{ href: "/wishlist", label: t("nav.wishlist"), count: wishlistCount, kind: "heart" }, { href: "/cart", label: t("nav.cart"), count: cartCount, kind: "cart" }] as const).map(item => (
         <Link key={item.kind} href={item.href} aria-label={`${item.label}: ${item.count}`} title={item.label}
-          className="group relative flex h-11 w-11 items-center justify-center rounded-lg text-zinc-600 transition hover:bg-white hover:text-red-600 hover:shadow-sm motion-reduce:transition-none min-[460px]:w-12 min-[460px]:rounded-xl">
+          className="group relative flex h-11 w-9 items-center justify-center rounded-lg text-zinc-600 transition hover:bg-white hover:text-red-600 hover:shadow-sm motion-reduce:transition-none min-[460px]:w-12 min-[460px]:rounded-xl">
           <Icon kind={item.kind} />
           <span aria-hidden="true" className={`absolute right-0.5 top-0 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold ring-2 ring-zinc-50 ${item.count > 0 ? "bg-red-600 text-white" : "bg-zinc-200 text-zinc-600"}`}>{item.count > 99 ? "99+" : item.count}</span>
         </Link>
@@ -77,11 +77,11 @@ export default function AccountControls({ user, wishlistCount, cartCount, onLogo
       // moves to a known element outside the menu.
       if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
     }}>
-      <summary ref={trigger} className="flex h-11 cursor-pointer list-none items-center gap-1 rounded-xl bg-zinc-950 px-1 text-white shadow-sm transition hover:bg-zinc-800 [&::-webkit-details-marker]:hidden min-[460px]:h-12 min-[460px]:gap-2 min-[460px]:rounded-2xl min-[460px]:px-2.5 sm:pr-3">
+      <summary ref={trigger} className="flex h-11 cursor-pointer list-none items-center gap-1 rounded-xl bg-zinc-950 px-2 text-white shadow-sm transition hover:bg-zinc-800 [&::-webkit-details-marker]:hidden min-[460px]:h-12 min-[460px]:gap-2 min-[460px]:rounded-2xl min-[460px]:px-2.5 sm:pr-3">
         <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10 text-red-300 min-[460px]:h-8 min-[460px]:w-8 min-[460px]:rounded-xl"><Icon kind="user" /></span>
         <span className="hidden font-semibold sm:block">{t("nav.account")}</span>
         <span className="sr-only sm:hidden">{t("nav.account")}</span>
-        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="hidden h-3.5 w-3.5 text-zinc-400 transition group-open/account:rotate-180 motion-reduce:transition-none min-[360px]:block"><path d="m4 6 4 4 4-4" /></svg>
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="hidden h-3.5 w-3.5 text-zinc-400 transition group-open/account:rotate-180 motion-reduce:transition-none min-[460px]:block"><path d="m4 6 4 4 4-4" /></svg>
       </summary>
       <div className="absolute right-0 top-[calc(100%+0.75rem)] z-[80] w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-[0_16px_48px_-12px_rgba(0,0,0,0.25)]">
         <div className="border-b border-zinc-100 bg-zinc-50 px-4 py-3"><p className="text-xs font-bold text-red-600">{t("nav.account")}</p><p className="mt-1 truncate text-xs text-zinc-500" title={user.email}>{user.email}</p></div>

@@ -48,7 +48,7 @@ export default function NotificationBell({ items, unread, markRead }: Props) {
         aria-label={label}
         aria-expanded={open}
         title={text("Notifications")}
-        className="group relative flex h-11 w-11 items-center justify-center rounded-lg text-zinc-600 transition hover:bg-white hover:text-red-600 hover:shadow-sm motion-reduce:transition-none min-[460px]:w-12 min-[460px]:rounded-xl"
+        className="group relative flex h-11 w-9 items-center justify-center rounded-lg text-zinc-600 transition hover:bg-white hover:text-red-600 hover:shadow-sm motion-reduce:transition-none min-[460px]:w-12 min-[460px]:rounded-xl"
       >
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
           <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />

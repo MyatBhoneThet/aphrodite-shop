@@ -61,7 +61,7 @@ export default function Navbar({ search, setSearch, searchSuggestions, language,
   return (
     <header className="sticky top-0 z-50 border-b bg-white/95 shadow-sm backdrop-blur-xl">
       <div className="mx-auto flex max-w-[92rem] flex-nowrap items-center gap-2 px-3 py-3 sm:flex-wrap sm:gap-4 sm:px-4 lg:px-6">
-        <Link href="/" aria-label="Aphrodite Myanmar home" className="w-[84px] shrink-0 min-[360px]:w-[104px] min-[460px]:w-[120px] sm:w-44"><BrandLogo className="h-9 sm:h-12" /></Link>
+        <Link href="/" aria-label="Aphrodite Myanmar home" className="w-[84px] shrink-0 min-[360px]:w-[92px] min-[460px]:w-[120px] sm:w-44"><BrandLogo className="h-9 sm:h-12" /></Link>
         {/* whitespace-nowrap on every link: without it the labels break
             mid-word ("PC / Parts") once the signed-in account controls take
             their share of the row. Returns and Support appear only on very
