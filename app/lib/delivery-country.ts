@@ -18,14 +18,83 @@ export const YANGON_TOWNSHIPS = [
   "Thanlyin", "Thingangyun", "Thongwa", "Twante", "Yankin",
 ] as const;
 
+/**
+ * Other spellings of the same township. OpenStreetMap, Google and the
+ * government use different romanisations ("Kamaryut" / "Kamayut",
+ * "Hlaingtharya" / "Hlaing Tharyar"), and the pin lookup returns whichever the
+ * map volunteers typed. Keys are written the way they are compared: lowercase
+ * letters only (see townshipKey).
+ */
+const TOWNSHIP_ALIASES: Record<string, (typeof YANGON_TOWNSHIPS)[number]> = {
+  kamaryut: "Kamayut",
+  kamarut: "Kamayut",
+  mayangone: "Mayangon",
+  hlaingtharya: "Hlaing Tharyar",
+  hlaingthaya: "Hlaing Tharyar",
+  hlaingtharyar: "Hlaing Tharyar",
+  hlainthaya: "Hlaing Tharyar",
+  botahtaung: "Botataung",
+  botahtaungtownship: "Botataung",
+  shwepyithar: "Shwepyitha",
+  shwepyitar: "Shwepyitha",
+  tarmwe: "Tamwe",
+  northokkalarpa: "North Okkalapa",
+  southokkalarpa: "South Okkalapa",
+  okkalapanorth: "North Okkalapa",
+  okkalapasouth: "South Okkalapa",
+  mingalardon: "Mingaladon",
+  mingalartaungnyunt: "Mingala Taungnyunt",
+  mingalataungnyunt: "Mingala Taungnyunt",
+  twantay: "Twante",
+  kyimyindaing: "Kyeemyindaing",
+  kyeemyindine: "Kyeemyindaing",
+  seikkyikanaungto: "Seikgyikanaungto",
+  seikgyikanaungto: "Seikgyikanaungto",
+  kayan: "Khayan",
+  syriam: "Thanlyin",
+  thingangyoun: "Thingangyun",
+  dagonseikkan: "Dagon Seikkan",
+  htantapin: "Htantabin",
+  cocoislands: "Cocokyun",
+  cocoisland: "Cocokyun",
+  ahlon: "Ahlone",
+  lathar: "Latha",
+};
+
+/** Letters only, lowercase, accents removed: "Hlaing Tharyar" and "hlaing-tharyar" compare equal. */
+function townshipKey(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z]/g, "");
+}
+
+const TOWNSHIP_BY_KEY = new Map<string, (typeof YANGON_TOWNSHIPS)[number]>([
+  ...YANGON_TOWNSHIPS.map((township) => [townshipKey(township), township] as const),
+  ...Object.entries(TOWNSHIP_ALIASES),
+]);
+
+/**
+ * Maps whatever a person or a map service wrote to one of the townships we
+ * deliver to, or undefined. Case, spacing, hyphens, a trailing "Township" and
+ * a bracketed part ("Hlaingtharya (East)") are ignored. Districts are NOT
+ * townships: "Kyauktada District" deliberately does not match "Kyauktada".
+ */
 export function normalizeYangonTownship(value: string | null | undefined) {
-  const normalized = value
-    ?.trim()
-    .replace(/\s+(township|မြို့နယ်)$/i, "")
-    .replace(/[-_]/g, " ")
-    .replace(/\s+/g, " ")
-    .toLowerCase();
-  return YANGON_TOWNSHIPS.find((township) => township.toLowerCase() === normalized);
+  if (!value) return undefined;
+  const withoutBrackets = value.replace(/\s*[([].*?[)\]]\s*/g, " ");
+  const cleaned = withoutBrackets.trim().replace(/\s+(township|မြို့နယ်)$/i, "");
+  return TOWNSHIP_BY_KEY.get(townshipKey(cleaned));
+}
+
+/** The first of several map-service fields that names a township we deliver to. */
+export function pickYangonTownship(candidates: (string | null | undefined)[]) {
+  for (const candidate of candidates) {
+    const township = normalizeYangonTownship(candidate);
+    if (township) return township;
+  }
+  return undefined;
 }
 
 // Delivery is intentionally limited to Yangon Region. This generous bounding

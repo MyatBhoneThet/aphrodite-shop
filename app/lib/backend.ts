@@ -99,6 +99,10 @@ import {
   selectPriceListById,
   selectPriceLists,
   selectProductById,
+  selectProductsByIds,
+  selectAttentionOrdersService,
+  selectOrderIdsWithSlipsService,
+  countOpenItemReturnsService,
   selectProductByIdService,
   selectProducts,
   selectProductVariants,
@@ -342,7 +346,7 @@ export async function wholesaleContext(
 
 function cartResponse(
   rows: CartItemRow[],
-  user: CurrentUser,
+  user: CurrentUser | null,
   context: WholesaleContext | null
 ): CartSummary {
   const items = rows.flatMap((row) => {
@@ -376,7 +380,7 @@ function cartResponse(
     return [
       {
         id: row.id,
-        product: productDTO(product, user.role === "admin" ? user : null, ladder),
+        product: productDTO(product, user?.role === "admin" ? user : null, ladder),
         product_id: row.product_id,
         quantity: row.quantity,
         build_group_id: row.build_group_id ?? null,
@@ -1075,6 +1079,41 @@ export async function getCart(user: CurrentUser) {
   return cartResponse(rows, user, context);
 }
 
+/**
+ * Prices a signed-out visitor's browser cart.
+ *
+ * Same line shape as the real cart so the cart page renders both with one
+ * code path, but: retail prices only (wholesale needs an account), public
+ * product columns only, and nothing is stored. Ids are `guest-<productId>`.
+ */
+export async function getGuestCart(
+  lines: { productId: number; quantity: number }[]
+): Promise<CartSummary> {
+  const quantityById = new Map<number, number>();
+  for (const line of lines.slice(0, 30)) {
+    quantityById.set(
+      line.productId,
+      Math.min(9_999, (quantityById.get(line.productId) ?? 0) + cleanQuantity(line.quantity))
+    );
+  }
+
+  const products = await selectProductsByIds([...quantityById.keys()]);
+  const now = new Date().toISOString();
+  const rows: CartItemRow[] = products.map((product) => ({
+    id: `guest-${product.id}`,
+    user_id: "guest",
+    product_id: product.id,
+    quantity: quantityById.get(product.id) ?? 1,
+    build_group_id: null,
+    build_name: null,
+    created_at: now,
+    updated_at: now,
+    products: product,
+  }));
+
+  return cartResponse(rows, null, null);
+}
+
 export async function addCartItem(
   user: CurrentUser,
   productId: number,
@@ -1123,6 +1162,94 @@ export async function addCartItem(
   }
 
   return getCart(user);
+}
+
+export type ReorderSkipReason = "out_of_stock" | "price_pending" | "unavailable" | "in_cart";
+
+export type ReorderResult = {
+  /** Lines that went into the cart (quantity may be less than the order had). */
+  added: { product_id: number; name: string; quantity: number; requested: number }[];
+  skipped: { product_id: number; name: string; reason: ReorderSkipReason }[];
+  cart: CartSummary;
+};
+
+/**
+ * "Buy again": puts what a delivered order contained back into the cart.
+ *
+ * The order is read as the signed-in owner (never from the browser), and every
+ * line is re-checked against today's price and stock -- an item that sold out
+ * or lost its price is skipped and named, and a line is trimmed to what is
+ * still available instead of failing the whole thing. Prices are today's, not
+ * the old order's, and wholesale rules apply as they do for any cart.
+ */
+export async function reorderToCart(user: CurrentUser, orderId: string): Promise<ReorderResult> {
+  requireCustomerAccount(user);
+
+  const order = await selectOrderById(user, orderId);
+  if (!order || order.user_id !== user.id) throw notFound("Order not found.");
+  if (order.status !== "delivered") {
+    throw badRequest("You can buy these items again once the order has been delivered.");
+  }
+
+  const wanted = new Map<number, number>();
+  for (const item of order.order_items ?? []) {
+    if (!Number.isInteger(item.product_id) || item.product_id <= 0) continue;
+    wanted.set(item.product_id, Math.min(9_999, (wanted.get(item.product_id) ?? 0) + Math.max(1, item.quantity)));
+  }
+  if (wanted.size === 0) throw badRequest("This order has no items to buy again.");
+
+  const [products, cartRows] = await Promise.all([
+    selectProductsByIdsService([...wanted.keys()]),
+    selectCart(user.id, user.accessToken),
+  ]);
+  const productById = new Map(products.map((product) => [product.id, product]));
+  const added: ReorderResult["added"] = [];
+  const skipped: ReorderResult["skipped"] = [];
+  // Names come from what the customer bought, so a product that has since been
+  // removed can still be named in the "could not add" list.
+  const orderedName = new Map(
+    (order.order_items ?? []).map((item) => [item.product_id, item.products?.name ?? `Product #${item.product_id}`])
+  );
+
+  for (const [productId, requested] of wanted) {
+    const product = productById.get(productId);
+    const name = product?.name ?? orderedName.get(productId) ?? `Product #${productId}`;
+
+    if (!product) {
+      skipped.push({ product_id: productId, name, reason: "unavailable" });
+      continue;
+    }
+    if (!Number.isFinite(product.price) || product.price <= 0) {
+      skipped.push({ product_id: productId, name, reason: "price_pending" });
+      continue;
+    }
+
+    const available = availableStock(product);
+    if (available <= 0) {
+      skipped.push({ product_id: productId, name, reason: "out_of_stock" });
+      continue;
+    }
+
+    const inCart = cartRows
+      .filter((row) => row.product_id === productId)
+      .reduce((sum, row) => sum + row.quantity, 0);
+    const room = Number.isFinite(available) ? available - inCart : requested;
+    const quantity = Math.min(requested, room);
+
+    if (quantity <= 0) {
+      skipped.push({ product_id: productId, name, reason: "in_cart" });
+      continue;
+    }
+
+    try {
+      await addCartItem(user, productId, quantity);
+      added.push({ product_id: productId, name, quantity, requested });
+    } catch {
+      skipped.push({ product_id: productId, name, reason: "unavailable" });
+    }
+  }
+
+  return { added, skipped, cart: await getCart(user) };
 }
 
 /** Adds the same quantity of every selected PC component after validating the
@@ -5201,6 +5328,63 @@ export type AdminStats = {
   }[];
   recentOrders: ReturnType<typeof orderResponse>[];
 };
+
+/** What the dashboard's "needs attention today" strip counts. */
+export type AttentionSummary = {
+  /** Transfer slips uploaded and waiting for someone to check them. Admin only. */
+  slipsToCheck: number;
+  /** Transfer orders where the customer has not uploaded a slip yet. Admin only. */
+  awaitingPayment: number;
+  /** Verified orders waiting to be packed and handed to the courier. */
+  toShip: number;
+  /** Open returns, cancellation requests and refunds the shop must act on. Admin only. */
+  openReturns: number;
+  /** Cancelled prepaid orders whose refund still has to be sent. Admin only. */
+  refundsToSend: number;
+};
+
+/**
+ * Counts, computed on the server from the live tables (not from whatever page
+ * of orders a browser happens to hold). Staff only see what they can act on:
+ * the number of orders to pack and ship.
+ */
+export async function getAttentionSummary(user: CurrentUser): Promise<AttentionSummary> {
+  requireBackoffice(user);
+
+  const orders = await selectAttentionOrdersService();
+  const toShip = orders.filter((order) => order.status === "confirmed").length;
+
+  if (user.role !== "admin") {
+    return { slipsToCheck: 0, awaitingPayment: 0, toShip, openReturns: 0, refundsToSend: 0 };
+  }
+
+  const prepaidWaiting = orders.filter(
+    (order) =>
+      order.status === "pending" &&
+      (order.payment_method === "bank_transfer" || order.payment_method === "mmqr") &&
+      (order.payment_verification_status ?? "pending") === "pending"
+  );
+  const withSlips = await selectOrderIdsWithSlipsService(prepaidWaiting.map((order) => order.id)).catch(
+    () => new Set<string>()
+  );
+  const slipsToCheck = prepaidWaiting.filter((order) => withSlips.has(order.id)).length;
+
+  // The old order-level return flow and the newer per-item returns are both live.
+  const legacyOpen = orders.filter(
+    (order) =>
+      order.cancellation_request_status === "requested" ||
+      ["requested", "approved", "pickup_scheduled", "received"].includes(order.return_request_status ?? "none")
+  ).length;
+  const itemReturns = await countOpenItemReturnsService().catch(() => 0);
+
+  return {
+    slipsToCheck,
+    awaitingPayment: prepaidWaiting.length - slipsToCheck,
+    toShip,
+    openReturns: legacyOpen + itemReturns,
+    refundsToSend: orders.filter((order) => order.cancellation_refund_status === "pending").length,
+  };
+}
 
 export type SalesPeriod = "week" | "month" | "quarter" | "year";
 

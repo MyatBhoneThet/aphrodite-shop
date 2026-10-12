@@ -24,6 +24,14 @@ import {
   type PaymentMethod,
 } from "../lib/payment-accounts";
 import { readCartIntent } from "../lib/cart-intent";
+import {
+  clearGuestCart,
+  readGuestCart,
+  removeGuestLine,
+  setGuestLineQuantity,
+  takeGuestCartNotice,
+  writeGuestCart,
+} from "../lib/guest-cart";
 
 type LinePricing = {
   promotional?: boolean;
@@ -106,6 +114,8 @@ export default function CartPage() {
   const [isClearingCart, setIsClearingCart] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [placedOrderId, setPlacedOrderId] = useState<string | null>(null);
+  // Items from the signed-out cart that the account cart refused (e.g. out of stock).
+  const [guestNotices, setGuestNotices] = useState<string[]>([]);
 
   const [shippingName, setShippingName] = useState("");
   const [shippingPhone, setShippingPhone] = useState("");
@@ -146,6 +156,8 @@ export default function CartPage() {
     [cartEntries, selectedItemIds]
   );
   const displayedEntryCount = checkoutMode ? selectedEntries.length : cartEntries.length;
+  // A signed-out visitor orders everything in the cart, so there is nothing to pick.
+  const showSelection = !checkoutMode && Boolean(user);
   const selectedTotal = selectedItems.reduce((sum, item) => sum + item.lineTotal, 0);
   const selectedRetailSubtotal = selectedItems.reduce(
     (sum, item) => sum + item.pricing.retailUnitPrice * item.quantity,
@@ -181,6 +193,53 @@ export default function CartPage() {
 
     if (response.ok) {
       setCart((await response.json()) as CartSummary);
+    }
+
+    setIsLoading(false);
+  }, []);
+
+  // Signed-out visitors: the browser's own cart, priced by the server.
+  const loadGuestCart = useCallback(async () => {
+    const lines = readGuestCart();
+
+    if (lines.length === 0) {
+      setCart({
+        items: [],
+        subtotal: 0,
+        total: 0,
+        totalQuantity: 0,
+        retailSubtotal: 0,
+        totalSavings: 0,
+        wholesale: false,
+        minimumOrder: null,
+        prepayRequired: false,
+      });
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/cart/guest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: lines.map((line) => ({ product_id: line.productId, quantity: line.quantity })),
+        }),
+      });
+
+      if (response.ok) {
+        const summary = (await response.json()) as CartSummary;
+        setCart(summary);
+
+        // Products that no longer exist are dropped so they do not linger.
+        const known = new Set(summary.items.map((item) => item.product_id));
+        const kept = lines.filter((line) => known.has(line.productId));
+        if (kept.length !== lines.length) writeGuestCart(kept);
+      } else {
+        setError("Unable to load your cart. Please try again.");
+      }
+    } catch {
+      setError("Unable to load your cart. Please check your connection and try again.");
     }
 
     setIsLoading(false);
@@ -231,6 +290,8 @@ export default function CartPage() {
         }
 
         if (!cartLoadedFromIntent) await loadCart();
+        const notices = takeGuestCartNotice();
+        if (notices.length > 0) setGuestNotices(notices);
         setShippingName((current) => current || user.full_name || "");
         setShippingPhone((current) => current || user.phone || "");
         setAddressLine1(
@@ -249,12 +310,13 @@ export default function CartPage() {
           if (preferred) applySavedAddress(preferred);
         }
       } else if (userStatus === "ready") {
-        setIsLoading(false);
+        if (checkoutMode) setIsLoading(false);
+        else await loadGuestCart();
       }
     }
 
     loadOnMount();
-  }, [userStatus, user, loadCart, checkoutMode]);
+  }, [userStatus, user, loadCart, loadGuestCart, checkoutMode]);
 
   useEffect(() => {
     if (!cart) return;
@@ -321,9 +383,10 @@ export default function CartPage() {
           data.address.township ? `${data.address.township} Township` : null,
           data.address.postal_code,
         ].filter(Boolean).join(" · ");
+        const township = Boolean(data.address.township);
         setAddressLookupMessage(autofilled
-          ? `Autofilled: ${autofilled}. Add your house or building details above.`
-          : "The pin is selected, but no street details were available. Please enter them manually.");
+          ? `Autofilled: ${autofilled}. ${township ? "" : "We could not tell the township from this pin, so please check that the Yangon township is the right one. "}Add your house or building details above.`
+          : "The pin is selected, but no street details were available. Please choose the Yangon township and enter the street manually.");
       } else {
         setAddressLookupMessage("The pin is selected, but address lookup failed. Please choose the township and enter the street manually.");
       }
@@ -378,8 +441,22 @@ export default function CartPage() {
     }
   }
 
+  function guestProductId(id: string) {
+    const productId = Number(id.replace(/^guest-/, ""));
+    return Number.isInteger(productId) && productId > 0 ? productId : null;
+  }
+
   async function updateQuantity(id: string, quantity: number) {
     setError("");
+
+    if (!user) {
+      const productId = guestProductId(id);
+      if (productId) {
+        writeGuestCart(setGuestLineQuantity(readGuestCart(), productId, quantity));
+        await loadGuestCart();
+      }
+      return;
+    }
 
     const response = await fetch(`/api/cart/${id}`, {
       method: "PATCH",
@@ -398,6 +475,15 @@ export default function CartPage() {
 
   async function removeItem(id: string) {
     setError("");
+
+    if (!user) {
+      const productId = guestProductId(id);
+      if (productId) {
+        writeGuestCart(removeGuestLine(readGuestCart(), productId));
+        await loadGuestCart();
+      }
+      return;
+    }
 
     const response = await fetch(`/api/cart/${id}`, {
       method: "DELETE",
@@ -477,6 +563,13 @@ export default function CartPage() {
     if (!window.confirm(text("Remove every product from your cart? This cannot be undone."))) return;
 
     setError("");
+
+    if (!user) {
+      clearGuestCart();
+      await loadGuestCart();
+      return;
+    }
+
     setIsClearingCart(true);
     try {
       const response = await fetch("/api/cart", {
@@ -604,7 +697,7 @@ export default function CartPage() {
     if (entry.isBuild && buildGroupId) {
       return <article key={entry.id} className={`rounded-2xl border p-3 transition sm:rounded-3xl sm:p-5 ${selected || checkoutMode ? "border-red-200 bg-red-50/40" : "border-zinc-200 bg-white"}`}>
         <div className="flex items-start gap-3">
-          {!checkoutMode && <input type="checkbox" checked={selected} onChange={() => toggleEntry(entry)} aria-label={`Select ${entry.name}`} className="mt-1 h-5 w-5 shrink-0 accent-red-600" />}
+          {showSelection && <input type="checkbox" checked={selected} onChange={() => toggleEntry(entry)} aria-label={`Select ${entry.name}`} className="mt-1 h-5 w-5 shrink-0 accent-red-600" />}
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -637,8 +730,8 @@ export default function CartPage() {
     }
 
     const item = firstItem;
-    return <article key={entry.id} className={`grid items-center gap-2 rounded-2xl border p-3 transition sm:gap-3 sm:p-4 ${checkoutMode ? "grid-cols-[3rem_minmax(0,1fr)] sm:grid-cols-[5rem_minmax(0,1fr)]" : "grid-cols-[auto_3rem_minmax(0,1fr)] sm:grid-cols-[auto_5rem_minmax(0,1fr)_auto]"} ${selected || checkoutMode ? "border-red-200" : "border-zinc-200"}`}>
-      {!checkoutMode && <input type="checkbox" checked={selected} onChange={() => toggleEntry(entry)} aria-label={`Select ${item.product.name}`} className="h-4 w-4 accent-red-600 sm:h-5 sm:w-5" />}
+    return <article key={entry.id} className={`grid items-center gap-2 rounded-2xl border p-3 transition sm:gap-3 sm:p-4 ${checkoutMode ? "grid-cols-[3rem_minmax(0,1fr)] sm:grid-cols-[5rem_minmax(0,1fr)]" : showSelection ? "grid-cols-[auto_3rem_minmax(0,1fr)] sm:grid-cols-[auto_5rem_minmax(0,1fr)_auto]" : "grid-cols-[3rem_minmax(0,1fr)] sm:grid-cols-[5rem_minmax(0,1fr)_auto]"} ${selected || checkoutMode ? "border-red-200" : "border-zinc-200"}`}>
+      {showSelection && <input type="checkbox" checked={selected} onChange={() => toggleEntry(entry)} aria-label={`Select ${item.product.name}`} className="h-4 w-4 accent-red-600 sm:h-5 sm:w-5" />}
       <img src={item.product.image} alt={item.product.name} className="h-12 w-12 rounded-xl bg-zinc-50 object-contain sm:h-20 sm:w-20" />
       <div className="min-w-0">
         <p className="text-sm font-bold leading-5 sm:text-base">{item.product.name}</p>
@@ -654,7 +747,7 @@ export default function CartPage() {
           <button type="button" onClick={() => void updateQuantity(item.id, item.quantity + 1)} className="h-8 w-8 rounded-full border font-bold sm:h-10 sm:w-10" aria-label={t("detail.increase")}>+</button>
         </div>}
       </div>
-      {!checkoutMode && <div className="col-span-3 flex justify-end sm:col-span-1 sm:self-end">
+      {!checkoutMode && <div className={`flex justify-end sm:col-span-1 sm:self-end ${showSelection ? "col-span-3" : "col-span-2"}`}>
         <button type="button" onClick={() => void removeItem(item.id)} className="text-xs text-red-600 sm:text-sm">{text("Remove")}</button>
       </div>}
     </article>;
@@ -668,17 +761,17 @@ export default function CartPage() {
     );
   }
 
-  if (!user) {
+  if (!user && checkoutMode) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-white px-5 text-center text-zinc-950">
         <div>
           <h1 className="text-3xl font-bold">{t("cart.loginTitle")}</h1>
           <p className="mt-3 text-zinc-500">
-            You need an account to add items to a cart and check out.
+            {text("Log in to check out")}
           </p>
           <div className="mt-6 flex justify-center gap-3">
             <Link
-              href="/login"
+              href="/login?next=/cart"
               className="rounded-full bg-red-600 px-6 py-3 font-semibold text-white"
             >
               Login
@@ -728,6 +821,15 @@ export default function CartPage() {
         </div>
         {hasPendingPrices && <p className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">{t("cart.pendingPrices")}</p>}
 
+        {guestNotices.length > 0 && (
+          <div role="status" className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">
+            <p className="font-semibold">{text("Some items from your earlier cart could not be added:")}</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5">
+              {guestNotices.map((notice) => <li key={notice}>{notice}</li>)}
+            </ul>
+          </div>
+        )}
+
         {error && (
           <p className="mt-4 rounded-2xl bg-red-50 p-4 text-sm font-semibold text-red-700">
             {error}
@@ -747,7 +849,7 @@ export default function CartPage() {
         ) : (
           <div className="mt-5 grid gap-6 sm:mt-8 sm:gap-10 lg:grid-cols-[1.4fr_1fr]">
             <div className="space-y-3 sm:space-y-4">
-              {!checkoutMode && <div className="flex items-center gap-3 px-1 py-2 sm:gap-4 sm:py-3">
+              {showSelection && <div className="flex items-center gap-3 px-1 py-2 sm:gap-4 sm:py-3">
                 <label className="flex cursor-pointer items-center gap-2 text-xs font-bold sm:gap-3 sm:text-sm">
                   <input type="checkbox" checked={selectedItemIds.size === cart.items.length} onChange={toggleAllEntries} className="h-4 w-4 accent-red-600 sm:h-5 sm:w-5" />
                   {text("Select all")}
@@ -794,7 +896,12 @@ export default function CartPage() {
                 </p>
               </div>
 
-              {!checkoutMode ? <button type="button" onClick={continueToCheckout} disabled={selectedItemIds.size === 0 || hasPendingPrices} className="mt-4 w-full rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white disabled:bg-zinc-400 sm:mt-6 sm:px-5 sm:py-4 sm:text-base">{text("Checkout selected items")}</button> : <form onSubmit={handleCheckout} className="mt-6 space-y-4">
+              {!user ? <div className="mt-4 space-y-3 sm:mt-6">
+                <Link href="/login?next=/cart" className="block w-full rounded-xl bg-red-600 px-4 py-3 text-center text-sm font-bold text-white hover:bg-red-700 sm:px-5 sm:py-4 sm:text-base">{text("Log in to check out")}</Link>
+                <Link href="/register" className="block w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-center text-sm font-bold hover:border-red-500 hover:text-red-600 sm:px-5 sm:text-base">{text("Create an account")}</Link>
+                <p className="text-xs leading-5 text-zinc-500">{text("Your items are saved on this device. Log in to place your order and they will move into your account cart.")}</p>
+                <p className="text-xs leading-5 text-zinc-400">{text("These are retail prices. Wholesale prices apply after you log in with an approved business account.")}</p>
+              </div> : !checkoutMode ? <button type="button" onClick={continueToCheckout} disabled={selectedItemIds.size === 0 || hasPendingPrices} className="mt-4 w-full rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white disabled:bg-zinc-400 sm:mt-6 sm:px-5 sm:py-4 sm:text-base">{text("Checkout selected items")}</button> : <form onSubmit={handleCheckout} className="mt-6 space-y-4">
                 {savedAddresses.length > 0 && <div>
                   <label htmlFor="saved-address" className="mb-1 block text-sm font-semibold">Saved address</label>
                   <select id="saved-address" value={selectedAddressId} onChange={(event) => {

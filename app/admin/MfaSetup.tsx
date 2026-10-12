@@ -13,6 +13,20 @@ export default function MfaSetup({ onDone, onCancel }: { onDone: () => void; onC
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  // The key is shown once and never again, so the admin has to say they kept it.
+  const [keySaved, setKeySaved] = useState(false);
+
+  async function copyKey() {
+    if (!enrollment) return;
+    try {
+      await navigator.clipboard.writeText(enrollment.secret);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2500);
+    } catch {
+      // Clipboard blocked: the key is selectable, so it can still be copied by hand.
+    }
+  }
 
   async function start() {
     setBusy(true);
@@ -82,8 +96,16 @@ export default function MfaSetup({ onDone, onCancel }: { onDone: () => void; onC
           </div>
         </li>
         <li>
-          Can&apos;t scan? In the app choose <strong>Other account</strong>, then <strong>Enter code manually</strong>, and type this key. <strong>Save it somewhere safe</strong>: it lets you add a new phone later.
-          <code className="mt-2 block break-all rounded-xl bg-zinc-100 px-3 py-2 font-mono text-xs select-all">{enrollment.secret}</code>
+          <strong>Save this key before you go on.</strong> It is shown only now, and it is the one thing that lets you add a new phone if this one is lost or broken.
+          Keep it in a password manager, or write it on paper and put it somewhere safe. (Can&apos;t scan? In the app choose <strong>Other account</strong>, then <strong>Enter code manually</strong>, and type this key.)
+          <code className="mt-2 block break-all rounded-xl bg-zinc-100 px-3 py-2 font-mono text-sm select-all">{enrollment.secret}</code>
+          <button type="button" onClick={() => void copyKey()} className="mt-2 rounded-full border px-4 py-1.5 text-xs font-bold hover:border-red-500 hover:text-red-600">
+            {copied ? "Copied ✓" : "Copy key"}
+          </button>
+          <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-900">
+            <input type="checkbox" checked={keySaved} onChange={(event) => setKeySaved(event.target.checked)} className="mt-0.5 h-5 w-5 accent-red-600" />
+            I have saved this key somewhere safe.
+          </label>
         </li>
         <li>
           Type the 6-digit code the app shows now:
@@ -102,7 +124,7 @@ export default function MfaSetup({ onDone, onCancel }: { onDone: () => void; onC
       </ol>
       {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}
       <div className="flex gap-2">
-        <button type="submit" disabled={busy || !code} className="rounded-full bg-red-600 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{busy ? "Checking…" : "Turn on two-step login"}</button>
+        <button type="submit" disabled={busy || !code || !keySaved} className="rounded-full bg-red-600 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{busy ? "Checking…" : "Turn on two-step login"}</button>
         {onCancel && <button type="button" onClick={onCancel} className="rounded-full border px-5 py-2.5 text-sm font-semibold">Cancel</button>}
       </div>
     </form>

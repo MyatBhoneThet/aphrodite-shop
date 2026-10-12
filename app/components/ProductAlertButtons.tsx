@@ -4,6 +4,7 @@ import { useLanguage } from "../lib/language";
 import { useState } from "react";
 import type { Product } from "../data/products";
 import { authHeaders } from "../lib/client-auth";
+import PhoneNotificationsToggle from "./PhoneNotificationsToggle";
 import {
   suggestedAlertKinds,
   type AlertKind,
@@ -162,6 +163,14 @@ export default function ProductAlertButtons({
         <p role="alert" className="mt-2 text-xs font-semibold text-red-600">
           {error}
         </p>
+      )}
+
+      {/* Following something is only useful if the news reaches the customer:
+          offer the phone switch right where they asked for it. */}
+      {mine.length > 0 && !compact && (
+        <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-left">
+          <PhoneNotificationsToggle compact />
+        </div>
       )}
     </div>
   );

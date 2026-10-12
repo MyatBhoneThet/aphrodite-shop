@@ -16,7 +16,15 @@ import { translate, type Language } from "./translations";
  * It never throws, so it can sit anywhere without risking an order action.
  */
 
-export type NotificationCategory = "order" | "support" | "return";
+/**
+ * "alert" and "cart" are things the customer asked for or can ignore: an alert
+ * is a product they chose to follow, a cart reminder is only the bell item and
+ * a phone message if they turned phone notifications on.
+ */
+export type NotificationCategory = "order" | "support" | "return" | "alert" | "cart";
+
+/** What happened to one notification. "duplicate" means it was already announced earlier. */
+export type NotifyResult = "sent" | "duplicate" | "failed";
 
 export type NotificationEvent = {
   kind: string;
@@ -29,7 +37,7 @@ export type NotificationEvent = {
   dedupeKey?: string;
 };
 
-export async function notifyCustomer(userId: string, event: NotificationEvent) {
+export async function notifyCustomer(userId: string, event: NotificationEvent): Promise<NotifyResult> {
   try {
     const row = await insertNotification({
       user_id: userId,
@@ -39,14 +47,16 @@ export async function notifyCustomer(userId: string, event: NotificationEvent) {
       link: event.link,
       dedupe_key: event.dedupeKey ?? null,
     });
-    if (!row) return; // already announced
+    if (!row) return "duplicate"; // already announced
 
     const profile = await selectProfileByIdService(userId).catch(() => null);
     const allowed =
       event.category === "support"
         ? profile?.support_updates_enabled ?? true
-        : profile?.order_updates_enabled ?? true;
-    if (!allowed) return;
+        : event.category === "alert"
+          ? true // an explicit "tell me" on that product
+          : profile?.order_updates_enabled ?? true;
+    if (!allowed) return "sent"; // the bell item exists; only the phone message is off
 
     const subscriptions = await selectPushSubscriptions(userId);
     await Promise.all(
@@ -56,8 +66,10 @@ export async function notifyCustomer(userId: string, event: NotificationEvent) {
         if (result === "sent") await touchPushSubscription(subscription.endpoint).catch(() => undefined);
       })
     );
+    return "sent";
   } catch (error) {
     console.error("[notifications] could not notify the customer", error instanceof Error ? error.message : error);
+    return "failed";
   }
 }
 
@@ -151,5 +163,112 @@ export async function notifyReturnCustomer(
     await notifyCustomer(customerId, returnNoticeContent(event, await languageOf(customerId), request, suffix));
   } catch (error) {
     console.error("[notifications] return notice failed", error instanceof Error ? error.message : error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Followed products: back in stock / price drop
+// ---------------------------------------------------------------------------
+
+export type ProductAlertNotice =
+  | { type: "back_in_stock" }
+  | { type: "price_drop"; previousPrice: number; currentPrice: number; promotion: boolean; wasPending: boolean };
+
+const mmk = (value: number) => `MMK ${Math.round(value).toLocaleString("en-US")}`;
+
+/** The words for a followed-product alert. The dedupe key changes with the price/stock, so a later drop is a new message. */
+export function productAlertContent(
+  notice: ProductAlertNotice,
+  product: { id: number; name: string; stock: string },
+  alertId: string,
+  language: Language,
+  now: Date = new Date()
+): NotificationEvent {
+  const link = `/products/${product.id}`;
+  // One message per change per day: a price that bounces back and drops again
+  // tomorrow is news again, the same drop repeated within a day is not.
+  const day = now.toISOString().slice(0, 10);
+  const name = product.name.length > 80 ? `${product.name.slice(0, 77)}…` : product.name;
+
+  if (notice.type === "back_in_stock") {
+    return {
+      kind: "alert_back_in_stock",
+      category: "alert",
+      title: translate(language, "notify.alert.stock.title"),
+      body: translate(language, "notify.alert.stock.body", { name }),
+      link,
+      dedupeKey: `alert:${alertId}:stock:${product.stock}:${day}`,
+    };
+  }
+
+  const price = mmk(notice.currentPrice);
+  const previous = mmk(notice.previousPrice);
+  const key = notice.wasPending
+    ? "notify.alert.price.available"
+    : notice.promotion
+      ? "notify.alert.price.promo"
+      : "notify.alert.price.body";
+
+  return {
+    kind: "alert_price_drop",
+    category: "alert",
+    title: translate(language, "notify.alert.price.title"),
+    body: translate(language, key, { name, price, previous }),
+    link,
+    dedupeKey: `alert:${alertId}:price:${Math.round(notice.currentPrice)}:${day}`,
+  };
+}
+
+export async function notifyProductAlert(
+  userId: string,
+  alertId: string,
+  product: { id: number; name: string; stock: string },
+  notice: ProductAlertNotice
+): Promise<NotifyResult> {
+  try {
+    return await notifyCustomer(userId, productAlertContent(notice, product, alertId, await languageOf(userId)));
+  } catch (error) {
+    console.error("[notifications] product alert notice failed", error instanceof Error ? error.message : error);
+    return "failed";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cart reminder
+// ---------------------------------------------------------------------------
+
+/** "You left 2 items in your cart". `lastChangedAt` makes each cart state announce once. */
+export function cartReminderContent(
+  language: Language,
+  items: { name: string }[],
+  userId: string,
+  lastChangedAt: string
+): NotificationEvent {
+  const first = items[0]?.name ?? "";
+  const name = first.length > 60 ? `${first.slice(0, 57)}…` : first;
+
+  return {
+    kind: "cart_reminder",
+    category: "cart",
+    title: translate(language, "notify.cart.title"),
+    body:
+      items.length <= 1
+        ? translate(language, "notify.cart.one", { name })
+        : translate(language, "notify.cart.many", { name, count: items.length }),
+    link: "/cart",
+    dedupeKey: `cart:${userId}:${Date.parse(lastChangedAt) || lastChangedAt}`.slice(0, 200),
+  };
+}
+
+export async function notifyCartReminder(
+  userId: string,
+  items: { name: string }[],
+  lastChangedAt: string
+): Promise<NotifyResult> {
+  try {
+    return await notifyCustomer(userId, cartReminderContent(await languageOf(userId), items, userId, lastChangedAt));
+  } catch (error) {
+    console.error("[notifications] cart reminder failed", error instanceof Error ? error.message : error);
+    return "failed";
   }
 }

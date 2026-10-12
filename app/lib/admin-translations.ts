@@ -2,6 +2,24 @@ import { translations, type Language } from "./translations";
 import { storefrontBurmese } from "./storefront-translations";
 
 export const adminBurmese: Record<string, string> = {
+  // Needs-attention strip and batch order actions. New lines: please have a native speaker review them.
+  "Needs attention today": "ယနေ့ အာရုံစိုက်ရန်",
+  "Payment slips to check": "စစ်ဆေးရန် ငွေလွှဲပြေစာများ",
+  "more waiting for the customer to pay": "ခု ဖောက်သည်၏ ငွေပေးချေမှုကို စောင့်နေသည်",
+  "Orders to ship": "ပို့ရန် အော်ဒါများ",
+  "Verified — pack and hand to the courier": "အတည်ပြုပြီး — ထုပ်ပိုး၍ ကာရီယာထံ ပေးအပ်ပါ",
+  "Open returns & cancellations": "ဖွင့်ထားသော ပြန်ပို့မှုနှင့် ပယ်ဖျက်မှုများ",
+  "Refunds to send": "ပေးပို့ရန် ငွေပြန်အမ်းမှုများ",
+  "All clear — nothing is waiting for you right now.": "အားလုံးရှင်းပါပြီ — လက်ရှိ စောင့်နေသော အလုပ် မရှိပါ။",
+  "Select": "ရွေးရန်",
+  "Select order": "အော်ဒါကို ရွေးရန်",
+  "Select all on this page": "ဤစာမျက်နှာရှိ အားလုံးကို ရွေးရန်",
+  "Tick orders to print their packing slips together or move them to the next step.": "အော်ဒါများကို ရွေးပြီး ထုပ်ပိုးစာရွက်များ တစ်ပြိုင်နက် ထုတ်ရန် သို့မဟုတ် နောက်အဆင့်သို့ ရွှေ့ရန်။",
+  "Batch actions": "အစုလိုက် လုပ်ဆောင်ချက်များ",
+  "Print packing slips": "ထုပ်ပိုးစာရွက်များ ထုတ်ရန်",
+  "Mark packed": "ထုပ်ပိုးပြီးအဖြစ် မှတ်ရန်",
+  "Mark shipped": "ပို့ပြီးအဖြစ် မှတ်ရန်",
+  "Working…": "လုပ်ဆောင်နေသည်…",
   "Business overview": "လုပ်ငန်း အခြေအနေအကျဉ်း",
   "One dashboard for the whole store": "ဆိုင်တစ်ခုလုံးအတွက် စီမံခန့်ခွဲမှု စာမျက်နှာ",
   "Products, orders, returns, customers, pricing, chat, and product sync all stay in this sidebar.": "ပစ္စည်း၊ အော်ဒါ၊ ပြန်ပို့မှု၊ ဖောက်သည်၊ ဈေးနှုန်း၊ စကားပြောနှင့် ပစ္စည်းစာရင်းချိတ်ဆက်မှုတို့ကို ဤဘေးဘားမှ စီမံနိုင်ပါသည်။",

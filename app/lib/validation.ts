@@ -49,6 +49,18 @@ export const cartItemInputSchema = z.object({
   quantity: z.number().int().positive().max(9999).optional(),
 });
 
+// A signed-out visitor's browser cart, sent only to be priced (nothing is stored).
+export const guestCartInputSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        product_id: z.number().int().positive(),
+        quantity: z.number().int().positive().max(9999),
+      })
+    )
+    .max(30),
+});
+
 export const cartQuantityUpdateSchema = z.object({
   quantity: z.number().int().positive().max(9999),
 });

@@ -9,6 +9,7 @@ import NextStep from "../components/NextStep";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import OrderItemsList, { type OrderLine } from "../components/OrderItemsList";
+import BuyAgainButton from "../components/BuyAgainButton";
 import { invoiceKind } from "../lib/company";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
@@ -434,7 +435,7 @@ export default function OrdersView() {
               order.status === "shipped" &&
               deliveryEvents[deliveryEvents.length - 1]?.stage === "delivery_failed";
             return <article id={`order-${order.id}`} key={order.id} className="min-w-0 overflow-hidden bg-white">
-              <div className="flex flex-wrap items-start justify-between gap-4 border-b p-6"><div><p className="text-xl font-black">Order #{order.id.slice(0, 8).toUpperCase()}</p><p className="mt-1 text-sm text-zinc-500">{formatDateTime(order.created_at)}</p>{order.receipt_number && <p className="mt-1 text-xs font-semibold text-zinc-500">Receipt {order.receipt_number}</p>}{order.po_number && <p className="mt-1 text-xs font-semibold text-zinc-500">PO {order.po_number}</p>}</div><div className="flex flex-wrap items-center gap-2">{user?.role === "wholesale" && order.status !== "cancelled" && <Link href={`/orders/${order.id}/invoice`} className="rounded-full border px-4 py-2 text-xs font-bold hover:border-red-500 hover:text-red-600">{invoiceKind(order) === "invoice" ? "View / print invoice" : "Proforma invoice"}</Link>}{order.receipt_number && <Link href={`/orders/${order.id}/receipt`} className="rounded-full border px-4 py-2 text-xs font-bold hover:border-red-500 hover:text-red-600">View / print receipt</Link>}<span className={`rounded-full px-3 py-2 text-xs font-bold capitalize ${statusStyles[order.status]}`}>{order.status}</span></div></div>
+              <div className="flex flex-wrap items-start justify-between gap-4 border-b p-6"><div><p className="text-xl font-black">Order #{order.id.slice(0, 8).toUpperCase()}</p><p className="mt-1 text-sm text-zinc-500">{formatDateTime(order.created_at)}</p>{order.receipt_number && <p className="mt-1 text-xs font-semibold text-zinc-500">Receipt {order.receipt_number}</p>}{order.po_number && <p className="mt-1 text-xs font-semibold text-zinc-500">PO {order.po_number}</p>}</div><div className="flex flex-wrap items-center gap-2">{user?.role === "wholesale" && order.status !== "cancelled" && <Link href={`/orders/${order.id}/invoice`} className="rounded-full border px-4 py-2 text-xs font-bold hover:border-red-500 hover:text-red-600">{invoiceKind(order) === "invoice" ? "View / print invoice" : "Proforma invoice"}</Link>}{order.receipt_number && <Link href={`/orders/${order.id}/receipt`} className="rounded-full border px-4 py-2 text-xs font-bold hover:border-red-500 hover:text-red-600">View / print receipt</Link>}{order.status === "delivered" && user?.role !== "admin" && user?.role !== "staff" && <BuyAgainButton orderId={order.id} />}<span className={`rounded-full px-3 py-2 text-xs font-bold capitalize ${statusStyles[order.status]}`}>{order.status}</span></div></div>
               <div className="p-6">
                 {/* The one thing to do next, derived from this order rather
                     than stored — see lib/next-step.ts. */}

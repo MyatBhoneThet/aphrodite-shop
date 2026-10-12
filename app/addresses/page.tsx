@@ -95,7 +95,7 @@ export default function AddressesPage() {
         data?.address?.postal_code,
       ].filter(Boolean).join(" · ");
       setMessage(autofilled
-        ? `Autofilled: ${autofilled}. Add your house or building details.`
+        ? `Autofilled: ${autofilled}. ${data?.address?.township ? "" : "We could not tell the township from this pin, so please check that the Yangon township is the right one. "}Add your house or building details.`
         : "The pin is confirmed, but this map location has no street details. Choose the township and type the street manually.");
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : "Choose the township and type the street manually.");

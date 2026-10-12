@@ -72,7 +72,7 @@ export default function ProductGallery({ product }: { product: Product }) {
     <div className="space-y-3 sm:space-y-4">
       <div className="relative">
         <div
-          className={`relative flex h-64 items-center justify-center overflow-hidden rounded-2xl border border-zinc-200 bg-white sm:h-[480px] sm:rounded-3xl ${
+          className={`relative flex h-56 items-center justify-center overflow-hidden rounded-2xl border border-zinc-200 bg-white sm:h-[480px] sm:rounded-3xl ${
             model ? "" : "lg:cursor-zoom-in"
           }`}
           onPointerEnter={updateZoom}
@@ -182,7 +182,7 @@ export default function ProductGallery({ product }: { product: Product }) {
             aria-label={text(item.label)}
             aria-pressed={!model && selected === index}
             onClick={() => choosePhoto(index)}
-            className={`w-20 shrink-0 rounded-xl border p-1.5 sm:w-24 sm:rounded-2xl sm:p-2 ${
+            className={`w-14 shrink-0 rounded-xl border p-1 sm:w-24 sm:rounded-2xl sm:p-2 ${
               !model && selected === index
                 ? "border-red-600 bg-red-50"
                 : "border-zinc-200 bg-white"
@@ -192,13 +192,13 @@ export default function ProductGallery({ product }: { product: Product }) {
               src={item.url}
               alt=""
               loading="lazy"
-              className="h-12 w-full object-contain sm:h-16"
+              className="h-10 w-full object-contain sm:h-16"
               onError={(event) => {
                 event.currentTarget.onerror = null;
                 event.currentTarget.src = PRODUCT_PLACEHOLDER;
               }}
             />
-            <span className="mt-1 block truncate text-xs">{text(item.label)}</span>
+            <span className="mt-1 hidden truncate text-xs sm:block">{text(item.label)}</span>
           </button>
         ))}
         {product.model3D && (
@@ -209,7 +209,7 @@ export default function ProductGallery({ product }: { product: Product }) {
               setZoom(null);
             }}
             aria-pressed={model}
-            className="w-20 shrink-0 rounded-xl border px-2 text-xs font-semibold sm:w-24 sm:rounded-2xl sm:px-3 sm:text-sm"
+            className="w-14 shrink-0 rounded-xl border px-1 text-xs font-semibold sm:w-24 sm:rounded-2xl sm:px-3 sm:text-sm"
           >
             {text("3D view")}
           </button>

@@ -1,12 +1,46 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { authenticate } from "@/app/lib/backend";
-import { isApproximatelyInYangon, normalizeYangonTownship } from "@/app/lib/delivery-country";
+import { isApproximatelyInYangon, pickYangonTownship } from "@/app/lib/delivery-country";
 import { handleRouteError } from "@/app/lib/errors";
 
 type NominatimResult = {
   display_name?: string;
   address?: Record<string, string | undefined>;
 };
+
+
+/** Fields OpenStreetMap may put a township name in, most specific first. */
+function townshipCandidates(address: Record<string, string | undefined>) {
+  return [
+    address.city_district,
+    address.town,
+    address.suburb,
+    address.municipality,
+    address.neighbourhood,
+    address.village,
+    address.county,
+    address.city,
+  ];
+}
+
+async function reverseLookup(latitude: number, longitude: number, zoom: number): Promise<NominatimResult> {
+  const url = new URL("https://nominatim.openstreetmap.org/reverse");
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("lat", String(latitude));
+  url.searchParams.set("lon", String(longitude));
+  url.searchParams.set("addressdetails", "1");
+  url.searchParams.set("zoom", String(zoom));
+  // Nominatim may ignore Accept-Language for Myanmar unless the preference
+  // is also explicit in the query. English township names match the values
+  // in our Yangon selector; road/ward names still fall back to local data.
+  url.searchParams.set("accept-language", "en");
+  const response = await fetch(url, {
+    headers: { "User-Agent": "AphroditeMyanmar/1.0 (delivery address autofill)", "Accept-Language": "en,my;q=0.8" },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw new Error(`Reverse geocoding failed: ${response.status}`);
+  return (await response.json()) as NominatimResult;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,25 +51,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Place the pin inside Yangon Region." }, { status: 400 });
     }
 
-    const url = new URL("https://nominatim.openstreetmap.org/reverse");
-    url.searchParams.set("format", "jsonv2");
-    url.searchParams.set("lat", String(latitude));
-    url.searchParams.set("lon", String(longitude));
-    url.searchParams.set("addressdetails", "1");
-    url.searchParams.set("zoom", "18");
-    // Nominatim may ignore Accept-Language for Myanmar unless the preference
-    // is also explicit in the query. English township names match the values
-    // in our Yangon selector; road/ward names still fall back to local data.
-    url.searchParams.set("accept-language", "en");
-    const response = await fetch(url, {
-      headers: { "User-Agent": "AphroditeMyanmar/1.0 (delivery address autofill)", "Accept-Language": "en,my;q=0.8" },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!response.ok) throw new Error(`Reverse geocoding failed: ${response.status}`);
-    const result = await response.json() as NominatimResult;
-    const address = result.address ?? {};
-    const townshipCandidates = [address.city_district, address.town, address.suburb, address.county, address.city];
-    const township = townshipCandidates.map(normalizeYangonTownship).find(Boolean) ?? null;
+    // The street-level lookup knows the road but often has no township on
+    // it. Map volunteers record the township at different levels (suburb,
+    // town, municipality, city district), so every one is tried, and if none
+    // matches, a coarser lookup of the same spot is made: that one usually
+    // carries the town or municipality name instead.
+    const detailed = await reverseLookup(latitude, longitude, 18);
+    const address = detailed.address ?? {};
+    let township: string | null = pickYangonTownship(townshipCandidates(address)) ?? null;
+
+    if (!township) {
+      const coarse = await reverseLookup(latitude, longitude, 12).catch(() => null);
+      township = pickYangonTownship(townshipCandidates(coarse?.address ?? {})) ?? null;
+    }
+    const result = detailed;
     const street = [address.road, address.neighbourhood, address.quarter, address.village]
       .filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index)
       .join(", ");

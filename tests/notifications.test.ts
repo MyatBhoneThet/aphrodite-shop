@@ -10,7 +10,7 @@ vi.mock("../app/lib/supabase", async (importOriginal) => ({
 }));
 vi.mock("../app/lib/push", () => ({ sendPush: vi.fn() }));
 
-import { notifyCustomer, notifyOrderCustomer, orderNoticeContent, returnNoticeContent, supportReplyContent } from "../app/lib/notifications";
+import { cartReminderContent, notifyCustomer, notifyOrderCustomer, orderNoticeContent, productAlertContent, returnNoticeContent, supportReplyContent } from "../app/lib/notifications";
 import { sendPush } from "../app/lib/push";
 import * as db from "../app/lib/supabase";
 
@@ -24,6 +24,8 @@ beforeEach(() => {
   vi.mocked(db.selectProfileByIdService).mockResolvedValue({ id: "u1", order_updates_enabled: true, support_updates_enabled: true, preferred_language: "en" } as never);
   vi.mocked(db.selectPushSubscriptions).mockResolvedValue([sub(1), sub(2)] as never);
   vi.mocked(sendPush).mockResolvedValue("sent");
+  vi.mocked(db.touchPushSubscription).mockResolvedValue(undefined as never);
+  vi.mocked(db.deletePushSubscriptionByEndpoint).mockResolvedValue(undefined as never);
 });
 
 describe("notifyCustomer", () => {
@@ -37,7 +39,20 @@ describe("notifyCustomer", () => {
 
   it("announces an event only once", async () => {
     vi.mocked(db.insertNotification).mockResolvedValue(null as never);
-    await notifyCustomer("u1", event);
+    await expect(notifyCustomer("u1", event)).resolves.toBe("duplicate");
+    expect(sendPush).not.toHaveBeenCalled();
+  });
+
+  it("sends a followed-product alert to the phone even when order updates are switched off", async () => {
+    vi.mocked(db.selectProfileByIdService).mockResolvedValue({ id: "u1", order_updates_enabled: false } as never);
+    await notifyCustomer("u1", { ...event, kind: "alert_price_drop", category: "alert" });
+    expect(sendPush).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps cart reminders behind the customer's updates switch", async () => {
+    vi.mocked(db.selectProfileByIdService).mockResolvedValue({ id: "u1", order_updates_enabled: false } as never);
+    await notifyCustomer("u1", { ...event, kind: "cart_reminder", category: "cart" });
+    expect(db.insertNotification).toHaveBeenCalled();
     expect(sendPush).not.toHaveBeenCalled();
   });
 
@@ -66,11 +81,11 @@ describe("notifyCustomer", () => {
 
   it("never throws, and keeps going if one push fails", async () => {
     vi.mocked(sendPush).mockResolvedValueOnce("failed").mockResolvedValueOnce("sent");
-    await expect(notifyCustomer("u1", event)).resolves.toBeUndefined();
+    await expect(notifyCustomer("u1", event)).resolves.toBe("sent");
     expect(db.deletePushSubscriptionByEndpoint).not.toHaveBeenCalled();
     vi.mocked(db.insertNotification).mockRejectedValue(new Error("db down"));
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    await expect(notifyCustomer("u1", event)).resolves.toBeUndefined();
+    await expect(notifyCustomer("u1", event)).resolves.toBe("failed");
     spy.mockRestore();
   });
 
@@ -117,5 +132,38 @@ describe("what the notices say", () => {
   it("never puts anything but order code and status on a lock screen", () => {
     const notice = orderNoticeContent({ type: "stage", stage: "delivered" }, ORDER, "en");
     expect(`${notice.title} ${notice.body}`).not.toMatch(/\d{7,}|@|MMK/);
+  });
+});
+
+describe("followed-product and cart messages", () => {
+  const product = { id: 209, name: "Thinkpad X13", stock: "In Stock" };
+  const day = new Date("2026-10-12T05:00:00Z");
+
+  it("says a product is back in stock, in the customer's language", () => {
+    const en = productAlertContent({ type: "back_in_stock" }, product, "alert-1", "en", day);
+    expect(en).toMatchObject({ kind: "alert_back_in_stock", category: "alert", title: "Back in stock", body: "Thinkpad X13 is available again.", link: "/products/209" });
+    expect(en.dedupeKey).toBe("alert:alert-1:stock:In Stock:2026-10-12");
+    expect(productAlertContent({ type: "back_in_stock" }, product, "alert-1", "my", day).title).toBe("ပစ္စည်း ပြန်လည်ရရှိပါပြီ");
+  });
+
+  it("names both prices for a drop, and tells a promotion apart", () => {
+    const drop = productAlertContent({ type: "price_drop", previousPrice: 3_000_000, currentPrice: 2_700_000, promotion: false, wasPending: false }, product, "a", "en", day);
+    expect(drop.body).toBe("Thinkpad X13 is now MMK 2,700,000 (was MMK 3,000,000).");
+    expect(drop.dedupeKey).toBe("alert:a:price:2700000:2026-10-12");
+    const promo = productAlertContent({ type: "price_drop", previousPrice: 3_000_000, currentPrice: 2_700_000, promotion: true, wasPending: false }, product, "a", "en", day);
+    expect(promo.body).toContain("is on promotion");
+    const pending = productAlertContent({ type: "price_drop", previousPrice: 0, currentPrice: 2_700_000, promotion: false, wasPending: true }, product, "a", "en", day);
+    expect(pending.body).toBe("Thinkpad X13 now has a price: MMK 2,700,000.");
+    expect(pending.body).not.toContain("was MMK 0");
+  });
+
+  it("a cart reminder counts the items and announces each cart state once", () => {
+    const one = cartReminderContent("en", [{ name: "Wireless Mouse" }], "u1", "2026-10-10T05:00:00.000Z");
+    expect(one).toMatchObject({ kind: "cart_reminder", category: "cart", title: "Your cart is waiting", body: "You left Wireless Mouse in your cart.", link: "/cart" });
+    const many = cartReminderContent("en", [{ name: "Wireless Mouse" }, { name: "Keyboard" }], "u1", "2026-10-10T05:00:00.000Z");
+    expect(many.body).toBe("You left 2 items in your cart, including Wireless Mouse.");
+    expect(many.dedupeKey).toBe(one.dedupeKey);
+    const later = cartReminderContent("en", [{ name: "Wireless Mouse" }], "u1", "2026-10-11T05:00:00.000Z");
+    expect(later.dedupeKey).not.toBe(one.dedupeKey);
   });
 });

@@ -42,13 +42,13 @@ export default function PhoneNotificationsToggle({ compact = false }: { compact?
       <p className="text-sm font-bold">{text("Phone notifications")}</p>
       {status === "on" && (
         <>
-          {note("You will get delivery and order updates on this phone, even when the website is closed.")}
+          {note("You will get order updates, followed-product alerts and cart reminders on this phone, even when the website is closed.")}
           <button type="button" disabled={busy} onClick={() => void turnOff()} className="mt-2 rounded-full border px-4 py-1.5 text-xs font-semibold hover:border-red-500 hover:text-red-600 disabled:opacity-50">{busy ? text("Please wait…") : text("Turn off on this phone")}</button>
         </>
       )}
       {status === "off" && (
         <>
-          {note("Get a message on your phone when your order is packed, out for delivery, or the shop replies.")}
+          {note("Get a message on your phone when your order moves, a product you follow is back or cheaper, or the shop replies.")}
           <button type="button" disabled={busy} onClick={() => void turnOn()} className="mt-2 rounded-full bg-red-600 px-4 py-2 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-50">{busy ? text("Please wait…") : text("Turn on phone notifications")}</button>
         </>
       )}

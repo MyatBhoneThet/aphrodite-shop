@@ -1,5 +1,6 @@
 import { emailFooterHtml } from "./email-footer";
 import { publicSiteUrl, sendMail, type MailContent } from "./mailer";
+import { notifyProductAlert, type ProductAlertNotice } from "./notifications";
 import { evaluateAlert, type ProductAlert } from "./product-alerts";
 import { activePromotion, discountPercent, effectiveProductPrice } from "./promotions";
 import {
@@ -122,8 +123,14 @@ function stockAlertContent(product: Product, env: NodeJS.ProcessEnv): MailConten
   };
 }
 
+/**
+ * Tells one customer about one fired alert: the bell + their phone, and the
+ * email when they have an address. The watch moves forward once at least one
+ * of those got through, so a customer is never told twice and never missed
+ * just because email is not set up.
+ */
 async function deliverAlert(row: ProductAlertRow, forceCurrentPromotion = false) {
-  if (!row.products || !row.profiles?.email) return false;
+  if (!row.products) return false;
 
   const product = mapProductRow(row.products);
   const alert = alertFromRow(row);
@@ -138,17 +145,28 @@ async function deliverAlert(row: ProductAlertRow, forceCurrentPromotion = false)
   const previousPrice = forceCurrentPromotion && isCurrentPromotion
     ? product.price
     : row.baseline_price;
+  const notice: ProductAlertNotice = row.kind === "price_drop"
+    ? {
+        type: "price_drop",
+        previousPrice,
+        currentPrice,
+        promotion: isCurrentPromotion,
+        wasPending: !Number.isFinite(row.baseline_price) || row.baseline_price <= 0,
+      }
+    : { type: "back_in_stock" };
   const content = row.kind === "price_drop"
     ? productPriceAlertEmailContent(product, previousPrice, process.env)
     : stockAlertContent(product, process.env);
-  const result = await sendMail(row.profiles.email, content, {
-    idempotencyKey: `product-alert-${row.id}-${row.kind}-${currentPrice}-${product.stock}`,
-  });
+  const email = row.profiles?.email;
 
-  if (result.status === "sent") {
-    await updateProductAlertBaseline(row.id, currentPrice, product.stock);
-    return true;
-  }
+  const [result, phone] = await Promise.all([
+    email
+      ? sendMail(email, content, {
+          idempotencyKey: `product-alert-${row.id}-${row.kind}-${currentPrice}-${product.stock}`,
+        })
+      : Promise.resolve({ status: "not_configured" as const }),
+    notifyProductAlert(row.user_id, row.id, product, notice),
+  ]);
 
   if (result.status === "failed") {
     console.error("[product-alerts] email failed", {
@@ -157,6 +175,12 @@ async function deliverAlert(row: ProductAlertRow, forceCurrentPromotion = false)
       error: result.error,
     });
   }
+
+  if (result.status === "sent" || phone !== "failed") {
+    await updateProductAlertBaseline(row.id, currentPrice, product.stock);
+    return true;
+  }
+
   return false;
 }
 

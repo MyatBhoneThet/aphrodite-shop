@@ -92,7 +92,12 @@ export default function SecurityPanel({ isAdmin }: { isAdmin: boolean }) {
                 ))}
               </ul>
             )}
-            {verified.length === 1 && <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Tip: add a <strong>second phone or app</strong> too. If you lose this phone, the other one still gets you in.</p>}
+            {verified.length === 1 && (
+              <p role="note" className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                <strong>You have only one authenticator.</strong> If this phone is lost or broken you will be locked out of the admin.
+                Add a <strong>second phone or app</strong> now (a family member&apos;s phone or a tablet is fine), and save the key shown during setup.
+              </p>
+            )}
 
             <div className="mt-4">
               {adding ? (
@@ -103,6 +108,16 @@ export default function SecurityPanel({ isAdmin }: { isAdmin: boolean }) {
             </div>
           </>
         )}
+      </section>
+
+      <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-zinc-100 sm:p-6">
+        <h2 className="text-lg font-black">If you lose your phone</h2>
+        <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-zinc-700">
+          <li><strong>Another authenticator?</strong> Sign in with the other phone, then remove the lost one above and add the new phone.</li>
+          <li><strong>Saved key?</strong> Install the app on the new phone, choose <em>Enter code manually</em> and type the saved key. The same six-digit codes will appear.</li>
+          <li><strong>Neither?</strong> Someone with access to your Supabase project can clear the lost authenticator, and you sign in with your password and set a new one up. The exact steps are in <code className="rounded bg-zinc-100 px-1">docs/admin-recovery.md</code> in the project.</li>
+        </ol>
+        <p className="mt-3 text-xs text-zinc-500">Nobody can read your key back: not the shop developers and not Supabase. That is what makes it safe, and why it has to be saved when it is first shown.</p>
       </section>
 
       <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-zinc-100 sm:p-6">

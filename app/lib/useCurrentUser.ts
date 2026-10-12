@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { UserRole } from "../data/products";
 import { AUTH_STORAGE_KEYS } from "./auth-storage";
 import { authHeaders, clearStoredAuth } from "./client-auth";
+import { mergeGuestCart, readGuestCart } from "./guest-cart";
 
 export type CurrentUser = {
   id?: string;
@@ -55,6 +56,18 @@ export function useCurrentUser(): CurrentUserState {
 
       if (response.ok && data.user) {
         localStorage.setItem(AUTH_STORAGE_KEYS.user, JSON.stringify(data.user));
+
+        // Items added while signed out move into the real cart as soon as the
+        // customer is known. Done before the page is told "ready" so the cart
+        // count and cart page already see them. Back-office accounts keep
+        // their guest cart untouched.
+        if (
+          (data.user.role === "normal" || data.user.role === "wholesale") &&
+          readGuestCart().length > 0
+        ) {
+          await mergeGuestCart(authHeaders());
+        }
+
         setUser(data.user);
       } else {
         clearStoredAuth();

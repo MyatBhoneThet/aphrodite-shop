@@ -27,6 +27,10 @@ const LIMITS: Record<string, number> = {
   // order code against a phone number has to stay impractical.
   track: 10,
   chat: 30,
+  // Prices a signed-out visitor's browser cart; public data, cheap reads.
+  "cart-guest": 60,
+  // Search-suggestion thumbnails: a few per keystroke, so generous, but bounded.
+  thumb: 240,
   // Lower than live chat: each call can reach an external AI provider and
   // spends the shop's free Gemini quota.
   assistant: 20,

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 import type { CurrentUser } from "../lib/useCurrentUser";
 import { useLanguage } from "../lib/language";
@@ -37,7 +38,11 @@ export default function RegisterForm({
   providers: SocialProvider[];
 }) {
   const { t } = useLanguage();
-  const [kind, setKind] = useState<AccountKind>("retail");
+  // "/register?type=wholesale" (the link on product pages) opens the business form.
+  const searchParams = useSearchParams();
+  const [kind, setKind] = useState<AccountKind>(
+    searchParams.get("type") === "wholesale" ? "wholesale" : "retail"
+  );
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

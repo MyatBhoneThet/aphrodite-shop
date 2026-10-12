@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import BrandLogo from "./BrandLogo";
 import LanguageSwitcher from "./LanguageSwitcher";
@@ -8,6 +7,8 @@ import AccountControls from "./AccountControls";
 import type { Product, UserRole } from "../data/products";
 import { useLanguage } from "../lib/language";
 import LastOrderStatusBar from "./LastOrderStatusBar";
+import GuestCartLink from "./GuestCartLink";
+import { thumbnailSrc } from "../lib/thumbnail";
 
 type CurrentUser = { email: string; role: UserRole; wholesale_status?: string };
 type Props = {
@@ -39,7 +40,11 @@ function SearchBox({ search, setSearch, suggestions }: {
           <p className="border-b px-4 py-2 text-xs font-bold uppercase tracking-wider text-zinc-400">{t("nav.suggestions")}</p>
           {suggestions.map((product) => (
             <Link key={product.id} href={`/products/${product.id}`} className="flex items-center gap-3 border-b px-4 py-3 last:border-0 hover:bg-red-50">
-              <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-xl bg-zinc-100"><Image src={product.image} unoptimized alt="" fill sizes="44px" className="object-contain p-1" /></div>
+              <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-xl bg-zinc-100">
+                {/* A ~3 KB thumbnail instead of the full-size photo: this is shown 44 px wide. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={thumbnailSrc(product.image, 96)} alt="" width={44} height={44} loading="lazy" decoding="async" className="h-full w-full object-contain p-1" />
+              </div>
               <div className="min-w-0"><p className="truncate text-sm font-bold">{product.name}</p><p className="truncate text-xs text-zinc-500">{product.brand} · {text(product.category)}</p></div>
               <span className="ml-auto text-red-600">→</span>
             </Link>
@@ -79,7 +84,7 @@ export default function Navbar({ search, setSearch, searchSuggestions, language,
           {currentUser ? (
             <AccountControls user={currentUser} wishlistCount={wishlistCount} cartCount={cartCount} onLogout={onLogout} />
           ) : (
-            <><details className="group/guest relative sm:hidden">
+            <><GuestCartLink /><details className="group/guest relative sm:hidden">
               <summary className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-xl bg-zinc-950 text-red-300 [&::-webkit-details-marker]:hidden" aria-label={`${t("nav.login")} / ${t("nav.register")}`}>
                 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><circle cx="12" cy="8" r="4" /><path d="M4 21v-2a8 8 0 0 1 16 0v2" /></svg>
               </summary>

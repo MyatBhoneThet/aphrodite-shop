@@ -8,14 +8,16 @@ import { authHeaders } from "@/app/lib/client-auth";
 import type { UserRole } from "@/app/data/products";
 import { formatCurrency, formatDateTime } from "@/app/lib/format";
 import { useAdminText } from "@/app/lib/useAdminText";
+import type { OrderFilters } from "@/app/lib/admin-order-filter";
+import AttentionStrip from "./AttentionStrip";
 import LowStockCard from "./LowStockCard";
 import OrderExportCard from "./OrderExportCard";
-
-type AdminPanel = "dashboard" | "products" | "orders" | "queue" | "locations" | "support" | "ads" | "wholesale" | "pricing" | "sync" | "staff";
+import type { AdminPanelId } from "./types";
 
 type AdminOverviewPanelProps = {
   role: UserRole;
-  onNavigate: (section: AdminPanel) => void;
+  /** `ordersFilter` presets the orders list (e.g. only orders waiting to ship). */
+  onNavigate: (section: AdminPanelId, ordersFilter?: Partial<OrderFilters>) => void;
 };
 
 const periods: Array<{ value: SalesPeriod; label: string }> = [
@@ -220,6 +222,8 @@ export default function AdminOverviewPanel({ role, onNavigate }: AdminOverviewPa
           </div>
         </div>
       </section>
+
+      <AttentionStrip role={role} onNavigate={onNavigate} />
 
       {error ? <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</div> : null}
 

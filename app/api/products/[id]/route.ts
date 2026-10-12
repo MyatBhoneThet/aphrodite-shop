@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, after, type NextRequest } from "next/server";
 import {
   authenticate,
   authenticateOptional,
@@ -7,6 +7,7 @@ import {
   removeProduct,
 } from "@/app/lib/backend";
 import { handleRouteError } from "@/app/lib/errors";
+import { sendTriggeredProductAlertEmails } from "@/app/lib/product-alert-email";
 import { readJsonBody } from "@/app/lib/request";
 import {
   firstIssueMessage,
@@ -67,6 +68,10 @@ export async function PATCH(
     if (!result) {
       return NextResponse.json({ error: "Product not found." }, { status: 404 });
     }
+
+    // Followers hear about a price or stock change right away instead of at
+    // the next sheet sync. Failures are swallowed inside; the save is done.
+    after(() => sendTriggeredProductAlertEmails([productId]));
 
     // sheetStock says which Google Sheet cells a stock change was written to.
     return NextResponse.json(result);

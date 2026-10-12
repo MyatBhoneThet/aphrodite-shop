@@ -1812,6 +1812,33 @@ export async function selectProductById(id: number) {
   return rows[0] ?? null;
 }
 
+/** Every product id, for the sitemap. Public data; capped so a bad table cannot run away. */
+export async function selectProductIdsForSitemap(limit = 5000) {
+  const { anonKey } = requireSupabaseConfig();
+  const rows = await supabaseRest<{ id: number }[]>(
+    `products?select=id&order=id.asc&limit=${Math.max(1, Math.min(limit, 5000))}`,
+    {},
+    anonKey
+  );
+  return rows.map((row) => row.id);
+}
+
+/** Several public products at once, with only the public columns. */
+export async function selectProductsByIds(ids: number[]) {
+  const idList = Array.from(
+    new Set(ids.filter((id) => Number.isInteger(id) && id > 0))
+  ).join(",");
+
+  if (!idList) return [];
+
+  const { anonKey } = requireSupabaseConfig();
+  return supabaseRest<ProductRow[]>(
+    `products?select=${PUBLIC_PRODUCT_COLUMNS}&id=in.(${idList})&order=id.asc`,
+    {},
+    anonKey
+  );
+}
+
 export async function selectProductByIdService(id: number) {
   const rows = await supabaseRest<ProductRow[]>(
     `products?select=*&id=eq.${id}&limit=1`
@@ -3037,6 +3064,50 @@ export async function selectReturnRequests() {
     `return_requests?select=${encodeURIComponent(
       returnRequestSelect
     )}&order=created_at.desc&limit=200`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// "Needs attention today" (service role; the caller is a checked back-office user)
+// ---------------------------------------------------------------------------
+
+export type AttentionOrderRow = {
+  id: string;
+  status: OrderStatus;
+  payment_method: "cash_on_delivery" | "bank_transfer" | "mmqr" | null;
+  payment_verification_status: PaymentVerificationStatus | null;
+  cancellation_request_status: OrderRequestStatus | null;
+  return_request_status: OrderRequestStatus | null;
+  cancellation_refund_status: CancellationRefundStatus | null;
+};
+
+/** Orders that still need somebody to do something: not yet shipped, or with an open request or refund. */
+export async function selectAttentionOrdersService() {
+  const open = [
+    "status.in.(pending,confirmed)",
+    "return_request_status.in.(requested,approved,pickup_scheduled,received)",
+    "cancellation_request_status.eq.requested",
+    "cancellation_refund_status.eq.pending",
+  ].join(",");
+  return supabaseRest<AttentionOrderRow[]>(
+    `orders?select=id,status,payment_method,payment_verification_status,cancellation_request_status,return_request_status,cancellation_refund_status&or=(${open})&limit=2000`
+  );
+}
+
+/** Which of these orders already have a transfer slip uploaded. */
+export async function selectOrderIdsWithSlipsService(orderIds: string[]) {
+  const ids = [...new Set(orderIds.filter(Boolean))];
+  if (ids.length === 0) return new Set<string>();
+  const rows = await supabaseRest<{ order_id: string }[]>(
+    `payment_slips?select=order_id&order_id=in.(${ids.map(encodeURIComponent).join(",")})&limit=5000`
+  );
+  return new Set(rows.map((row) => row.order_id));
+}
+
+/** Item-level return requests the shop still has to act on. */
+export async function countOpenItemReturnsService() {
+  return supabaseCount(
+    "return_requests?select=id&status=in.(requested,approved,collected,inspected,refund_approved)"
   );
 }
 
@@ -4431,6 +4502,45 @@ export async function insertNotification(entry: {
     body: JSON.stringify(entry),
   });
   return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Cart reminders (service role; the scan runs from the scheduled job, not a
+// signed-in customer).
+// ---------------------------------------------------------------------------
+
+export type RecentCartItemRow = {
+  user_id: string;
+  product_id: number;
+  quantity: number;
+  build_group_id: string | null;
+  updated_at: string;
+  products: { id: number; name: string; price: number; stock: string } | null;
+};
+
+/** Cart lines changed since `sinceIso`, oldest first. The caller groups by customer. */
+export async function selectRecentCartItemsService(sinceIso: string, limit = 2000) {
+  return supabaseRest<RecentCartItemRow[]>(
+    `cart_items?select=user_id,product_id,quantity,build_group_id,updated_at,products(id,name,price,stock)&updated_at=gt.${encodeURIComponent(sinceIso)}&order=updated_at.asc&limit=${Math.min(Math.max(1, Math.trunc(limit)), 5000)}`
+  );
+}
+
+/** When these customers last placed an order, if it was after `sinceIso`. */
+export async function selectOrderTimesSinceService(userIds: string[], sinceIso: string) {
+  const ids = [...new Set(userIds.filter(Boolean))];
+  if (ids.length === 0) return [];
+  return supabaseRest<{ user_id: string; created_at: string }[]>(
+    `orders?select=user_id,created_at&user_id=in.(${ids.map(encodeURIComponent).join(",")})&created_at=gt.${encodeURIComponent(sinceIso)}&order=created_at.desc&limit=5000`
+  );
+}
+
+/** Which of these customers already got a notification of this kind since `sinceIso`. */
+export async function selectNotificationTimesByKindService(userIds: string[], kind: string, sinceIso: string) {
+  const ids = [...new Set(userIds.filter(Boolean))];
+  if (ids.length === 0) return [];
+  return supabaseRest<{ user_id: string; created_at: string }[]>(
+    `notifications?select=user_id,created_at&kind=eq.${encodeURIComponent(kind)}&user_id=in.(${ids.map(encodeURIComponent).join(",")})&created_at=gt.${encodeURIComponent(sinceIso)}&limit=5000`
+  );
 }
 
 export async function selectNotifications(userId: string, limit = 30) {
