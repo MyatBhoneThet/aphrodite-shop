@@ -143,6 +143,21 @@ a {
 .hero-float { animation: hero-float 6s ease-in-out infinite; }
 .hero-progress { transform-origin: left; animation: hero-progress 6s linear both; }
 
+/* Ad carousels: the new slide pushes the old one out sideways. */
+@keyframes ad-in-next { from { transform: translateX(100%); } }
+@keyframes ad-out-next { to { transform: translateX(-100%); } }
+@keyframes ad-in-prev { from { transform: translateX(-100%); } }
+@keyframes ad-out-prev { to { transform: translateX(100%); } }
+.ad-in-next, .ad-out-next, .ad-in-prev, .ad-out-prev { animation-duration: 0.7s; animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1); animation-fill-mode: both; }
+.ad-in-next { animation-name: ad-in-next; }
+.ad-out-next { animation-name: ad-out-next; }
+.ad-in-prev { animation-name: ad-in-prev; }
+.ad-out-prev { animation-name: ad-out-prev; }
+@media (prefers-reduced-motion: reduce) {
+  .ad-in-next, .ad-in-prev { animation: none; }
+  .ad-out-next, .ad-out-prev { animation: none; visibility: hidden; }
+}
+
 @keyframes order-status-sheen {
   0% { transform: translateX(-130%) skewX(-18deg); }
   55%, 100% { transform: translateX(430%) skewX(-18deg); }

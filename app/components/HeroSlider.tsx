@@ -26,7 +26,8 @@ const themes: Record<HomeAdTheme, { background: string; glow: string; accent: st
 };
 
 export default function HeroSlider({ language }: { language: "en" | "my" }) {
-  const [index, setIndex] = useState(0);
+  // prev/dir drive the sideways transition: the previous slide leaves as the new one enters.
+  const [{ index, prev, dir }, setSlide] = useState({ index: 0, prev: -1, dir: 1 });
   const [slides, setSlides] = useState<HomeAd[]>(homeAds);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -77,7 +78,7 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
           imageAlt: ad.alt_text,
         }));
         setSlides([...customSlides, ...homeAds]);
-        setIndex(0);
+        setSlide({ index: 0, prev: -1, dir: 1 });
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -86,14 +87,16 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
   useEffect(() => {
     if (!playing) return;
     const timer = window.setInterval(() => {
-      if (!document.hidden) setIndex(value => (value + 1) % count);
+      if (!document.hidden) setSlide(slide => ({ index: (slide.index + 1) % count, prev: slide.index, dir: 1 }));
     }, 6000);
     return () => window.clearInterval(timer);
   }, [count, playing, index]);
 
   if (!active) return null;
   const text = (en: string, mm?: string) => (language === "my" ? mm ?? en : en);
-  const move = (amount: number) => { setIndex(value => (value + amount + count) % count); };
+  const go = (to: number, direction: number) => setSlide(slide => (to === slide.index ? slide : { index: to, prev: slide.index, dir: direction }));
+  const move = (amount: number) => go((index + amount + count) % count, amount);
+  const way = dir > 0 ? "next" : "prev";
   const failed = (src: string) => setFailedImages(value => (value.includes(src) ? value : [...value, src]));
   const theme = themes[active.theme];
 
@@ -114,7 +117,7 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
           const theme = themes[ad.theme];
           const photos = (ad.photos ?? []).filter(photo => !failedImages.includes(photo.src));
           return <div key={ad.id} inert={position !== index} aria-hidden={position !== index}
-            className={position === index ? "relative col-start-1 row-start-1 visible" : "invisible absolute inset-0"}
+            className={position === index ? `relative z-10 col-start-1 row-start-1 visible ${prev >= 0 ? `ad-in-${way}` : ""}` : position === prev ? `absolute inset-0 ad-out-${way}` : "invisible absolute inset-0"}
             role="group" aria-roledescription="slide" aria-label={`${position + 1} of ${count}: ${title}`}>
 
           {active.image && !failedImages.includes(active.image) ? (
@@ -158,11 +161,11 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
         </div>
 
         {count > 1 && (
-          <>
-            {/* Solid arrows at the left and right edges: always readable, and they stay off the banner's text. */}
-            <button type="button" onClick={() => move(-1)} aria-label="Previous advertisement" className="pointer-events-auto absolute top-1/2 z-20 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white text-zinc-900 shadow-lg shadow-black/30 ring-1 ring-black/10 transition hover:bg-red-600 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none left-2 sm:left-3"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="m15 6-6 6 6 6" /></svg></button>
-            <button type="button" onClick={() => move(1)} aria-label="Next advertisement" className="pointer-events-auto absolute top-1/2 z-20 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white text-zinc-900 shadow-lg shadow-black/30 ring-1 ring-black/10 transition hover:bg-red-600 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none right-2 sm:right-3"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="m9 6 6 6-6 6" /></svg></button>
-          </>
+          <div className="absolute bottom-2 left-2 z-20 flex gap-1 sm:bottom-4 sm:left-4 sm:gap-2">
+            {/* No disc behind the arrows; the text shadow keeps them readable on light artwork. */}
+            <button type="button" onClick={() => move(-1)} aria-label="Previous advertisement" className="grid h-11 w-11 place-items-center rounded-full text-2xl font-bold text-white [text-shadow:0_1px_4px_rgb(0_0_0/.9)] transition hover:text-red-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none">←</button>
+            <button type="button" onClick={() => move(1)} aria-label="Next advertisement" className="grid h-11 w-11 place-items-center rounded-full text-2xl font-bold text-white [text-shadow:0_1px_4px_rgb(0_0_0/.9)] transition hover:text-red-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none">→</button>
+          </div>
         )}
 
         {count > 1 && <div className="pointer-events-none absolute inset-x-0 bottom-1 z-20 flex items-center justify-end gap-2 bg-transparent px-2 sm:justify-center sm:gap-3 sm:px-4">
@@ -170,7 +173,7 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
           <div className="pointer-events-auto hidden gap-2 sm:flex" aria-label="Choose advertisement">
             {slides.map((ad, position) => (
               <button type="button" key={ad.id} aria-label={`Show slide ${position + 1}: ${ad.title}`} aria-pressed={position === index}
-                onClick={() => setIndex(position)} className="flex h-11 min-w-11 items-center justify-center">
+                onClick={() => go(position, position > index ? 1 : -1)} className="flex h-11 min-w-11 items-center justify-center">
                 <span className={`relative h-1.5 overflow-hidden rounded-full bg-white/60 shadow ring-1 ring-black/25 transition-all ${position === index ? "w-8 sm:w-12" : "w-3 sm:w-5"}`}>
                   {position === index && <span key={`${index}-${playing}`} className={`absolute inset-0 rounded-full bg-white ${playing ? "hero-progress" : ""}`} />}
                 </span>
