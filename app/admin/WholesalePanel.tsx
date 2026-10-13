@@ -8,6 +8,7 @@ import { formatDateTime } from "../lib/format";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import CompanyCard from "./CompanyCard";
 import WholesaleRulesCard from "./WholesaleRulesCard";
+import { confirmAction } from "./confirm";
 
 type PriceList = {
   id: string;
@@ -126,6 +127,15 @@ export default function WholesalePanel() {
   }
 
   async function deactivateInviteCode(id: string) {
+    const confirmed = await confirmAction({
+      title: "Turn off this registration code?",
+      message: "Nobody will be able to sign up with it any more.",
+      consequences: ["Accounts already created with it keep their wholesale access."],
+      confirmLabel: "Turn off code",
+      tone: "caution",
+    });
+    if (!confirmed) return;
+
     setMessage("");
     setError("");
 
@@ -241,9 +251,27 @@ export default function WholesalePanel() {
     } finally { setSaving(false); }
   }
 
-  function handleRevoke(account: Account) {
-    // Reversible action, no unsupported browser confirmation dialog.
-    updateAccount(account, { action: "revoke" });
+  async function handleRevoke(account: Account) {
+    const confirmed = await confirmAction({
+      title: "Revoke wholesale access?",
+      subject: account.business_name ? `${account.business_name} · ${account.email}` : account.email,
+      message: "They go back to retail prices on their next page load.",
+      consequences: ["Granting access again needs a new business verification."],
+      confirmLabel: "Revoke access",
+    });
+    if (confirmed) updateAccount(account, { action: "revoke" });
+  }
+
+  async function handleSuspend(account: Account) {
+    const confirmed = await confirmAction({
+      title: "Suspend wholesale access?",
+      subject: account.business_name ? `${account.business_name} · ${account.email}` : account.email,
+      message: "They pay retail prices until you reactivate the account.",
+      consequences: ["Nothing is deleted. Reactivate brings the wholesale prices straight back."],
+      confirmLabel: "Suspend",
+      tone: "caution",
+    });
+    if (confirmed) updateAccount(account, { action: "suspend" });
   }
 
   return (
@@ -539,9 +567,7 @@ export default function WholesalePanel() {
                           </select>
 
                           <button
-                            onClick={() =>
-                              updateAccount(account, { action: "suspend" })
-                            }
+                            onClick={() => void handleSuspend(account)}
                             className="rounded-full bg-orange-50 px-4 py-2 text-xs font-semibold text-orange-700 hover:bg-orange-100"
                           >
                              {a("Suspend")} </button>

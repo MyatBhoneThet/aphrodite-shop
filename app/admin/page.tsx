@@ -23,6 +23,7 @@ import PricingPanel from "./PricingPanel";
 import { getErrorMessage } from "./product-form";
 import ProductsPanel from "./ProductsPanel";
 import QueuePanel from "./QueuePanel";
+import ConfirmDialogHost from "./ConfirmDialogHost";
 import ReauthDialog from "./ReauthDialog";
 import SecurityPanel from "./SecurityPanel";
 import SheetSyncPanel from "./SheetSyncPanel";
@@ -234,6 +235,7 @@ export default function AdminPage() {
   return (
     <main className="min-h-screen bg-[#f4f6f9] text-zinc-900">
       <ReauthDialog />
+      <ConfirmDialogHost />
       <AdminSidebar
         currentUser={currentUser}
         activePanel={activePanel}
@@ -298,6 +300,7 @@ export default function AdminPage() {
               setSearch={setSearch}
               isAdmin={isAdmin}
               isStaff={isStaff}
+              onProductsChanged={loadDashboardData}
             />
           )}
 

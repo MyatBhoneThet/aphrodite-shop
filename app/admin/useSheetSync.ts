@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
+import { confirmAction } from "./confirm";
 import { fetchAutoSyncStatus } from "./sync-status";
 import type { AutoSyncStatus, SheetSyncReport } from "./types";
 
@@ -39,6 +40,24 @@ export function useSheetSync({ active, loadDashboardData, setMessage, setError }
   }, [active]);
 
   async function handleSyncProducts(dryRun: boolean) {
+    if (!dryRun) {
+      // The last dry run already lists what a real sync would take off the website.
+      const removing = sheetSyncReport?.dryRun ? sheetSyncReport.stockCorrections?.removedFromSheet.length ?? 0 : 0;
+      const confirmed = await confirmAction({
+        title: "Sync products from the Google Sheet now?",
+        message: "Prices, stock and product details on the website are replaced with the sheet's.",
+        consequences: [
+          ...(removing > 0
+            ? [`${removing} product${removing === 1 ? " is" : "s are"} no longer in the sheet and will be taken off the website.`]
+            : []),
+          "Run the dry run first if you want to preview the changes.",
+        ],
+        confirmLabel: "Sync now",
+        tone: "caution",
+      });
+      if (!confirmed) return;
+    }
+
     setMessage("");
     setError("");
     setIsSyncing(true);

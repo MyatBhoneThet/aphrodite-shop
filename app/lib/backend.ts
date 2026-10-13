@@ -104,6 +104,8 @@ import {
   selectOrderIdsWithSlipsService,
   countOpenItemReturnsService,
   selectProductByIdService,
+  selectDeletedProducts,
+  patchProductColumns,
   selectProductBySourceKeyService,
   selectProducts,
   selectProductVariants,
@@ -191,6 +193,17 @@ import {
   notFound,
   serviceUnavailable,
 } from "./errors";
+import {
+  daysLeft,
+  deletedSpecs,
+  isPurgeDue,
+  keptHiddenSpecs,
+  purgeDate,
+  readDeletedMarker,
+  restoredSpecs,
+  stockLabel,
+  type DeletedMarker,
+} from "./deleted-products";
 import { withSheetStockLock } from "./sheet-stock-lock";
 import { normalizeGallery } from "./product-gallery";
 import { addProductThroughSheet, forgetSavedSheet } from "./product-sync";
@@ -1109,64 +1122,211 @@ async function saveProduct(user: CurrentUser, id: number, product: Partial<Produ
   return { product: mapProductRow(row), sheetStock };
 }
 
-/** Old orders keep pointing at their products, so those cannot be deleted. */
-async function deleteProductRecord(id: number) {
+/** Old orders keep pointing at their products, so a product that has orders cannot lose its row. */
+async function tryDeleteProductRow(id: number): Promise<"deleted" | "has_orders"> {
   try {
     await deleteProduct(id);
+    return "deleted";
   } catch (error) {
     if (error instanceof Error && /order_items|foreign key/i.test(error.message)) {
-      throw conflict(
-        "This product has orders, so it cannot be deleted. To take it off the website, delete its row in the Google Sheet (it is hidden on the next sync) or set its stock to 0."
-      );
+      return "has_orders";
     }
     throw error;
   }
 }
 
+/**
+ * Deleting a product moves it to "Recently deleted" for 30 days instead of
+ * removing it. Its database row and its Google Sheet row both stay, so a wrong
+ * delete is one click to undo. The scheduled sync erases it once the 30 days
+ * are up (purgeExpiredDeletedProducts). It is hidden at once: the archive mark
+ * already keeps it out of every list and the stock is 0, so it cannot be bought.
+ */
 export async function removeProduct(user: CurrentUser, id: number) {
   requireAdmin(user);
   requireFreshAuth(user);
   const before = await selectProductByIdService(id).catch(() => null);
-  const sourceKey = before?.source_key;
+  if (!before) throw notFound("Product not found.");
+  if (readDeletedMarker(before.full_specs)) {
+    throw conflict("This product is already in Recently deleted.");
+  }
+
+  const marker: DeletedMarker = {
+    at: new Date().toISOString(),
+    by: user.id,
+    stock: before.stock,
+    stock_quantity: Math.max(0, before.stock_quantity ?? 0),
+    was_archived: Boolean((before.full_specs as Record<string, unknown> | null)?.archived),
+  };
+
+  await patchProductColumns(id, {
+    stock: "Out of Stock",
+    stock_quantity: 0,
+    full_specs: deletedSpecs(before.full_specs, marker),
+  });
+
+  const restorableUntil = purgeDate(marker).toISOString();
+  await recordAdminAction({
+    actorId: user.id,
+    action: "product.delete",
+    targetType: "product",
+    targetId: id,
+    previous: { name: before.name, price: before.price },
+    next: { recoverable_until: restorableUntil },
+  });
+
+  return { deletedAt: marker.at, restorableUntil };
+}
+
+/** The "Recently deleted" list, with how many days each product has left. */
+export async function listDeletedProducts(user: CurrentUser, now = new Date()) {
+  requireAdmin(user);
+  const rows = await selectDeletedProducts();
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    brand: row.brand,
+    category: row.category,
+    image: row.image,
+    price: row.price,
+    source_sheet: row.source_sheet,
+    stock_quantity: row.deleted.stock_quantity,
+    deleted_at: row.deleted.at,
+    days_left: daysLeft(row.deleted, now),
+    restorable_until: purgeDate(row.deleted).toISOString(),
+  }));
+}
+
+/** Puts a deleted product back on the shop with the stock it had. */
+export async function restoreProduct(user: CurrentUser, id: number) {
+  requireAdmin(user);
+  const row = await selectProductByIdService(id).catch(() => null);
+  const marker = readDeletedMarker(row?.full_specs);
+  if (!row || !marker) throw notFound("That product is not in Recently deleted.");
+
+  await patchProductColumns(id, {
+    stock: stockLabel(marker.stock_quantity),
+    stock_quantity: marker.stock_quantity,
+    full_specs: restoredSpecs(row.full_specs, marker),
+  });
+
+  await recordAdminAction({
+    actorId: user.id,
+    action: "product.restore",
+    targetType: "product",
+    targetId: id,
+    previous: { name: row.name },
+    next: { stock_quantity: marker.stock_quantity },
+  });
+
+  return { id, name: row.name };
+}
+
+/**
+ * Erases a product for good: its row and its row in the Google Sheet (or the
+ * next sync would bring it back). A product that already has orders keeps its
+ * row, hidden, so the order history still reads correctly.
+ */
+async function eraseProductForever(
+  id: number,
+  row: Awaited<ReturnType<typeof selectProductByIdService>>,
+  actorId: string | null
+) {
+  const sourceKey = row?.source_key;
+
+  const eraseRow = async () => {
+    const outcome = await tryDeleteProductRow(id);
+    if (outcome === "has_orders" && row) {
+      await patchProductColumns(id, { full_specs: keptHiddenSpecs(row.full_specs) });
+    }
+    return outcome;
+  };
+
+  let outcome: "deleted" | "has_orders";
   let sheetRows: Awaited<ReturnType<typeof deleteSheetProductRows>> | null = null;
 
   if (sourceKey && hasGoogleSheetsConfig()) {
-    // A product that came from the Google Sheet is deleted there too;
-    // otherwise the next sync would bring it straight back. The database goes
-    // first: if the product cannot be deleted (it has orders), the sheet is
-    // left untouched.
-    sheetRows = await withSheetStockLock(async () => {
-      await deleteProductRecord(id);
+    const result = await withSheetStockLock(async () => {
+      const done = await eraseRow();
       try {
         const deleted = await deleteSheetProductRows(sourceKey);
         forgetSavedSheet();
-        return deleted;
+        return { done, deleted };
       } catch (error) {
         console.error("[products] sheet row delete failed", {
           product_id: id,
           error: error instanceof Error ? error.message : String(error),
         });
         throw serviceUnavailable(
-          "The product was deleted from the website, but its row could not be deleted from the Google Sheet. Delete the row in the sheet, or the next sync will add the product again."
+          "The product was erased from the website, but its row could not be deleted from the Google Sheet. Delete the row in the sheet, or the next sync will add the product again."
         );
       }
     });
+    outcome = result.done;
+    sheetRows = result.deleted;
   } else {
-    await deleteProductRecord(id);
+    outcome = await eraseRow();
   }
 
-  await recordAdminAction({
-    actorId: user.id,
-    action: "product.delete",
-    targetType: "product",
-    targetId: id,
-    previous: { name: before?.name ?? null, price: before?.price ?? null },
-    ...(sheetRows?.status === "deleted"
-      ? { next: { sheet: sheetRows.sheet, deleted_rows: sheetRows.rows.join(", ") } }
-      : {}),
-  });
+  if (actorId) {
+    await recordAdminAction({
+      actorId,
+      action: "product.erase",
+      targetType: "product",
+      targetId: id,
+      previous: { name: row?.name ?? null, price: row?.price ?? null },
+      next: {
+        kept_hidden_for_orders: outcome === "has_orders",
+        ...(sheetRows?.status === "deleted"
+          ? { sheet: sheetRows.sheet, deleted_rows: sheetRows.rows.join(", ") }
+          : {}),
+      },
+    });
+  }
 
-  return sheetRows;
+  return { outcome, sheetRows };
+}
+
+/** "Delete forever" from the Recently deleted list. */
+export async function eraseDeletedProduct(user: CurrentUser, id: number) {
+  requireAdmin(user);
+  requireFreshAuth(user);
+  const row = await selectProductByIdService(id).catch(() => null);
+  if (!row || !readDeletedMarker(row.full_specs)) {
+    throw notFound("That product is not in Recently deleted.");
+  }
+  return eraseProductForever(id, row, user.id);
+}
+
+/**
+ * Erases products that have been in Recently deleted for 30 days. Runs on the
+ * scheduled sync call; never throws, and does a few per run so it cannot hold
+ * up the sheet lock for long.
+ */
+export async function purgeExpiredDeletedProducts(now = new Date(), limit = 10) {
+  let erased = 0;
+
+  try {
+    const due = (await selectDeletedProducts()).filter((row) => isPurgeDue(row.deleted, now)).slice(0, limit);
+
+    for (const item of due) {
+      try {
+        const row = await selectProductByIdService(item.id);
+        await eraseProductForever(item.id, row, item.deleted.by);
+        erased += 1;
+      } catch (error) {
+        console.error("[products] could not erase an expired deleted product", {
+          product_id: item.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  } catch (error) {
+    console.error("[products] could not read Recently deleted", error instanceof Error ? error.message : error);
+  }
+
+  return erased;
 }
 
 export async function getCart(user: CurrentUser) {

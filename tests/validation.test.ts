@@ -258,6 +258,7 @@ describe("order lifecycle validation", () => {
       action: "admin_cancel",
       reason_code: "out_of_stock",
       reason: "Item is unavailable after verification.",
+      confirm: "CANCEL",
     }).success).toBe(true);
     expect(adminReturnWorkflowSchema.safeParse({
       action: "advance_return",
@@ -274,6 +275,7 @@ describe("order lifecycle validation", () => {
       stage: "complete_refund",
       refund_method: "bank_transfer",
       refund_amount: 50000,
+      confirm: "REFUND",
     }).success).toBe(true);
   });
 

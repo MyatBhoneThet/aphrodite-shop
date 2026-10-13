@@ -1,5 +1,6 @@
 import { NextResponse, after, type NextRequest } from "next/server";
 import { runCartReminders } from "@/app/lib/cart-reminders";
+import { purgeExpiredDeletedProducts } from "@/app/lib/backend";
 import { handleRouteError } from "@/app/lib/errors";
 import { isAuthorizedCronRequest, runAutomaticProductSync } from "@/app/lib/product-sync";
 
@@ -23,6 +24,9 @@ export async function POST(request: NextRequest) {
     // Rides on this scheduled call so there is no second job to set up. It is
     // throttled and never throws; after() keeps it off the sync's response time.
     after(() => runCartReminders());
+    // Products deleted more than 30 days ago are erased for good. It reads one
+    // small filtered list and never throws.
+    after(() => purgeExpiredDeletedProducts());
     // A failure status lets Cloud Scheduler show the job as failed.
     return NextResponse.json(status, { status: status.lastResult === "failed" ? 500 : 200 });
   } catch (error) {

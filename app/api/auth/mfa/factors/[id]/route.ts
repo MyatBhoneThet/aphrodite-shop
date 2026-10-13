@@ -4,6 +4,7 @@ import { conflict, handleRouteError, notFound } from "@/app/lib/errors";
 import { requireFreshAuth } from "@/app/lib/mfa";
 import { authenticateBackoffice } from "@/app/lib/mfa-routes";
 import { mfaUnenroll } from "@/app/lib/supabase";
+import { requireTypedConfirmation } from "@/app/lib/typed-confirmation";
 
 /** Removes an authenticator (a lost phone, a new phone). Needs a fresh code. */
 export async function DELETE(request: NextRequest, context: { params: Promise<{ id: string }> }) {
@@ -13,6 +14,7 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     const factor = user.mfa.factors.find((entry) => entry.id === id && entry.factor_type === "totp");
     if (!factor) throw notFound("Authenticator not found.");
 
+    await requireTypedConfirmation(request, "REMOVE");
     requireFreshAuth(user);
     const others = user.mfa.factors.filter((entry) => entry.id !== id && entry.status === "verified" && entry.factor_type === "totp");
     if (factor.status === "verified" && others.length === 0 && process.env.ADMIN_MFA_REQUIRED?.trim().toLowerCase() === "all") {

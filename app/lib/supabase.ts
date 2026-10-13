@@ -10,6 +10,7 @@ import type { SupabaseSocialProvider } from "./oauth";
 import type { SavedAddress, SavedAddressInput } from "./address-book";
 import type { FeedbackInput } from "./feedback";
 import { computeMfaState, type AuthFactor, type MfaState } from "./mfa";
+import { readDeletedMarker, type DeletedMarker } from "./deleted-products";
 import {
   normalizeHomepageAdPlacement,
   type HomepageAdPlacement,
@@ -1710,6 +1711,14 @@ export function sanitizePagination(
 const NOT_ARCHIVED = ["full_specs->>archived", "is.null"] as const;
 
 /**
+ * Products an admin deleted sit in "Recently deleted" for 30 days (see
+ * deleted-products.ts). They are archived too, so every list already hides
+ * them; this extra filter also keeps their direct page and the sitemap from
+ * showing a product the shop meant to remove.
+ */
+const NOT_DELETED = ["full_specs->>deleted", "is.null"] as const;
+
+/**
  * Matches belongsToCatalogSection: a workbook tab also lists products that
  * were added by hand (no source sheet) and have the matching type.
  */
@@ -1830,7 +1839,7 @@ export async function selectProductsService(filters: {
 export async function selectProductById(id: number) {
   const { anonKey } = requireSupabaseConfig();
   const rows = await supabaseRest<ProductRow[]>(
-    `products?select=${PUBLIC_PRODUCT_COLUMNS}&id=eq.${id}&limit=1`,
+    `products?select=${PUBLIC_PRODUCT_COLUMNS}&id=eq.${id}&${NOT_DELETED[0]}=${NOT_DELETED[1]}&limit=1`,
     {},
     anonKey
   );
@@ -1842,7 +1851,7 @@ export async function selectProductById(id: number) {
 export async function selectProductIdsForSitemap(limit = 5000) {
   const { anonKey } = requireSupabaseConfig();
   const rows = await supabaseRest<{ id: number }[]>(
-    `products?select=id&order=id.asc&limit=${Math.max(1, Math.min(limit, 5000))}`,
+    `products?select=id&${NOT_DELETED[0]}=${NOT_DELETED[1]}&order=id.asc&limit=${Math.max(1, Math.min(limit, 5000))}`,
     {},
     anonKey
   );
@@ -2297,7 +2306,14 @@ export async function upsertProductionProducts(
     ...new Set([...products.map((product) => product.sourceKey), ...baseKeys]),
   ]);
 
-  const rows = products.map((product) => {
+  // A product in "Recently deleted" stays as it is while its sheet row is
+  // still there; otherwise this upsert would put it straight back on sale.
+  const live = existing
+    ? products.filter((product) => !readDeletedMarker(existing.get(product.sourceKey)?.full_specs))
+    : products;
+  if (live.length === 0) return [];
+
+  const rows = live.map((product) => {
     const row = mapProductionProductToRow(product);
     const baseKey = specVariantBaseKey(product.sourceKey);
     // Photos only: a spec version that is new to the website (e.g. the 512 GB
@@ -2372,6 +2388,41 @@ export async function deleteProduct(id: number) {
     `products?id=eq.${id}`,
     { method: "DELETE" }
   );
+}
+
+export type DeletedProductRow = {
+  id: number;
+  name: string;
+  brand: string;
+  category: string;
+  image: string | null;
+  price: number;
+  source_sheet: string | null;
+  source_key: string | null;
+  deleted: DeletedMarker;
+};
+
+/** Products in "Recently deleted", newest deletion first. Service role: these are hidden from public reads. */
+export async function selectDeletedProducts() {
+  const rows = await supabaseRest<(Omit<DeletedProductRow, "deleted"> & { deleted: unknown })[]>(
+    "products?select=id,name,brand,category,image,price,source_sheet,source_key,deleted:full_specs->deleted&full_specs->>deleted=not.is.null&limit=1000"
+  );
+
+  return rows
+    .flatMap((row) => {
+      const marker = readDeletedMarker({ deleted: row.deleted });
+      return marker ? [{ ...row, deleted: marker }] : [];
+    })
+    .sort((a, b) => Date.parse(b.deleted.at) - Date.parse(a.deleted.at));
+}
+
+/** Writes some columns of one product. Used to move a product in and out of "Recently deleted". */
+export async function patchProductColumns(id: number, columns: Record<string, unknown>) {
+  await supabaseRest(`products?id=eq.${id}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify(columns),
+  });
 }
 
 // Cart/wishlist rows are always scoped to the calling user's own account, so

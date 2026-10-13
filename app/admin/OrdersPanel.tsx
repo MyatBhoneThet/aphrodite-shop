@@ -13,6 +13,7 @@ import {
   type BatchStage,
 } from "./batch-orders";
 import CodDeliveryForm from "./CodDeliveryForm";
+import { confirmAction } from "./confirm";
 import CourierForm from "./CourierForm";
 import OrderFilterBar from "./OrderFilterBar";
 import OrdersTable from "./OrdersTable";
@@ -137,17 +138,20 @@ export default function OrdersPanel(props: Props) {
       return;
     }
 
-    const notice =
-      stage === "handed_to_courier"
-        ? " Each customer is told their order is on its way."
-        : "";
-    if (
-      !window.confirm(
-        `Mark ${plan.eligible.length} order${plan.eligible.length === 1 ? "" : "s"} as ${batchStageLabels[stage]}?${notice}`
-      )
-    ) {
-      return;
-    }
+    const count = plan.eligible.length;
+    const confirmed = await confirmAction({
+      title: `Mark ${count} order${count === 1 ? "" : "s"} as ${batchStageLabels[stage]}?`,
+      message: "Each order moves to the next step.",
+      consequences:
+        stage === "handed_to_courier"
+          ? ["Each customer is told their order is on its way."]
+          : plan.skipped.length > 0
+            ? [`${plan.skipped.length} selected order${plan.skipped.length === 1 ? " is" : "s are"} not ready and will be skipped.`]
+            : [],
+      confirmLabel: "Yes, update orders",
+      tone: "caution",
+    });
+    if (!confirmed) return;
 
     setBusy(stage);
     try {

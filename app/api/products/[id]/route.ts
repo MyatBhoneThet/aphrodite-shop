@@ -9,6 +9,7 @@ import {
 import { handleRouteError } from "@/app/lib/errors";
 import { sendTriggeredProductAlertEmails } from "@/app/lib/product-alert-email";
 import { readJsonBody } from "@/app/lib/request";
+import { requireTypedConfirmation } from "@/app/lib/typed-confirmation";
 import {
   firstIssueMessage,
   parseProductIdParam,
@@ -93,10 +94,14 @@ export async function DELETE(
       return NextResponse.json({ error: "Product not found." }, { status: 404 });
     }
 
-    const sheetRows = await removeProduct(user, productId);
+    // The dialog makes the admin type DELETE; the server asks again so a
+    // stale tab or a script cannot delete a product with one bare request.
+    await requireTypedConfirmation(request, "DELETE");
 
-    // sheetRows says which Google Sheet rows were deleted with the product.
-    return NextResponse.json({ ok: true, sheetRows });
+    // The product moves to Recently deleted for 30 days; nothing is erased yet.
+    const result = await removeProduct(user, productId);
+
+    return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     return handleRouteError("products.delete", error);
   }

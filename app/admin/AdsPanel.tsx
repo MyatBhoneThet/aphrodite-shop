@@ -5,6 +5,7 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
 import { useAdminText } from "../lib/useAdminText";
+import { confirmAction } from "./confirm";
 import {
   HOMEPAGE_AD_PLACEMENTS,
   HOMEPAGE_AD_PLACEMENT_LABELS,
@@ -140,7 +141,14 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
   }
 
   async function remove(ad: AdminAd) {
-    if (!window.confirm(`Delete “${ad.title}”? This cannot be undone.`)) return;
+    const confirmed = await confirmAction({
+      title: "Delete this advertisement?",
+      subject: ad.title,
+      message: "It disappears from the home page straight away.",
+      consequences: ["This cannot be undone. To keep it for later, use Hide instead."],
+      confirmLabel: "Delete advertisement",
+    });
+    if (!confirmed) return;
     setBusy(ad.id); setError(""); setMessage("");
     try {
       const response = await fetch(`/api/admin/home-ads/${ad.id}`, { method: "DELETE", headers: authHeaders() });

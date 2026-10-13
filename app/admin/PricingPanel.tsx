@@ -6,6 +6,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { Product } from "../data/products";
 import { authHeaders } from "../lib/client-auth";
 import { formatCurrency } from "../lib/format";
+import { confirmAction } from "./confirm";
 
 type PriceList = {
   id: string;
@@ -234,9 +235,15 @@ export default function PricingPanel() {
   }
 
   async function removeTier(tier: Tier) {
-    if (!window.confirm(`Delete the ${tier.min_quantity}+ tier for ${productName(tier.product_id)}?`)) {
-      return;
-    }
+    const confirmed = await confirmAction({
+      title: "Delete this price tier?",
+      subject: `${tier.min_quantity}+ units · ${productName(tier.product_id)}`,
+      message: "Wholesale customers on this price list stop getting this discount at once.",
+      consequences: ["Orders already placed keep the price they were charged."],
+      confirmLabel: "Delete tier",
+      tone: "caution",
+    });
+    if (!confirmed) return;
 
     setMessage("");
     setError("");

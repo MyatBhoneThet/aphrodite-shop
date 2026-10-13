@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { authHeaders } from "@/app/lib/client-auth";
 import { formatDateTime } from "@/app/lib/format";
 import MfaSetup from "./MfaSetup";
+import { confirmAction } from "./confirm";
 import { fetchWithReauth } from "./reauth";
 
 type Factor = { id: string; status: string; friendly_name: string | null; created_at: string | null };
@@ -48,10 +49,25 @@ export default function SecurityPanel({ isAdmin }: { isAdmin: boolean }) {
   }, [load]);
 
   async function remove(factor: Factor) {
-    if (!window.confirm("Remove this authenticator? You will not be able to use it to sign in any more.")) return;
+    const confirmed = await confirmAction({
+      title: "Remove this authenticator?",
+      subject: factor.friendly_name ?? undefined,
+      message: "You will not be able to use it to sign in any more.",
+      consequences: [
+        "If it is your only authenticator you can be locked out of the admin panel.",
+        "Add the new phone first, then remove the old one.",
+      ],
+      confirmLabel: "Remove authenticator",
+      requireText: "REMOVE",
+    });
+    if (!confirmed) return;
     setError(""); setMessage("");
     try {
-      const response = await fetchWithReauth(`/api/auth/mfa/factors/${factor.id}`, { method: "DELETE", headers: authHeaders() });
+      const response = await fetchWithReauth(`/api/auth/mfa/factors/${factor.id}`, {
+        method: "DELETE",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: "REMOVE" }),
+      });
       if (!response.ok) throw new Error(await errorOf(response, "Could not remove it."));
       setMessage("Authenticator removed.");
       await load();

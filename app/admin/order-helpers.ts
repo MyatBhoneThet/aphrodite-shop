@@ -34,3 +34,14 @@ export function allowedDeliveryProgress(order: AdminOrder) {
   if (order.status === "cancelled" || order.status === "returned") return [order.status];
   return trackingSteps;
 }
+
+/**
+ * Cancelling an order and recording a refund are the two places money or stock
+ * moves for good, so the admin types a word first. The server checks the same
+ * word (see validation.ts).
+ */
+export function workflowConfirmWord(action: string): string | null {
+  if (action === "admin_cancel") return "CANCEL";
+  if (action === "complete_refund" || action === "complete_cancellation_refund") return "REFUND";
+  return null;
+}

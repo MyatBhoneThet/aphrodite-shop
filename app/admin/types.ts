@@ -61,6 +61,8 @@ export type OrderWorkflowDraft = {
   refundAccountName: string;
   refundAccountNumber: string;
   adminNote: string;
+  /** The word typed to confirm a cancellation or a refund (see workflowConfirmWord). */
+  confirmText: string;
 };
 
 export type AdminOrderItem = {

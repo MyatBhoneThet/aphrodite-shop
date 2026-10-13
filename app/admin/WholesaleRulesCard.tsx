@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { authHeaders } from "@/app/lib/client-auth";
+import { formatCurrency } from "@/app/lib/format";
+import { confirmAction } from "./confirm";
 
 type Rules = { minAmount: number; minUnits: number; prepayRequired: boolean };
 
@@ -33,12 +35,42 @@ export default function WholesaleRulesCard() {
 
   async function save(event: FormEvent) {
     event.preventDefault();
-    setBusy(true); setError(""); setMessage("");
+    setError(""); setMessage("");
+
+    const next = { min_amount: Number(amount), min_units: Number(units), prepay_required: prepay };
+    if (rules) {
+      const changes: string[] = [];
+      if (rules.minAmount !== next.min_amount) {
+        changes.push(`Minimum order amount: ${formatCurrency(rules.minAmount)} → ${formatCurrency(next.min_amount)}`);
+      }
+      if (rules.minUnits !== next.min_units) {
+        changes.push(`Minimum number of items: ${rules.minUnits} → ${next.min_units}`);
+      }
+      if (rules.prepayRequired !== next.prepay_required) {
+        changes.push(`Pay by bank transfer first: ${rules.prepayRequired ? "on" : "off"} → ${next.prepay_required ? "on" : "off"}`);
+      }
+      if (changes.length === 0) {
+        setMessage("Nothing changed.");
+        return;
+      }
+      // These terms apply to every wholesale order from the next one on.
+      const confirmed = await confirmAction({
+        title: "Change the wholesale terms?",
+        message: "They apply to every wholesale order from the next one on.",
+        consequences: changes,
+        confirmLabel: "Save terms",
+        tone: "caution",
+        requireText: "CHANGE",
+      });
+      if (!confirmed) return;
+    }
+
+    setBusy(true);
     try {
       const response = await fetch("/api/admin/wholesale-rules", {
         method: "PUT",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ min_amount: Number(amount), min_units: Number(units), prepay_required: prepay }),
+        body: JSON.stringify({ ...next, confirm: "CHANGE" }),
       });
       const body = (await response.json().catch(() => null)) as ({ rules: Rules } & { error?: string }) | null;
       if (!response.ok || !body) throw new Error(body?.error ?? "Could not save.");

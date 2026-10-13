@@ -2,6 +2,7 @@ import { z } from "zod";
 import { poNumberSchema } from "./company";
 import { isApproximatelyInYangon, isMyanmarCountry, normalizeMyanmarRegion, normalizeYangonTownship } from "./delivery-country";
 import { isPreviousLocalCalendarDate } from "./delivery-date";
+import { typedConfirmation } from "./typed-confirmation";
 
 const productJsonSchema = z.record(z.string(), z.unknown());
 
@@ -528,6 +529,8 @@ export const adminOrderCancellationSchema = z.object({
   ]),
   reason: orderRequestReason,
   admin_note: z.string().trim().max(500).optional().nullable(),
+  /** Cancelling restores stock and starts a refund, so the word is checked here too. */
+  confirm: typedConfirmation("CANCEL"),
 });
 
 export const cancellationRefundDetailsSchema = z.object({
@@ -548,6 +551,8 @@ export const completeCancellationRefundSchema = z.object({
   refund_reference: z.string().trim().min(3, "Enter the transfer reference.").max(200),
   refund_amount: z.number().int().positive(),
   admin_note: z.string().trim().max(500).optional().nullable(),
+  /** Records that money was sent and tells the customer, so the word is checked here too. */
+  confirm: typedConfirmation("REFUND"),
 });
 
 const optionalAdminText = z.string().trim().max(500).optional().nullable();
@@ -642,6 +647,7 @@ export const adminReturnWorkflowSchema = z.union([
     refund_reference: z.string().trim().max(200).optional().nullable(),
     refund_amount: z.number().int().nonnegative(),
     admin_note: optionalAdminText,
+    confirm: typedConfirmation("REFUND"),
   }),
 ]);
 

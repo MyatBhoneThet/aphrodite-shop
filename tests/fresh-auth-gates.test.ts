@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../app/lib/supabase", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../app/lib/supabase")>()),
   selectProductByIdService: vi.fn(),
+  patchProductColumns: vi.fn(),
   deleteProduct: vi.fn(),
   insertAuditLog: vi.fn(),
   selectProfileByEmailService: vi.fn(),
@@ -23,6 +24,7 @@ const stale = admin({ ...base, fresh: false });
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(db.insertAuditLog).mockResolvedValue(undefined);
+  vi.mocked(db.patchProductColumns).mockResolvedValue(undefined);
   vi.mocked(db.selectProductByIdService).mockResolvedValue({ id: 5, name: "X", price: 1 } as never);
   vi.mocked(db.selectProfileByEmailService).mockResolvedValue({ id: "p1", role: "normal", email: "a@b.c" } as never);
   vi.mocked(db.setProfileRoleService).mockResolvedValue({ id: "p1" } as never);
@@ -32,9 +34,11 @@ beforeEach(() => {
 describe("risky actions need a fresh confirmation", () => {
   it("deleting a product", async () => {
     await expect(removeProduct(stale, 5)).rejects.toMatchObject({ code: "reauth_required" });
-    expect(db.deleteProduct).not.toHaveBeenCalled();
+    expect(db.patchProductColumns).not.toHaveBeenCalled();
+    // Deleting moves the product to Recently deleted; nothing is erased yet.
     await removeProduct(fresh, 5);
-    expect(db.deleteProduct).toHaveBeenCalledWith(5);
+    expect(db.patchProductColumns).toHaveBeenCalledWith(5, expect.objectContaining({ stock_quantity: 0 }));
+    expect(db.deleteProduct).not.toHaveBeenCalled();
   });
 
   it("giving someone staff access", async () => {
@@ -54,6 +58,7 @@ describe("risky actions need a fresh confirmation", () => {
   it("a stolen, held-back session gets nowhere (it is a customer there anyway)", async () => {
     const held = { id: "admin-1", role: "normal", mfa: { ...base, pending: "verify", fresh: false } } as unknown as CurrentUser;
     await expect(removeProduct(held, 5)).rejects.toMatchObject({ status: 403 });
+    expect(db.patchProductColumns).not.toHaveBeenCalled();
     expect(db.deleteProduct).not.toHaveBeenCalled();
   });
 });

@@ -3,10 +3,12 @@
 import type { FormEvent } from "react";
 import { formatCurrency } from "../lib/format";
 import { useAdminText } from "../lib/useAdminText";
+import { matchesConfirmText } from "./confirm";
 import {
   MAX_DELIVERY_ATTEMPTS,
   deliveryAttemptReasons,
   paymentCorrectionReasons,
+  workflowConfirmWord,
 } from "./order-helpers";
 import type {
   DeliveryAttemptReason,
@@ -29,6 +31,9 @@ export default function OrderWorkflowDialog({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const a = useAdminText();
+  // Cancelling and refunding move stock or money for good: type a word first.
+  const confirmWord = workflowConfirmWord(draft.action);
+  const unlocked = !confirmWord || matchesConfirmText(draft.confirmText, confirmWord);
   const titles: Record<OrderWorkflowAction, string> = {
     admin_cancel: "Cancel order",
     schedule_pickup: "Schedule return handover",
@@ -93,7 +98,26 @@ export default function OrderWorkflowDialog({
           </>}
 
           <label className="block text-sm font-semibold">{a("Note for customer (optional)")}<textarea value={draft.adminNote} onChange={(event) => onChange({ adminNote: event.target.value })} rows={2} maxLength={500} className="mt-2 w-full rounded-xl border px-4 py-3 font-normal" /></label>
-          <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end"><button type="button" onClick={onCancel} disabled={isSubmitting} className="rounded-full border px-5 py-3 text-sm font-bold disabled:opacity-50">{a("Go back")}</button><button type="submit" disabled={isSubmitting} className="rounded-full bg-red-600 px-6 py-3 text-sm font-bold text-white disabled:bg-zinc-400">{isSubmitting ? a("Saving...") : a("Confirm and save")}</button></div>
+          {confirmWord && (
+            <div className="rounded-xl border-2 border-red-200 bg-red-50 p-4">
+              <label htmlFor="workflow-confirm" className="block text-sm font-bold text-red-900">
+                {draft.action === "admin_cancel"
+                  ? a("This cancels the order and returns its stock. Type the word below to confirm.")
+                  : a("This records that the money was really sent. Type the word below to confirm.")}
+              </label>
+              <p className="mt-2 inline-block rounded-lg bg-zinc-900 px-3 py-1 font-mono text-sm font-bold tracking-widest text-white">{confirmWord}</p>
+              <input
+                id="workflow-confirm"
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                value={draft.confirmText}
+                onChange={(event) => onChange({ confirmText: event.target.value })}
+                className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-mono tracking-widest outline-none focus:border-red-500"
+              />
+            </div>
+          )}
+          <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end"><button type="button" onClick={onCancel} disabled={isSubmitting} className="rounded-full border px-5 py-3 text-sm font-bold disabled:opacity-50">{a("Go back")}</button><button type="submit" disabled={isSubmitting || !unlocked} className="rounded-full bg-red-600 px-6 py-3 text-sm font-bold text-white disabled:bg-zinc-400">{isSubmitting ? a("Saving...") : a("Confirm and save")}</button></div>
         </form>
       </section>
     </div>

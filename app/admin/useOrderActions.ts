@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
+import { confirmAction } from "./confirm";
 import { failedDeliveryAttempts } from "./order-helpers";
 import { getErrorMessage } from "./product-form";
 import type {
@@ -67,7 +68,14 @@ export function useOrderActions({ loadDashboardData, setMessage, setError }: Opt
 
   async function handleResendReceipt(order: AdminOrder) {
     const recipient = order.profiles?.email ?? "the customer";
-    if (!window.confirm(`Email the full receipt to ${recipient}?`)) return;
+    const confirmed = await confirmAction({
+      title: "Email the receipt?",
+      subject: recipient,
+      message: "The customer gets the full receipt for this order by email.",
+      confirmLabel: "Send receipt",
+      tone: "caution",
+    });
+    if (!confirmed) return;
 
     setMessage("");
     setError("");
@@ -198,6 +206,7 @@ export function useOrderActions({ loadDashboardData, setMessage, setError }: Opt
       refundAccountName: order.cancellation_refund_account_name ?? "",
       refundAccountNumber: order.cancellation_refund_account_number ?? "",
       adminNote: "",
+      confirmText: "",
     });
   }
 
@@ -216,6 +225,7 @@ export function useOrderActions({ loadDashboardData, setMessage, setError }: Opt
         reason_code: orderWorkflow.reasonCode,
         reason: orderWorkflow.reason.trim(),
         admin_note: orderWorkflow.adminNote.trim() || null,
+        confirm: orderWorkflow.confirmText.trim(),
       };
     } else if (orderWorkflow.action === "schedule_pickup") {
       const scheduled = new Date(orderWorkflow.scheduledFor);
@@ -312,6 +322,7 @@ export function useOrderActions({ loadDashboardData, setMessage, setError }: Opt
         refund_reference: orderWorkflow.refundReference.trim(),
         refund_amount: amount,
         admin_note: orderWorkflow.adminNote.trim() || null,
+        confirm: orderWorkflow.confirmText.trim(),
       };
     } else {
       const amount = Number(orderWorkflow.refundAmount);
@@ -326,6 +337,7 @@ export function useOrderActions({ loadDashboardData, setMessage, setError }: Opt
         refund_reference: orderWorkflow.refundReference.trim() || null,
         refund_amount: amount,
         admin_note: orderWorkflow.adminNote.trim() || null,
+        confirm: orderWorkflow.confirmText.trim(),
       };
     }
 

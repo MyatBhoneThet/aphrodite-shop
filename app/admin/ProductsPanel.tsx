@@ -4,6 +4,7 @@ import type { Dispatch, FormEvent, SetStateAction } from "react";
 import type { Product } from "../data/products";
 import { useAdminText } from "../lib/useAdminText";
 import ProductPhotoUploader from "./ProductPhotoUploader";
+import RecentlyDeletedProducts from "./RecentlyDeletedProducts";
 import ProductsTable from "./ProductsTable";
 import { useState } from "react";
 import { categoriesForSheet, emptyProductForm, productToForm, switchSheetTab } from "./product-form";
@@ -24,6 +25,8 @@ type Props = {
   setSearch: (value: string) => void;
   isAdmin: boolean;
   isStaff: boolean;
+  /** Reloads the product list after a deleted product is restored. */
+  onProductsChanged?: () => void | Promise<void>;
 };
 
 /** The product list with its add / edit form. */
@@ -41,6 +44,7 @@ export default function ProductsPanel({
   setSearch,
   isAdmin,
   isStaff,
+  onProductsChanged,
 }: Props) {
   const a = useAdminText();
   const [isNewCategory, setIsNewCategory] = useState(false);
@@ -52,6 +56,7 @@ export default function ProductsPanel({
       (productForm.category !== "" && !categoryOptions.includes(productForm.category)));
 
   return (
+    <>
       <section
         className={`mt-6 grid gap-6 ${
           isProductFormOpen ? "2xl:grid-cols-[minmax(0,520px)_minmax(0,1fr)]" : ""
@@ -424,5 +429,12 @@ export default function ProductsPanel({
           />
         </div>
       </section>
+      {isAdmin && (
+        <RecentlyDeletedProducts
+          refreshKey={allProducts.length}
+          onChanged={() => onProductsChanged?.()}
+        />
+      )}
+    </>
   );
 }

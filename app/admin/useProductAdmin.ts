@@ -5,6 +5,7 @@ import type { Product } from "../data/products";
 import { authHeaders } from "../lib/client-auth";
 import { PRODUCT_PLACEHOLDER, normalizeGallery } from "../lib/product-gallery";
 import { emptyProductForm, getErrorMessage, parseJsonObject } from "./product-form";
+import { confirmAction } from "./confirm";
 import { fetchWithReauth } from "./reauth";
 import type { ProductFormState } from "./types";
 
@@ -135,11 +136,20 @@ export function useProductAdmin({ loadDashboardData, setMessage, setError }: Opt
   }
 
   async function handleDeleteProduct(product: Product) {
-    const confirmed = window.confirm(
-      product.sourceSheet
-        ? `Delete ${product.name}?\n\nIts row is also deleted from the "${product.sourceSheet}" tab of the Google Sheet.`
-        : `Delete ${product.name}?`
-    );
+    const confirmed = await confirmAction({
+      title: "Delete this product?",
+      subject: product.name,
+      message: "It is taken off the shop right away and kept in Recently deleted for 30 days.",
+      consequences: [
+        "You can restore it from Recently deleted, with the stock it had, within 30 days.",
+        ...(product.sourceSheet
+          ? [`Its row stays in the "${product.sourceSheet}" tab of the Google Sheet until the 30 days are up, then it is deleted there too.`]
+          : []),
+        "After 30 days it is erased for good.",
+      ],
+      confirmLabel: "Delete product",
+      requireText: "DELETE",
+    });
 
     if (!confirmed) return;
 
@@ -149,23 +159,18 @@ export function useProductAdmin({ loadDashboardData, setMessage, setError }: Opt
     try {
       const response = await fetchWithReauth(`/api/products/${product.id}`, {
         method: "DELETE",
-        headers: authHeaders(),
+        // The server asks for the word again, so a bare request cannot delete.
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: "DELETE" }),
       });
 
       if (!response.ok) {
         throw new Error(await getErrorMessage(response));
       }
 
-      const data = (await response.json().catch(() => null)) as {
-        sheetRows?: { status: string; sheet?: string; rows?: number[] } | null;
-      } | null;
-      const sheetRows = data?.sheetRows;
-
       await loadDashboardData();
       setMessage(
-        sheetRows?.status === "deleted"
-          ? `Product deleted. Row ${sheetRows.rows?.join(", ")} was also deleted from the "${sheetRows.sheet}" tab of the Google Sheet.`
-          : "Product deleted successfully."
+        `Moved “${product.name}” to Recently deleted. You can restore it for 30 days.`
       );
     } catch (err) {
       setError(

@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
 import { formatDateTime } from "../lib/format";
+import { confirmAction } from "./confirm";
 import { fetchWithReauth } from "./reauth";
 
 type StaffAccount = {
@@ -57,10 +58,22 @@ export default function StaffPanel() {
   }
 
   async function remove(account: StaffAccount) {
-    if (!window.confirm(`Delete staff account ${account.email}? This removes the login permanently.`)) return;
+    const confirmed = await confirmAction({
+      title: "Delete this staff account?",
+      subject: account.email,
+      message: "The login is removed permanently.",
+      consequences: ["They can no longer sign in or use the staff dashboard.", "This cannot be undone."],
+      confirmLabel: "Delete account",
+      requireText: "DELETE",
+    });
+    if (!confirmed) return;
     setBusy(account.id); setError(""); setMessage("");
     try {
-      const response = await fetchWithReauth(`/api/admin/staff/${account.id}`, { method: "DELETE", headers: authHeaders() });
+      const response = await fetchWithReauth(`/api/admin/staff/${account.id}`, {
+        method: "DELETE",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: "DELETE" }),
+      });
       if (!response.ok) throw new Error(await responseError(response));
       setMessage("Staff account deleted.");
       await load();
