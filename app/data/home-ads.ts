@@ -16,7 +16,25 @@ export type HomeAd = {
   theme: HomeAdTheme;
   /** Transparent product photos drawn on the right of the slide. */
   photos?: { src: string; alt: string }[];
-  /** Built-in illustration when a slide has no product photos. */
+  /**
+   * Real product photos shown as white cards with a label. Cards, unlike
+   * `photos`, work with ordinary white-background product pictures.
+   */
+  cards?: {
+    src: string;
+    alt: string;
+    label: string;
+    labelMy?: string;
+    /**
+     * "cover" fills the card and trims the empty border above and below a
+     * wide product (graphics card, keyboard, memory). "contain" (default)
+     * shows the whole picture.
+     */
+    fit?: "contain" | "cover";
+    /** Enlarges the picture inside its card (1 = as is). Clipped by the card. */
+    zoom?: number;
+  }[];
+  /** Built-in illustration when a slide has neither product photos nor cards. */
   illustration?: "desk" | "pc";
   /** Decorative full-slide artwork behind the real, localised HTML copy. */
   backgroundImage?: string;
@@ -28,6 +46,10 @@ export type HomeAd = {
 
 const photo = (file: string) =>
   `${process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""}/storage/v1/object/public/product-photos/laptops/${file}`;
+
+/** A product photo from any folder of the product-photos bucket. */
+const storagePhoto = (path: string) =>
+  `${process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""}/storage/v1/object/public/product-photos/${path}`;
 
 // No discount or price is claimed by these store-navigation slides. Add a real
 // offer only when it is approved and available.
@@ -79,6 +101,11 @@ export const homeAds: HomeAd[] = [
     buttonMy: "Accessories ကြည့်ရန်",
     highlights: ["Monitors", "Keyboards", "Mice", "Headsets"],
     theme: "midnight",
+    cards: [
+      { src: storagePhoto("accessories/lg-27gs95qe-b-1.jpg"), alt: "LG UltraGear OLED monitor", label: "Monitors", labelMy: "Monitor", zoom: 1.35 },
+      { src: storagePhoto("accessories/rog-strix-scope-nx-wireless-deluxe-1.webp"), alt: "ASUS ROG Strix Scope keyboard", label: "Keyboards", labelMy: "Keyboard", fit: "cover" },
+      { src: storagePhoto("accessories/hyperx-cloud-stinger-1.png"), alt: "HyperX Cloud Stinger headset", label: "Headsets", labelMy: "Headset" },
+    ],
     illustration: "desk",
   },
   {
@@ -94,6 +121,11 @@ export const homeAds: HomeAd[] = [
     buttonMy: "စတင်တည်ဆောက်ရန်",
     highlights: ["CPU", "GPU", "Memory", "Storage"],
     theme: "violet",
+    cards: [
+      { src: storagePhoto("pc-parts/r7-9800x3d-1.jpg"), alt: "AMD Ryzen 7 9800X3D processor", label: "CPU", labelMy: "CPU" },
+      { src: storagePhoto("pc-parts/zotac-5090-solid-oc-1.jpg"), alt: "ZOTAC GeForce RTX 5090 graphics card", label: "GPU", labelMy: "GPU", fit: "cover" },
+      { src: storagePhoto("pc-parts/kingston-beast-rgb-ddr5-kit-1.jpg"), alt: "Kingston Fury Beast DDR5 memory", label: "Memory", labelMy: "Memory", fit: "cover" },
+    ],
     illustration: "pc",
   },
   {

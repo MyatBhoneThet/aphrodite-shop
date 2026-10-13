@@ -116,6 +116,7 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
           const title = text(ad.title, ad.titleMy);
           const theme = themes[ad.theme];
           const photos = (ad.photos ?? []).filter(photo => !failedImages.includes(photo.src));
+          const cards = (ad.cards ?? []).filter(card => !failedImages.includes(card.src));
           return <div key={ad.id} inert={position !== index} aria-hidden={position !== index}
             className={position === index ? `relative z-10 col-start-1 row-start-1 visible ${prev >= 0 ? `ad-in-${way}` : ""}` : position === prev ? `absolute inset-0 ad-out-${way}` : "invisible absolute inset-0"}
             role="group" aria-roledescription="slide" aria-label={`${position + 1} of ${count}: ${title}`}>
@@ -150,7 +151,7 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
                   </div>
                 </div>
                 {!active.backgroundImage && <div className="relative mx-auto h-[480px] w-full max-w-[750px]" aria-hidden="true">
-                  <SlideVisual ad={active} photos={photos} onFail={failed} />
+                  <SlideVisual ad={active} photos={photos} cards={cards} language={language} onFail={failed} />
                 </div>}
               </div>
             </div>
@@ -186,7 +187,59 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
   );
 }
 
-function SlideVisual({ ad, photos, onFail }: { ad: HomeAd; photos: { src: string; alt: string }[]; onFail: (src: string) => void }) {
+type SlideCard = NonNullable<HomeAd["cards"]>[number];
+
+function SlideVisual({ ad, photos, cards, language, onFail }: {
+  ad: HomeAd;
+  photos: { src: string; alt: string }[];
+  cards: SlideCard[];
+  language: "en" | "my";
+  onFail: (src: string) => void;
+}) {
+  // Real product photos on white cards: ordinary white-background pictures
+  // look intentional here, where on the dark slide they would show as boxes.
+  // One tall card for the main product, two wide cards stacked beside it.
+  if (cards.length > 0) {
+    const labelOf = (card: SlideCard) => (language === "my" ? card.labelMy ?? card.label : card.label);
+    const card = (item: SlideCard, className: string, delay: number) => (
+      <figure
+        key={item.src}
+        className={`hero-float relative overflow-hidden rounded-[30px] bg-white shadow-2xl shadow-black/50 ring-1 ring-white/30 ${className}`}
+        style={{ animationDelay: `${delay}s` }}
+      >
+        <div className={`absolute inset-0 flex items-center justify-center pb-14 pt-4 ${item.fit === "cover" ? "px-3" : "px-6"}`}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={item.src}
+            alt=""
+            onError={() => onFail(item.src)}
+            className={item.fit === "cover" ? "h-full w-full object-cover" : "max-h-full max-w-full object-contain"}
+            style={item.zoom && item.zoom > 1 ? { transform: `scale(${item.zoom})` } : undefined}
+          />
+        </div>
+        <figcaption className="absolute bottom-4 left-5 rounded-full bg-zinc-100 px-5 py-1.5 text-[22px] font-bold text-zinc-800">
+          {labelOf(item)}
+        </figcaption>
+      </figure>
+    );
+
+    if (cards.length === 1) {
+      return <div className="absolute inset-0 flex items-center justify-center">{card(cards[0], "h-[430px] w-[420px]", 0)}</div>;
+    }
+    if (cards.length === 2) {
+      return <div className="absolute inset-0 flex items-center justify-center gap-6">{cards.map((item, index) => card(item, "h-[400px] w-[340px]", index * 0.5))}</div>;
+    }
+    return (
+      <div className="absolute inset-0 flex items-center justify-center gap-6">
+        {card(cards[0], "h-[440px] w-[330px]", 0)}
+        <div className="flex flex-col gap-6">
+          {card(cards[1], "h-[208px] w-[330px]", 0.4)}
+          {card(cards[2], "h-[208px] w-[330px]", 0.8)}
+        </div>
+      </div>
+    );
+  }
+
   if (photos.length > 0) {
     const [front, back] = photos;
     return (
