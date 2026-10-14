@@ -15,6 +15,7 @@ export const quickQuestions = [
   "Recommend a laptop",
   "Build a MMK 6,700,000 PC",
   "How do returns work?",
+  "SSD or HDD: which is better?",
   "Show Acer products",
 ];
 
@@ -84,31 +85,106 @@ export function assistantReply(question: string, products: Product[]): Assistant
   };
 }
 
+const STOP_WORDS = new Set([
+  "the", "and", "for", "with", "that", "this", "what", "which", "have", "has", "does", "you",
+  "your", "can", "are", "how", "not", "from", "about", "need", "want", "best", "good", "any",
+  "show", "tell", "give", "please", "much", "price", "cost", "buy", "get", "one", "some",
+  "there", "will", "would", "should", "could", "between", "better", "than", "like",
+]);
+
+function wordsOf(text: string) {
+  return Array.from(
+    new Set(
+      text
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((word) => word.length >= 3 && !STOP_WORDS.has(word))
+    )
+  );
+}
+
+function specText(product: Product) {
+  return [
+    product.fullSpecs.processor ?? product.specs.cpu,
+    product.fullSpecs.ram ?? product.specs.ram,
+    product.fullSpecs.storage ?? product.specs.storage,
+    product.fullSpecs.graphics,
+    product.fullSpecs.display ?? product.specs.display,
+  ]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.trim().slice(0, 40));
+}
+
 /**
- * Picks the products worth showing as cards next to an AI answer, and the
- * compact catalogue slice used to ground the model. Only fields a customer can
- * already see are included -- never cost, stock counts or internal notes.
+ * Picks the catalogue slice the model is shown (and the cards that can sit
+ * beside its answer). Products that match words in the question come first, so
+ * "is the Dell Latitude 5440 good for office work?" really sees that Dell; the
+ * rest is a spread across product types so a general question still has
+ * something real to point at. Only fields a customer can already see are
+ * included -- never cost, stock counts or internal notes.
  */
 export function groundingProducts(question: string, products: Product[], limit = 24) {
   const { products: ruleMatches } = assistantReply(question, products);
   const available = products.filter(
     (product) => product.stock === "In Stock" && product.price > 0
   );
-  const seen = new Set<number>();
-  const picked: Product[] = [];
+  const wanted = wordsOf(question);
+  const ruleIds = new Set((ruleMatches ?? []).map((product) => product.id));
+  const budget = Number(question.toLowerCase().replaceAll(",", "").match(/\d{5,}/)?.[0] ?? 0);
+  const asksForLaptop = wanted.includes("laptop") || wanted.includes("notebook") || wanted.includes("laptops");
 
-  for (const product of [...(ruleMatches ?? []), ...available]) {
-    if (seen.has(product.id)) continue;
+  const relevant = available
+    .map((product) => {
+      const name = product.name.toLowerCase();
+      const brand = product.brand.toLowerCase();
+      const rest = `${product.category} ${specText(product).join(" ")}`.toLowerCase();
+      let score = ruleIds.has(product.id) ? 4 : 0;
+      for (const word of wanted) {
+        // A brand the customer named outranks a spec word that RAM kits and
+        // SSDs also contain ("16 GB RAM" appears in many accessory names).
+        if (brand.includes(word)) score += 6;
+        else if (name.includes(word)) score += 3;
+        else if (rest.includes(word)) score += 1;
+      }
+      // "laptop" means the machines, not the parts whose category says "Laptop - RAM".
+      if (asksForLaptop) score += product.type === "laptop" ? 3 : -3;
+      // Over budget stays visible: "nothing under 3 million, the cheapest is..." is a useful answer.
+      if (score > 0 && budget > 0) score += product.price <= budget ? 1 : -1;
+      return { product, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.product.price - b.product.price)
+    .map((entry) => entry.product);
+
+  const picked: Product[] = [];
+  const seen = new Set<number>();
+  const add = (product: Product) => {
+    if (seen.has(product.id) || picked.length >= limit) return;
     seen.add(product.id);
     picked.push(product);
-    if (picked.length >= limit) break;
+  };
+
+  relevant.slice(0, Math.ceil(limit * 0.75)).forEach(add);
+
+  // Fill the remaining room round-robin by type, cheapest first.
+  const byType = new Map<string, Product[]>();
+  for (const product of [...available].sort((a, b) => a.price - b.price)) {
+    const list = byType.get(product.type) ?? [];
+    list.push(product);
+    byType.set(product.type, list);
+  }
+  const lists = [...byType.values()];
+  for (let index = 0; picked.length < limit && lists.some((list) => index < list.length); index += 1) {
+    for (const list of lists) if (index < list.length) add(list[index]);
   }
 
   return picked;
 }
 
 export function catalogueLine(product: Product) {
+  const specs = specText(product).join(" / ");
+
   return `#${product.id} | ${product.name} | ${product.brand} | ${product.category} | ${formatCurrency(
     product.price
-  )}`;
+  )}${specs ? ` | ${specs}` : ""}`;
 }

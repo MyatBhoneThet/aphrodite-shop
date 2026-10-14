@@ -88,7 +88,7 @@ steps:
       # verifier cookie is set per host, so the callback would arrive without
       # it and fail with "This sign-in link has expired".
       - --set-env-vars=NODE_ENV=production,NEXT_PUBLIC_SUPABASE_URL=${_SUPABASE_URL},NEXT_PUBLIC_SUPABASE_ANON_KEY=${_SUPABASE_ANON_KEY},GMAIL_USER=aphrodite.store.mm@gmail.com,APP_URL=https://aphrodite-shop-672175800144.asia-southeast1.run.app,LINE_LOGIN_CHANNEL_ID=2011673452
-      - --set-secrets=SUPABASE_SERVICE_ROLE_KEY=supabase-service-role-key:latest,GOOGLE_SHEETS_CLIENT_EMAIL=sheets-client-email:latest,GOOGLE_SHEETS_PRIVATE_KEY=sheets-private-key:latest,GOOGLE_SHEETS_SPREADSHEET_ID=sheets-spreadsheet-id:latest,CRON_SECRET=cron-secret:latest,GMAIL_APP_PASSWORD=gmail-app-password:latest,LINE_LOGIN_CHANNEL_SECRET=line-channel-secret:latest
+      - --set-secrets=SUPABASE_SERVICE_ROLE_KEY=supabase-service-role-key:latest,GOOGLE_SHEETS_CLIENT_EMAIL=sheets-client-email:latest,GOOGLE_SHEETS_PRIVATE_KEY=sheets-private-key:latest,GOOGLE_SHEETS_SPREADSHEET_ID=sheets-spreadsheet-id:latest,CRON_SECRET=cron-secret:latest,GMAIL_APP_PASSWORD=gmail-app-password:latest,LINE_LOGIN_CHANNEL_SECRET=line-channel-secret:latest,GEMINI_API_KEY=gemini-api-key:latest
       #
       # LINE sign-in needs the channel id (public, above) and the channel
       # secret (in Secret Manager, on the line above). A new secret grants no

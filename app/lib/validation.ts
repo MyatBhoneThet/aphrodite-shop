@@ -759,7 +759,9 @@ export const assistantMessageSchema = z.object({
     .string()
     .trim()
     .min(1, "Please enter a question.")
-    .max(500, "Question must be 500 characters or fewer."),
+    .max(1000, "Question must be 1000 characters or fewer."),
+  /** The language the website is shown in; a hint for when the question is unclear. */
+  language: z.enum(["en", "my"]).optional(),
   // Earlier turns of this conversation, so follow-up questions make sense.
   // Capped hard: this is client-supplied text that goes into the AI prompt.
   history: z

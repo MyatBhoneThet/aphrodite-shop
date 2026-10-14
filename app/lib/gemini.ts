@@ -12,7 +12,12 @@
 // flash first) and fall through it at call time, caching whichever actually
 // answers. GEMINI_MODEL pins one and skips all of that.
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta";
-const TIMEOUT_MS = 15_000;
+// One model that hangs must not use up the whole turn, so each call is short
+// and the turn as a whole has a deadline.
+const TIMEOUT_MS = 12_000;
+const TURN_BUDGET_MS = 40_000;
+/** A model that was overloaded or hung is skipped for this long. */
+const COOLDOWN_MS = 60_000;
 
 /** Statuses that mean "this model is not usable right now" rather than "the
  *  request was bad" -- worth trying the next candidate. */
@@ -20,6 +25,12 @@ const TRY_NEXT_STATUSES = new Set([400, 404, 429, 503]);
 
 let cachedModel: string | null = null;
 let cachedCandidates: string[] | null = null;
+const coolingDown = new Map<string, number>();
+
+function isTimeout(error: unknown) {
+  const name = (error as { name?: string } | null)?.name;
+  return name === "TimeoutError" || name === "AbortError";
+}
 
 export function isGeminiConfigured() {
   return Boolean(process.env.GEMINI_API_KEY?.trim());
@@ -85,7 +96,8 @@ async function callModel(
   key: string,
   model: string,
   systemPrompt: string,
-  contents: { role: string; parts: { text: string }[] }[]
+  contents: { role: string; parts: { text: string }[] }[],
+  maxOutputTokens: number
 ) {
   const response = await fetch(
     `${ENDPOINT}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
@@ -97,7 +109,7 @@ async function callModel(
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt }] },
         contents,
-        generationConfig: { temperature: 0.4, maxOutputTokens: 500 },
+        generationConfig: { temperature: 0.5, maxOutputTokens },
       }),
     }
   );
@@ -137,10 +149,14 @@ export async function generateShopAnswer({
   systemPrompt,
   question,
   history = [],
+  // Room for a real explanation, and for Burmese, which spends many more
+  // tokens per sentence than English does.
+  maxOutputTokens = 1500,
 }: {
   systemPrompt: string;
   question: string;
   history?: ChatTurn[];
+  maxOutputTokens?: number;
 }) {
   const key = process.env.GEMINI_API_KEY?.trim();
   if (!key) throw new Error("GEMINI_API_KEY is not set.");
@@ -151,28 +167,39 @@ export async function generateShopAnswer({
   ];
 
   const pinned = process.env.GEMINI_MODEL?.trim();
-  if (pinned) return callModel(key, pinned, systemPrompt, contents);
+  if (pinned) return callModel(key, pinned, systemPrompt, contents, maxOutputTokens);
 
-  // Whatever worked last time, then the rest newest-first.
+  // Whatever worked last time, then the rest newest-first. Models that were
+  // overloaded a moment ago are skipped, so one busy model does not add a
+  // slow failed attempt to every question.
   const candidates = await listCandidates(key);
   const ordered = cachedModel
     ? [cachedModel, ...candidates.filter((name) => name !== cachedModel)]
     : candidates;
+  const now = Date.now();
+  const ready = ordered.filter((name) => (coolingDown.get(name) ?? 0) <= now);
+  const attempts = (ready.length > 0 ? ready : ordered).slice(0, 6);
+  const deadline = now + TURN_BUDGET_MS;
 
   let lastError: unknown = null;
 
-  for (const model of ordered.slice(0, 6)) {
+  for (const model of attempts) {
+    if (Date.now() > deadline) break;
+
     try {
-      const answer = await callModel(key, model, systemPrompt, contents);
+      const answer = await callModel(key, model, systemPrompt, contents, maxOutputTokens);
       cachedModel = model;
+      coolingDown.delete(model);
       return answer;
     } catch (error) {
       lastError = error;
       const status = (error as { status?: number }).status;
 
-      // A retired, overloaded or rate-limited model: try the next one. Anything
-      // else (a blocked prompt, a network failure) is not model-specific.
-      if (status && TRY_NEXT_STATUSES.has(status)) {
+      // A retired, overloaded, rate-limited or hanging model: try the next
+      // one. Anything else (a blocked prompt, a network failure) is not
+      // model-specific.
+      if ((status && TRY_NEXT_STATUSES.has(status)) || isTimeout(error)) {
+        coolingDown.set(model, Date.now() + COOLDOWN_MS);
         if (cachedModel === model) cachedModel = null;
         continue;
       }

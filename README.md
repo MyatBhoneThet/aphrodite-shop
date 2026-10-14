@@ -162,8 +162,14 @@ Behaviour and limits:
 - The catalogue is loaded server-side, so a browser cannot tell the assistant
   what the shop sells or what it costs. Product cards shown beside an answer
   always come from real database rows, never from model output.
-- The assistant is scoped to shop topics (products, prices, delivery, orders,
-  receipts, returns, PC building) and declines anything else.
+- The assistant answers shop questions (products, prices, delivery, orders,
+  receipts, returns, PC building) only from the catalogue, the customer's own
+  orders and the shop facts in `app/lib/assistant-prompt.ts`, and answers other
+  questions from the model's own knowledge. It declines harmful or illegal
+  requests, and never asks for passwords or card numbers. It replies in the
+  language the customer writes in (English or Burmese).
+- Product ids the model names are checked against the catalogue slice it was
+  shown, so an invented id can never become a link.
 - If the key is missing, the quota is exhausted, or Google is unreachable, the
   route silently falls back to the built-in rules, and the disclaimer under the
   chat box changes to say the message was not sent to an AI provider.

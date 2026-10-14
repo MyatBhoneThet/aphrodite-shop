@@ -164,8 +164,8 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
         {count > 1 && (
           <div className="absolute bottom-2 left-2 z-20 flex gap-1 sm:bottom-4 sm:left-4 sm:gap-2">
             {/* No disc behind the arrows; the text shadow keeps them readable on light artwork. */}
-            <button type="button" onClick={() => move(-1)} aria-label="Previous advertisement" className="grid h-11 w-11 place-items-center rounded-full text-2xl font-bold text-white [text-shadow:0_1px_4px_rgb(0_0_0/.9)] transition hover:text-red-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none">←</button>
-            <button type="button" onClick={() => move(1)} aria-label="Next advertisement" className="grid h-11 w-11 place-items-center rounded-full text-2xl font-bold text-white [text-shadow:0_1px_4px_rgb(0_0_0/.9)] transition hover:text-red-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none">→</button>
+            <button type="button" onClick={() => move(-1)} aria-label={text("Previous advertisement", "ရှေ့ကြော်ငြာ")} className="grid h-11 w-11 place-items-center rounded-full text-2xl font-bold text-white [text-shadow:0_1px_4px_rgb(0_0_0/.9)] transition hover:text-red-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none">←</button>
+            <button type="button" onClick={() => move(1)} aria-label={text("Next advertisement", "နောက်ကြော်ငြာ")} className="grid h-11 w-11 place-items-center rounded-full text-2xl font-bold text-white [text-shadow:0_1px_4px_rgb(0_0_0/.9)] transition hover:text-red-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none">→</button>
           </div>
         )}
 

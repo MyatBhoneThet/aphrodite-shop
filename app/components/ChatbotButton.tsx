@@ -61,7 +61,7 @@ function backInWords(backAt: string | null) {
 // `language` is still accepted so existing callers keep working; the text now
 // comes from the shared language provider instead.
 export default function ChatbotButton({ currentUser, products }: { language?: "en" | "my"; currentUser: CurrentUser | null; products: Product[] }) {
-  const { t } = useLanguage();
+  const { t, language: pageLanguage } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setMode] = useState<"assistant" | "live">("assistant");
   // Lets other pages (e.g. "Chat with us now" in an order's help panel) open the chat.
@@ -71,7 +71,7 @@ export default function ChatbotButton({ currentUser, products }: { language?: "e
     if (window.location.hash === "#chat") open(); // arriving from a support-reply notification
     return () => window.removeEventListener("aphrodite:open-chat", open);
   }, []);
-  const [localMessages, setLocalMessages] = useState<LocalMessage[]>([{ id: 1, role: "assistant", body: "Hello! I am the Aphrodite shopping assistant. Ask me about products, prices, delivery, receipts or returns — and your own orders once you are logged in." }]);
+  const [localMessages, setLocalMessages] = useState<LocalMessage[]>([]);
   const [assistantSource, setAssistantSource] = useState<AssistantSource>("rules");
   const [isThinking, setIsThinking] = useState(false);
   const [conversation, setConversation] = useState<SupportConversation | null>(null);
@@ -159,7 +159,7 @@ export default function ChatbotButton({ currentUser, products }: { language?: "e
       const response = await fetch("/api/assistant", {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed, history }),
+        body: JSON.stringify({ message: trimmed, history, language: pageLanguage }),
       });
       const data = (await response.json().catch(() => null)) as AssistantResponse | null;
       if (!response.ok || !data?.reply) throw new Error(data?.error ?? "Assistant unavailable.");
@@ -228,16 +228,16 @@ export default function ChatbotButton({ currentUser, products }: { language?: "e
       </div>
 
       {mode === "assistant" ? <>
-        <div ref={messageListRef} className="flex-1 space-y-3 overflow-y-auto bg-zinc-50 p-4" aria-live="polite" aria-busy={isThinking}>{localMessages.map((item) => <div key={item.id} className={`flex ${item.role === "user" ? "justify-end" : "justify-start"}`}><div className={`max-w-[88%] rounded-2xl px-4 py-3 text-sm ${item.role === "user" ? "rounded-br-md bg-red-600 text-white" : "rounded-bl-md bg-white text-zinc-800 shadow-sm"}`}>
+        <div ref={messageListRef} className="flex-1 space-y-3 overflow-y-auto bg-zinc-50 p-4" aria-live="polite" aria-busy={isThinking}>
+          <div className="flex justify-start"><div className="max-w-[88%] rounded-2xl rounded-bl-md bg-white px-4 py-3 text-sm text-zinc-800 shadow-sm"><p className="whitespace-pre-wrap">{t("chat.welcome")}</p></div></div>
+          {localMessages.map((item) => <div key={item.id} className={`flex ${item.role === "user" ? "justify-end" : "justify-start"}`}><div className={`max-w-[88%] rounded-2xl px-4 py-3 text-sm ${item.role === "user" ? "rounded-br-md bg-red-600 text-white" : "rounded-bl-md bg-white text-zinc-800 shadow-sm"}`}>
           {item.pending
             ? <span className="flex items-center gap-1.5 py-1" aria-label="Assistant is typing"><span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:-0.3s]" /><span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:-0.15s]" /><span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400" /></span>
             : <p className="whitespace-pre-wrap">{item.body}</p>}
           {item.products?.map((product) => <Link key={product.id} href={`/products/${product.id}`} className="mt-2 block rounded-xl border bg-zinc-50 p-2 text-zinc-900 hover:border-red-400"><span className="block font-bold">{product.name}</span><span className="text-xs text-zinc-500">{product.brand} · {formatCurrency(product.price)}</span></Link>)}
         </div></div>)}</div>
-        <div className="border-t bg-white p-4"><div className="mb-3 flex gap-2 overflow-x-auto pb-1">{quickQuestions.map((question) => <button key={question} type="button" onClick={() => void askAssistant(question)} disabled={isThinking} className="shrink-0 rounded-full bg-zinc-100 px-3 py-2 text-xs font-semibold hover:bg-red-50 hover:text-red-700 disabled:opacity-50">{question}</button>)}</div><form onSubmit={handleSubmit} className="flex gap-2"><input value={message} onChange={(event) => setMessage(event.target.value)} maxLength={500} placeholder={t("chat.askPlaceholder")} className="min-w-0 flex-1 rounded-full border px-4 py-2 text-sm outline-none focus:border-red-500" /><button type="submit" disabled={!message.trim() || isThinking} className="rounded-full bg-red-600 px-4 py-2 text-sm font-bold text-white disabled:bg-zinc-300">{isThinking ? "..." : t("chat.ask")}</button></form>
-        <p className="mt-2 text-[10px] text-zinc-400">{assistantSource === "gemini"
-          ? "Answers are generated by Google Gemini and can be wrong — check important details. Never share passwords or card numbers."
-          : "Free built-in assistant. Your message is not sent to an AI provider."}</p></div>
+        <div className="border-t bg-white p-4"><div className="mb-3 flex gap-2 overflow-x-auto pb-1">{quickQuestions.map((question) => <button key={question} type="button" onClick={() => void askAssistant(question)} disabled={isThinking} className="shrink-0 rounded-full bg-zinc-100 px-3 py-2 text-xs font-semibold hover:bg-red-50 hover:text-red-700 disabled:opacity-50">{question}</button>)}</div><form onSubmit={handleSubmit} className="flex gap-2"><input value={message} onChange={(event) => setMessage(event.target.value)} maxLength={1000} placeholder={t("chat.askPlaceholder")} className="min-w-0 flex-1 rounded-full border px-4 py-2 text-sm outline-none focus:border-red-500" /><button type="submit" disabled={!message.trim() || isThinking} className="rounded-full bg-red-600 px-4 py-2 text-sm font-bold text-white disabled:bg-zinc-300">{isThinking ? "..." : t("chat.ask")}</button></form>
+        <p className="mt-2 text-[10px] text-zinc-400">{assistantSource === "gemini" ? t("chat.disclaimerAi") : t("chat.disclaimerRules")}</p></div>
       </> : !currentUser ? <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
         {presence && <p className="mb-3 flex items-center gap-2 text-xs font-semibold text-zinc-500"><span className={`h-2 w-2 rounded-full ${PRESENCE_DOT[presence.status]}`} />{PRESENCE_TEXT[presence.status]}</p>}
         <p className="text-lg font-bold">{t("chat.loginTitle")}</p><p className="mt-2 text-sm text-zinc-500">{t("chat.loginBody")}</p><Link href="/login" className="mt-5 rounded-full bg-red-600 px-5 py-2.5 text-sm font-bold text-white">{t("nav.login")}</Link></div>
