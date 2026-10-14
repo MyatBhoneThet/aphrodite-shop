@@ -3244,6 +3244,25 @@ export async function resendOrderReceipt(user: CurrentUser, id: string) {
   };
 }
 
+/**
+ * The bell item and phone message for a new order, without the email. The
+ * checkout route waits for this one (briefly) before answering: on Cloud Run
+ * the CPU is throttled once the response has gone, so work left to after()
+ * can be delayed for minutes and the customer's phone stays silent.
+ * notifyOrderPlaced() repeats it later; the dedupe key makes that a no-op.
+ */
+export async function notifyOrderPlacedInApp(user: CurrentUser, orderId: string) {
+  try {
+    const order = await selectOrderById(user, orderId);
+    if (order) await notifyOrderCustomer(order, { type: "placed" });
+  } catch (error) {
+    console.error("[orders] placed notice could not run", {
+      order_id: orderId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 /** "Order received" email, right after a successful checkout. */
 export async function notifyOrderPlaced(user: CurrentUser, orderId: string) {
   try {

@@ -4610,12 +4610,29 @@ export async function insertNotification(entry: {
   link: string | null;
   dedupe_key: string | null;
 }) {
-  const rows = await supabaseRest<NotificationRow[]>("notifications?on_conflict=user_id,dedupe_key", {
-    method: "POST",
-    headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
-    body: JSON.stringify(entry),
-  });
-  return rows[0] ?? null;
+  // A plain insert, with the duplicate caught here. The unique index behind
+  // dedupe_key is PARTIAL (WHERE dedupe_key IS NOT NULL), and PostgREST's
+  // `on_conflict=user_id,dedupe_key` writes ON CONFLICT (user_id, dedupe_key)
+  // without that WHERE, which Postgres rejects with 42P10 ("no unique or
+  // exclusion constraint matching the ON CONFLICT specification"). Using it
+  // made EVERY notification fail: no bell item and no phone message, ever.
+  try {
+    const rows = await supabaseRest<NotificationRow[]>("notifications", {
+      method: "POST",
+      body: JSON.stringify(entry),
+    });
+    return rows[0] ?? null;
+  } catch (error) {
+    // The same event announced twice: already told, nothing to send.
+    if (
+      entry.dedupe_key &&
+      error instanceof Error &&
+      /duplicate key|23505|notifications_dedupe_idx/i.test(error.message)
+    ) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------
