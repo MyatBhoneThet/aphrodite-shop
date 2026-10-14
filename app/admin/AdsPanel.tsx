@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { ChangeEvent, FormEvent, useCallback, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
 import { useAdminText } from "../lib/useAdminText";
 import { confirmAction } from "./confirm";
@@ -79,18 +79,34 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
     }, 0);
     return () => window.clearTimeout(timer);
   }, [load]);
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+  // The newest file the admin picked, so a slow read of an earlier one cannot
+  // replace the preview of a later one.
+  const latestFile = useRef<File | null>(null);
 
+  // The preview is a data: URL, not a blob: URL: the site's Content Security
+  // Policy allows `img-src 'self' data: https:`, so a blob: image is blocked
+  // and the preview stays empty.
   function chooseFile(event: ChangeEvent<HTMLInputElement>) {
     const selected = event.target.files?.[0] ?? null;
-    if (preview) URL.revokeObjectURL(preview);
+    latestFile.current = selected;
     setFile(selected); setDimensions(null); setPreview(""); setError("");
     if (!selected) return;
-    const url = URL.createObjectURL(selected);
-    setPreview(url);
-    const image = new window.Image();
-    image.onload = () => setDimensions({ width: image.naturalWidth, height: image.naturalHeight });
-    image.src = url;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (latestFile.current !== selected) return;
+      const url = String(reader.result);
+      setPreview(url);
+      const image = new window.Image();
+      image.onload = () => {
+        if (latestFile.current === selected) setDimensions({ width: image.naturalWidth, height: image.naturalHeight });
+      };
+      image.src = url;
+    };
+    reader.onerror = () => {
+      if (latestFile.current === selected) setError("Could not read that file. Choose another image.");
+    };
+    reader.readAsDataURL(selected);
   }
 
   async function create(event: FormEvent) {
@@ -104,7 +120,7 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
       const response = await fetch("/api/admin/home-ads", { method: "POST", headers: authHeaders(), body: form });
       if (!response.ok) throw new Error(await responseError(response));
       setTitle(""); setAltText(""); setHref("/catalog/laptops"); setFile(null); setDimensions(null);
-      if (preview) URL.revokeObjectURL(preview); setPreview("");
+      latestFile.current = null; setPreview("");
       setMessage(`Advertisement added to ${HOMEPAGE_AD_PLACEMENT_LABELS[placement]}.`); await load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to add advertisement."); }
     finally { setBusy(""); }
