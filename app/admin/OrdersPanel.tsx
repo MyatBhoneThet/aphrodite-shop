@@ -172,7 +172,7 @@ export default function OrdersPanel(props: Props) {
   }
 
   return (
-    <section className="mt-6 rounded-2xl bg-white shadow-sm ring-1 ring-zinc-100">
+    <section className="min-h-[calc(100vh-8rem)] bg-white">
       <div className="border-b px-5 py-4">
         <h2 className="font-bold">{a("Customer Purchases")}</h2>
         <p className="text-sm text-zinc-500">

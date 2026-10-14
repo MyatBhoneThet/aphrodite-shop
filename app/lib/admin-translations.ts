@@ -3,6 +3,16 @@ import { storefrontBurmese } from "./storefront-translations";
 
 export const adminBurmese: Record<string, string> = {
   // Confirmation dialogs for risky admin actions. New lines: please have a native speaker review them.
+  "New order": "အော်ဒါအသစ်",
+  "just now": "ခုနကပဲ",
+  "min ago": "မိနစ်အကြာ",
+  "h ago": "နာရီအကြာ",
+  "A customer": "ဖောက်သည်တစ်ဦး",
+  "more": "ခု ထပ်ရှိ",
+  "View order": "အော်ဒါကြည့်ရန်",
+  "Later": "နောက်မှ",
+  "Close": "ပိတ်ရန်",
+  "MMQR": "MMQR",
   "It is taken off the shop right away and kept in Recently deleted for 30 days.": "ဆိုင်မှ ချက်ချင်း ဖယ်ရှားပြီး ရက် ၃၀ ကြာ \"မကြာသေးမီက ဖျက်ထားသည်\" တွင် သိမ်းထားပါမည်။",
   "You can restore it from Recently deleted, with the stock it had, within 30 days.": "ရက် ၃၀ အတွင်း မူလစတော့အတိုင်း \"မကြာသေးမီက ဖျက်ထားသည်\" မှ ပြန်ယူနိုင်ပါသည်။",
   "After 30 days it is erased for good.": "ရက် ၃၀ ကျော်လျှင် အပြီးအပိုင် ဖျက်ပစ်ပါမည်။",

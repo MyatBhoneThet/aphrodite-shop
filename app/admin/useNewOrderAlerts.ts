@@ -5,9 +5,21 @@ import { authHeaders } from "@/app/lib/client-auth";
 
 const SEEN_KEY = "aphrodite_admin_orders_seen";
 const SOUND_KEY = "aphrodite_admin_order_sound";
-const POLL_MS = 30_000;
+// A new order should be noticed within seconds, not half a minute.
+const POLL_MS = 15_000;
 
-export type NewOrderPreview = { id: string; total_amount: number; shipping_name: string };
+export type NewOrderPreview = {
+  id: string;
+  total_amount: number;
+  shipping_name: string;
+  created_at?: string;
+  payment_method?: string | null;
+  items?: { name: string; quantity: number }[];
+  item_count?: number;
+};
+
+/** The popups on screen at once; older ones make room for newer. */
+const MAX_POPUPS = 3;
 
 // Browser storage can be blocked (private windows); the alert still works for the session.
 const read = (key: string) => { try { return window.localStorage.getItem(key); } catch { return null; } };
@@ -44,6 +56,9 @@ export function useNewOrderAlerts(enabled: boolean) {
   const [capped, setCapped] = useState(false);
   const [preview, setPreview] = useState<NewOrderPreview[]>([]);
   const [soundOn, setSoundOn] = useState(false);
+  // Orders already announced in this session, so each one pops up exactly once.
+  const announced = useRef(new Set<string>());
+  const [popups, setPopups] = useState<NewOrderPreview[]>([]);
   const latestAt = useRef<string | null>(null);
   const lastCount = useRef(0);
   const sound = useRef(false);
@@ -74,6 +89,12 @@ export function useNewOrderAlerts(enabled: boolean) {
       setCount(data.count);
       setCapped(data.capped);
       setPreview(data.orders);
+
+      const fresh = data.orders.filter((order) => !announced.current.has(order.id));
+      if (fresh.length > 0) {
+        fresh.forEach((order) => announced.current.add(order.id));
+        setPopups((current) => [...fresh, ...current].slice(0, MAX_POPUPS));
+      }
     } catch { /* offline: try again next time */ }
   }, []);
 
@@ -99,6 +120,12 @@ export function useNewOrderAlerts(enabled: boolean) {
     setCount(0);
     setCapped(false);
     setPreview([]);
+    setPopups([]);
+  }, []);
+
+  /** Closes one popup without marking the orders as seen. */
+  const dismissPopup = useCallback((id: string) => {
+    setPopups((current) => current.filter((order) => order.id !== id));
   }, []);
 
   const toggleSound = useCallback(() => {
@@ -109,5 +136,5 @@ export function useNewOrderAlerts(enabled: boolean) {
     if (next) chime(); // also unlocks audio, which browsers only allow after a click
   }, []);
 
-  return { count, capped, preview, soundOn, toggleSound, markSeen };
+  return { count, capped, preview, popups, dismissPopup, soundOn, toggleSound, markSeen };
 }

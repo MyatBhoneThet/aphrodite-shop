@@ -24,6 +24,7 @@ import { getErrorMessage } from "./product-form";
 import ProductsPanel from "./ProductsPanel";
 import QueuePanel from "./QueuePanel";
 import ConfirmDialogHost from "./ConfirmDialogHost";
+import NewOrderPopups from "./NewOrderPopups";
 import ReauthDialog from "./ReauthDialog";
 import SecurityPanel from "./SecurityPanel";
 import SheetSyncPanel from "./SheetSyncPanel";
@@ -236,6 +237,15 @@ export default function AdminPage() {
     <main className="min-h-screen bg-[#f4f6f9] text-zinc-900">
       <ReauthDialog />
       <ConfirmDialogHost />
+      <NewOrderPopups
+        popups={newOrders.popups}
+        onClose={newOrders.dismissPopup}
+        onView={() => {
+          void loadDashboardData();
+          setActivePanel("orders");
+          newOrders.markSeen();
+        }}
+      />
       <AdminSidebar
         currentUser={currentUser}
         activePanel={activePanel}
@@ -261,12 +271,14 @@ export default function AdminPage() {
           onLogout={handleLogout}
         />
 
-        <div className="p-4 sm:p-5 lg:p-8">
+        {/* Customer Purchases runs edge to edge: it is a wide table, and the page
+            gutter only wasted width. Every other panel keeps its padding. */}
+        <div className={activePanel === "orders" ? "" : "p-4 sm:p-5 lg:p-8"}>
           {(message || error) && (
             <div
               className={`mb-5 rounded-xl p-4 text-sm font-semibold ${
-                error ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"
-              }`}
+                activePanel === "orders" ? "mx-4 mt-4 sm:mx-5 lg:mx-8" : ""
+              } ${error ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}
             >
               {error || message}
             </div>

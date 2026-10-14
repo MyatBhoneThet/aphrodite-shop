@@ -4400,11 +4400,18 @@ export async function insertCustomerNote(entry: { customer_id: string; author_id
   return rows[0] ?? null;
 }
 
-export type NewOrderRow = { id: string; created_at: string; total_amount: number; shipping_name: string };
+export type NewOrderRow = {
+  id: string;
+  created_at: string;
+  total_amount: number;
+  shipping_name: string;
+  payment_method?: string | null;
+  order_items?: { quantity: number; products: { name: string } | null }[] | null;
+};
 
 export async function selectOrdersSince(sinceIso: string) {
   const params = new URLSearchParams({
-    select: "id,created_at,total_amount,shipping_name",
+    select: "id,created_at,total_amount,shipping_name,payment_method,order_items(quantity,products(name))",
     order: "created_at.desc",
     limit: "50",
   });

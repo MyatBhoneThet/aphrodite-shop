@@ -202,3 +202,24 @@ a {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Floating "new order" popup in the admin (app/admin/NewOrderPopups.tsx). */
+@keyframes order-popup-in {
+  from { opacity: 0; transform: translateX(28px) scale(0.96); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes order-popup-timer {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+@keyframes order-popup-ring {
+  0% { transform: scale(0.85); opacity: 0.55; }
+  100% { transform: scale(1.45); opacity: 0; }
+}
+.order-popup-in { animation: order-popup-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+.order-popup-timer { transform-origin: left; animation: order-popup-timer linear forwards; }
+.order-popup-ring { animation: order-popup-ring 1.6s ease-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .order-popup-in { animation: none; }
+  .order-popup-ring { animation: none; opacity: 0; }
+}

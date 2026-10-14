@@ -119,6 +119,20 @@ export async function getNewOrders(user: CurrentUser, since: string | null) {
     count: rows.length,
     capped: rows.length >= 50,
     latestAt: rows[0]?.created_at ?? null,
-    orders: rows.slice(0, 3).map((row) => ({ id: row.id, total_amount: row.total_amount, shipping_name: row.shipping_name })),
+    orders: rows.slice(0, 3).map((row) => {
+      const items = (row.order_items ?? []).flatMap((item) =>
+        item.products?.name ? [{ name: item.products.name, quantity: item.quantity }] : []
+      );
+      return {
+        id: row.id,
+        total_amount: row.total_amount,
+        shipping_name: row.shipping_name,
+        created_at: row.created_at,
+        payment_method: row.payment_method ?? null,
+        // The popup names the first two products; the rest are counted.
+        items: items.slice(0, 2),
+        item_count: items.length,
+      };
+    }),
   };
 }

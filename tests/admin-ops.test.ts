@@ -102,6 +102,39 @@ describe("new order alert", () => {
     await expect(getNewOrders(user("normal"), "2026-09-25T00:00:00Z")).rejects.toThrow();
   });
 
+  it("tells the popup what was bought and how it is paid", async () => {
+    vi.mocked(db.selectOrdersSince).mockResolvedValue([
+      {
+        id: "o1",
+        created_at: "2026-09-25T01:00:00Z",
+        total_amount: 9_105_300,
+        shipping_name: "swan yi",
+        payment_method: "cash_on_delivery",
+        order_items: [
+          { quantity: 5, products: { name: "HP Elitebook 840 G8" } },
+          { quantity: 1, products: { name: "Mouse" } },
+          { quantity: 2, products: { name: "Bag" } },
+          { quantity: 1, products: null },
+        ],
+      },
+    ] as never);
+
+    const result = await getNewOrders(user("admin"), "2026-09-25T00:00:00Z");
+
+    expect(result.orders[0]).toEqual({
+      id: "o1",
+      total_amount: 9_105_300,
+      shipping_name: "swan yi",
+      created_at: "2026-09-25T01:00:00Z",
+      payment_method: "cash_on_delivery",
+      items: [
+        { name: "HP Elitebook 840 G8", quantity: 5 },
+        { name: "Mouse", quantity: 1 },
+      ],
+      item_count: 3,
+    });
+  });
+
   it("needs a valid time and returns the newest few", async () => {
     await expect(getNewOrders(user("admin"), null)).rejects.toThrow();
     await expect(getNewOrders(user("admin"), "yesterday")).rejects.toThrow();
