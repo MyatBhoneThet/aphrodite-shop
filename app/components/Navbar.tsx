@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import BrandLogo from "./BrandLogo";
 import LanguageSwitcher from "./LanguageSwitcher";
 import AccountControls from "./AccountControls";
@@ -22,6 +23,28 @@ type Props = {
   currentUser: CurrentUser | null;
   onLogout: () => void;
 };
+
+/**
+ * A category link that shows where you are. Black by default, red on hover,
+ * and red with an underline bar while its page (or a page under it) is open,
+ * so "PC Parts" reads as selected on /catalog/pc-parts.
+ */
+function NavLink({ href, children, className = "" }: { href: string; children: React.ReactNode; className?: string }) {
+  const pathname = usePathname() ?? "";
+  const active = pathname === href || pathname.startsWith(`${href}/`);
+
+  return (
+    <Link
+      href={href}
+      aria-current={active ? "page" : undefined}
+      className={`relative whitespace-nowrap transition-colors duration-150 after:absolute after:inset-x-0 after:bottom-1 after:h-0.5 after:origin-left after:rounded-full after:bg-red-600 after:transition-transform after:duration-200 motion-reduce:transition-none motion-reduce:after:transition-none ${
+        active ? "text-red-600 after:scale-x-100" : "text-zinc-950 after:scale-x-0 hover:text-red-600 hover:after:scale-x-100"
+      } ${className}`}
+    >
+      {children}
+    </Link>
+  );
+}
 
 function SearchBox({ search, setSearch, suggestions }: {
   search: string;
@@ -68,11 +91,11 @@ export default function Navbar({ search, setSearch, searchSuggestions, language,
             wide screens -- both stay reachable from the Account menu and the
             category bar below. */}
         <nav className="hidden shrink-0 items-center gap-4 text-sm font-semibold 2xl:flex">
-          <Link href="/catalog/laptops" className="whitespace-nowrap hover:text-red-600">{text("Laptops")}</Link>
-          <Link href="/catalog/accessories" className="whitespace-nowrap hover:text-red-600">{text("Accessories")}</Link>
-          <Link href="/catalog/pc-parts" className="whitespace-nowrap hover:text-red-600">{text("PC Parts")}</Link>
-          <Link href="/find-my-laptop" className="whitespace-nowrap rounded-full bg-red-50 px-3 py-1.5 text-red-700 transition hover:bg-red-100">{text("Find Laptop")}</Link>
-          <Link href="/pc-builder" className="whitespace-nowrap rounded-full bg-red-50 px-3 py-1.5 text-red-700 transition hover:bg-red-100">{text("PC Builder")}</Link>
+          <NavLink href="/catalog/laptops" className="py-1.5">{text("Laptops")}</NavLink>
+          <NavLink href="/catalog/accessories" className="py-1.5">{text("Accessories")}</NavLink>
+          <NavLink href="/catalog/pc-parts" className="py-1.5">{text("PC Parts")}</NavLink>
+          <NavLink href="/find-my-laptop" className="py-1.5">{text("Find Laptop")}</NavLink>
+          <NavLink href="/pc-builder" className="py-1.5">{text("PC Builder")}</NavLink>
           <Link href="/returns" className="hidden whitespace-nowrap hover:text-red-600 2xl:inline">{t("nav.returns")}</Link>
           <Link href="/#support" className="hidden whitespace-nowrap hover:text-red-600 2xl:inline">{t("nav.support")}</Link>
         </nav>
@@ -104,7 +127,7 @@ export default function Navbar({ search, setSearch, searchSuggestions, language,
         </div>
       </div>
       <div className="px-4 pb-3 md:hidden"><SearchBox search={search} setSearch={setSearch} suggestions={searchSuggestions} /></div>
-      <nav aria-label={text("Product categories")} className="scrollbar-none flex items-center gap-4 overflow-x-auto whitespace-nowrap border-t border-zinc-100 px-4 py-1 text-xs font-semibold sm:gap-5 sm:px-5 sm:text-sm [&>a]:inline-flex [&>a]:min-h-11 [&>a]:shrink-0 [&>a]:items-center"><Link href="/catalog/laptops">{text("Laptops")}</Link><Link href="/catalog/accessories">{text("Accessories")}</Link><Link href="/catalog/pc-parts">{text("PC Parts")}</Link><Link href="/find-my-laptop" className="text-red-600">{text("Find my laptop")} →</Link><Link href="/pc-builder" className="text-red-600">{text("Build a PC")} →</Link></nav>
+      <nav aria-label={text("Product categories")} className="scrollbar-none flex items-center gap-4 overflow-x-auto whitespace-nowrap border-t border-zinc-100 px-4 py-1 text-xs font-semibold sm:gap-5 sm:px-5 sm:text-sm [&>a]:inline-flex [&>a]:min-h-11 [&>a]:shrink-0 [&>a]:items-center"><NavLink href="/catalog/laptops">{text("Laptops")}</NavLink><NavLink href="/catalog/accessories">{text("Accessories")}</NavLink><NavLink href="/catalog/pc-parts">{text("PC Parts")}</NavLink><NavLink href="/find-my-laptop">{text("Find my laptop")} →</NavLink><NavLink href="/pc-builder">{text("Build a PC")} →</NavLink></nav>
       <LastOrderStatusBar enabled={Boolean(currentUser && currentUser.role !== "admin" && currentUser.role !== "staff")} />
     </header>
   );
