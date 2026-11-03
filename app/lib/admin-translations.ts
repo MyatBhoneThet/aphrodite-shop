@@ -3,6 +3,16 @@ import { storefrontBurmese } from "./storefront-translations";
 
 export const adminBurmese: Record<string, string> = {
   // Confirmation dialogs for risky admin actions. New lines: please have a native speaker review them.
+  "Burmese banner (optional)": "မြန်မာဘာသာ ဘန်နာ (မထည့်လည်းရ)",
+  "The words in a banner are part of the picture. Upload a second picture with Burmese words and Burmese visitors will see it; without it they see the English banner.": "ဘန်နာပေါ်ရှိ စာများသည် ပုံ၏ အစိတ်အပိုင်းဖြစ်ပါသည်။ မြန်မာစာပါသော ဒုတိယပုံကို တင်ပါက မြန်မာဘာသာရွေးထားသူများ မြင်ရပါမည်။ မတင်ပါက အင်္ဂလိပ်ဘန်နာကို မြင်ရပါမည်။",
+  "Burmese preview": "မြန်မာဘာသာ ကြိုကြည့်ရန်",
+  "Burmese version": "မြန်မာဘာသာ ဗားရှင်း",
+  "None. Burmese visitors see the English banner.": "မရှိပါ။ မြန်မာဘာသာရွေးထားသူများ အင်္ဂလိပ်ဘန်နာကို မြင်ရပါမည်။",
+  "Replace": "အစားထိုးရန်",
+  "Upload Burmese banner": "မြန်မာဘန်နာ တင်ရန်",
+  "Remove": "ဖယ်ရှားရန်",
+  "Remove the Burmese banner?": "မြန်မာဘန်နာကို ဖယ်ရှားမလား။",
+  "Burmese visitors will see the English banner instead.": "မြန်မာဘာသာရွေးထားသူများ အင်္ဂလိပ်ဘန်နာကို မြင်ရပါမည်။",
   "New order": "အော်ဒါအသစ်",
   "just now": "ခုနကပဲ",
   "min ago": "မိနစ်အကြာ",

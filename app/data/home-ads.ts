@@ -42,6 +42,13 @@ export type HomeAd = {
    *  A banner replaces the whole designed slide. */
   image?: string;
   imageAlt?: string;
+  /**
+   * The same banner with Burmese words, shown when the visitor reads Burmese.
+   * Without it, a built-in slide falls back to its designed text version
+   * (which has Burmese text), and an uploaded banner keeps its English image.
+   */
+  imageMy?: string;
+  imageAltMy?: string;
 };
 
 const photo = (file: string) =>

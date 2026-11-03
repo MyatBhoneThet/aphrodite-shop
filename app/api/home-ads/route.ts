@@ -9,7 +9,17 @@ export async function GET(request: NextRequest) {
     if (!isHomepageAdPlacement(requestedPlacement)) throw badRequest("Invalid advertisement placement.");
     const ads = await selectHomepageAds(false, requestedPlacement);
     return NextResponse.json(
-      { ads: ads.map(({ id, title, alt_text, image_url, href, placement }) => ({ id, title, alt_text, image_url, href, placement })) },
+      {
+        ads: ads.map(({ id, title, alt_text, image_url, image_url_my, href, placement }) => ({
+          id,
+          title,
+          alt_text,
+          image_url,
+          image_url_my: image_url_my ?? null,
+          href,
+          placement,
+        })),
+      },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {

@@ -4,22 +4,28 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { HomepageAdPlacement } from "../lib/homepage-ads";
+import { useLanguage } from "../lib/language";
 
 type StorefrontAd = {
   id: string;
   title: string;
   alt_text: string;
   image_url: string;
+  /** The Burmese version of the banner, when the admin uploaded one. */
+  image_url_my?: string | null;
   href: string;
 };
 
 export default function InlineAdBanner({ placement }: { placement: Exclude<HomepageAdPlacement, "hero"> }) {
+  const { language } = useLanguage();
   const [ads, setAds] = useState<StorefrontAd[]>([]);
   // prev/dir drive the sideways transition: the previous slide leaves as the new one enters.
   const [{ index, prev, dir }, setSlide] = useState({ index: 0, prev: -1, dir: 1 });
   const [paused, setPaused] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(true);
   const [failed, setFailed] = useState<string[]>([]);
+  // A Burmese image that does not load falls back to the English one, not to nothing.
+  const [failedMy, setFailedMy] = useState<string[]>([]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -78,7 +84,9 @@ export default function InlineAdBanner({ placement }: { placement: Exclude<Homep
       >
         {/* Same 1800 × 600 frame and controls as the hero slider. */}
         <div className="relative aspect-[3/1] w-full overflow-hidden bg-zinc-950">
-          {visibleAds.map((ad, position) => (
+          {visibleAds.map((ad, position) => {
+            const useBurmese = language === "my" && Boolean(ad.image_url_my) && !failedMy.includes(ad.id);
+            return (
             <a
               key={ad.id}
               href={ad.href}
@@ -88,13 +96,18 @@ export default function InlineAdBanner({ placement }: { placement: Exclude<Homep
               className={`absolute inset-0 block bg-zinc-950 ${position === activeIndex ? `z-10 ${prev >= 0 ? `ad-in-${way}` : ""}` : position === prev ? `ad-out-${way}` : "invisible"}`}
             >
               <img
-                src={ad.image_url}
+                src={useBurmese ? ad.image_url_my! : ad.image_url}
                 alt={ad.alt_text}
                 className="absolute inset-0 h-full w-full object-contain"
-                onError={() => { setFailed((items) => items.includes(ad.id) ? items : [...items, ad.id]); setSlide({ index: 0, prev: -1, dir: 1 }); }}
+                onError={() => {
+                  if (useBurmese) { setFailedMy((items) => [...items, ad.id]); return; }
+                  setFailed((items) => items.includes(ad.id) ? items : [...items, ad.id]);
+                  setSlide({ index: 0, prev: -1, dir: 1 });
+                }}
               />
             </a>
-          ))}
+            );
+          })}
         </div>
 
         {count > 1 && (

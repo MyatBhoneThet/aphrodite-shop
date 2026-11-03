@@ -70,6 +70,7 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     if (!existing) throw notFound("Advertisement not found.");
     await deleteHomepageAd(id);
     await deleteHomepageAdObject(existing.storage_path);
+    if (existing.storage_path_my) await deleteHomepageAdObject(existing.storage_path_my).catch(() => {});
     await recordAdminAction({ actorId: user.id, action: "home_ad.delete", targetType: "home_ad", targetId: id, previous: { title: existing.title, placement: existing.placement } });
     return NextResponse.json({ deleted: true });
   } catch (error) {

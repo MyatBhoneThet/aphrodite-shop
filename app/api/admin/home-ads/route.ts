@@ -1,9 +1,9 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { recordAdminAction } from "@/app/lib/admin-audit";
 import { authenticate } from "@/app/lib/backend";
 import { badRequest, handleRouteError } from "@/app/lib/errors";
 import { isHomepageAdPlacement } from "@/app/lib/homepage-ads";
+import { adImagePath, assertAdImage } from "@/app/lib/homepage-ad-image";
 import {
   deleteHomepageAdObject,
   insertHomepageAd,
@@ -13,9 +13,6 @@ import {
 } from "@/app/lib/supabase";
 
 export const runtime = "nodejs";
-
-const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 function safeHref(value: FormDataEntryValue | null) {
   const href = String(value ?? "/").trim() || "/";
@@ -37,14 +34,17 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   let uploadedPath: string | null = null;
+  let uploadedPathMy: string | null = null;
   try {
     const user = await authenticate(request);
     requireBackoffice(user);
     const form = await request.formData();
     const file = form.get("file");
-    if (!(file instanceof File)) throw badRequest("Choose an advertisement image.");
-    if (!IMAGE_TYPES.has(file.type)) throw badRequest("Advertisement must be a JPG, PNG or WebP image.");
-    if (file.size <= 0 || file.size > MAX_IMAGE_BYTES) throw badRequest("Advertisement must be 8 MB or smaller.");
+    assertAdImage(file, "Advertisement");
+    // Optional: the same banner with Burmese words, shown to Burmese visitors.
+    const fileMy = form.get("file_my");
+    const hasBurmese = fileMy instanceof File && fileMy.size > 0;
+    if (hasBurmese) assertAdImage(fileMy, "Burmese banner");
 
     const title = String(form.get("title") ?? "").trim();
     const altText = String(form.get("alt_text") ?? "").trim();
@@ -55,9 +55,13 @@ export async function POST(request: NextRequest) {
 
     const width = Number(form.get("width"));
     const height = Number(form.get("height"));
-    const safeName = (file.name || "banner").replace(/[^a-zA-Z0-9._-]+/g, "-").slice(-100);
-    uploadedPath = `uploads/${randomUUID()}-${safeName || "banner"}`;
+    uploadedPath = adImagePath(file);
     const imageUrl = await uploadHomepageAdObject(uploadedPath, await file.arrayBuffer(), file.type);
+    let imageUrlMy: string | null = null;
+    if (hasBurmese) {
+      uploadedPathMy = adImagePath(fileMy, "-my");
+      imageUrlMy = await uploadHomepageAdObject(uploadedPathMy, await fileMy.arrayBuffer(), fileMy.type);
+    }
     const existing = await selectHomepageAds(true, placement);
     const sortOrder = existing.reduce((max, ad) => Math.max(max, ad.sort_order), -1) + 1;
     const ad = await insertHomepageAd({
@@ -65,6 +69,8 @@ export async function POST(request: NextRequest) {
       alt_text: altText,
       image_url: imageUrl,
       storage_path: uploadedPath,
+      image_url_my: imageUrlMy,
+      storage_path_my: uploadedPathMy,
       href: safeHref(form.get("href")),
       placement,
       width: Number.isInteger(width) && width > 0 ? width : null,
@@ -79,6 +85,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ad }, { status: 201 });
   } catch (error) {
     if (uploadedPath) await deleteHomepageAdObject(uploadedPath).catch(() => {});
+    if (uploadedPathMy) await deleteHomepageAdObject(uploadedPathMy).catch(() => {});
     return handleRouteError("admin.home-ads.create", error);
   }
 }

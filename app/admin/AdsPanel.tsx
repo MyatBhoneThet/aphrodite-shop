@@ -17,6 +17,8 @@ type AdminAd = {
   title: string;
   alt_text: string;
   image_url: string;
+  /** Burmese version of the banner; empty means Burmese visitors see the English image. */
+  image_url_my?: string | null;
   href: string;
   placement: HomepageAdPlacement;
   width: number | null;
@@ -41,6 +43,8 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
   const [ads, setAds] = useState<AdminAd[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [file, setFile] = useState<File | null>(null);
+  const [fileMy, setFileMy] = useState<File | null>(null);
+  const [previewMy, setPreviewMy] = useState("");
   const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
   const [preview, setPreview] = useState("");
   const [title, setTitle] = useState("");
@@ -109,18 +113,59 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
     reader.readAsDataURL(selected);
   }
 
+  function chooseFileMy(event: ChangeEvent<HTMLInputElement>) {
+    const selected = event.target.files?.[0] ?? null;
+    setFileMy(selected); setPreviewMy(""); setError("");
+    if (!selected) return;
+    const reader = new FileReader();
+    reader.onload = () => setPreviewMy(String(reader.result));
+    reader.readAsDataURL(selected);
+  }
+
+  // Uploads or replaces the Burmese version of an existing banner.
+  async function uploadBurmese(ad: AdminAd, selected: File | null) {
+    if (!selected) return;
+    setBusy(ad.id); setError(""); setMessage("");
+    try {
+      const form = new FormData();
+      form.set("file", selected);
+      const response = await fetch(`/api/admin/home-ads/${ad.id}/burmese`, { method: "POST", headers: authHeaders(), body: form });
+      if (!response.ok) throw new Error(await responseError(response));
+      setMessage("Burmese banner saved. Burmese visitors now see it."); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to save the Burmese banner."); }
+    finally { setBusy(""); }
+  }
+
+  async function removeBurmese(ad: AdminAd) {
+    const confirmed = await confirmAction({
+      title: "Remove the Burmese banner?",
+      subject: ad.title,
+      message: "Burmese visitors will see the English banner instead.",
+      confirmLabel: "Remove",
+      tone: "caution",
+    });
+    if (!confirmed) return;
+    setBusy(ad.id); setError(""); setMessage("");
+    try {
+      const response = await fetch(`/api/admin/home-ads/${ad.id}/burmese`, { method: "DELETE", headers: authHeaders() });
+      if (!response.ok) throw new Error(await responseError(response));
+      setMessage("Burmese banner removed."); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to remove the Burmese banner."); }
+    finally { setBusy(""); }
+  }
+
   async function create(event: FormEvent) {
     event.preventDefault();
     if (!file) { setError("Choose a JPG, PNG or WebP banner."); return; }
     setBusy("create"); setError(""); setMessage("");
     try {
       const form = new FormData();
-      form.set("file", file); form.set("title", title); form.set("alt_text", altText); form.set("href", href); form.set("placement", placement);
+      form.set("file", file); if (fileMy) form.set("file_my", fileMy); form.set("title", title); form.set("alt_text", altText); form.set("href", href); form.set("placement", placement);
       if (dimensions) { form.set("width", String(dimensions.width)); form.set("height", String(dimensions.height)); }
       const response = await fetch("/api/admin/home-ads", { method: "POST", headers: authHeaders(), body: form });
       if (!response.ok) throw new Error(await responseError(response));
       setTitle(""); setAltText(""); setHref("/catalog/laptops"); setFile(null); setDimensions(null);
-      latestFile.current = null; setPreview("");
+      latestFile.current = null; setPreview(""); setFileMy(null); setPreviewMy("");
       setMessage(`Advertisement added to ${HOMEPAGE_AD_PLACEMENT_LABELS[placement]}.`); await load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to add advertisement."); }
     finally { setBusy(""); }
@@ -190,6 +235,10 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
           <label className="block text-sm font-semibold">{a("Banner image")}
             <input type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseFile} className="mt-2 block w-full rounded-xl border p-3 text-sm" />
           </label>
+          <label className="block text-sm font-semibold">{a("Burmese banner (optional)")}
+            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseFileMy} className="mt-2 block w-full rounded-xl border p-3 text-sm" />
+            <span className="mt-1 block text-xs font-normal text-zinc-500">{a("The words in a banner are part of the picture. Upload a second picture with Burmese words and Burmese visitors will see it; without it they see the English banner.")}</span>
+          </label>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="text-sm font-semibold">{a("Internal title")}
               <input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="September laptop sale" className="mt-2 w-full rounded-xl border px-4 py-3 font-normal" />
@@ -213,6 +262,7 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
           <div className="aspect-[3/1] overflow-hidden rounded-2xl bg-zinc-950 ring-1 ring-zinc-200">
             {preview ? <img src={preview} alt="New advertisement preview" className="h-full w-full object-contain" /> : <div className="flex h-full items-center justify-center text-sm text-zinc-400">1800 × 600</div>}
           </div>
+          {previewMy && <div className="mt-3"><p className="mb-1 text-xs font-semibold text-zinc-600">{a("Burmese preview")}</p><div className="aspect-[3/1] overflow-hidden rounded-xl bg-zinc-950 ring-1 ring-zinc-200"><img src={previewMy} alt="Burmese advertisement preview" className="h-full w-full object-contain" /></div></div>}
           {dimensions && <p className={`mt-2 text-xs font-semibold ${ratio && Math.abs(ratio - 3) <= .15 ? "text-green-700" : "text-amber-700"}`}>{dimensions.width} × {dimensions.height}px · {ratio?.toFixed(2)}:1 {ratio && Math.abs(ratio - 3) > .15 ? "— empty margins may appear" : "— excellent fit"}</p>}
         </div>
       </form>
@@ -226,7 +276,20 @@ export default function AdsPanel({ allowDelete = true }: { allowDelete?: boolean
           const placementAds = ads.filter((item) => item.placement === ad.placement);
           const placementIndex = placementAds.findIndex((item) => item.id === ad.id);
           return <article key={ad.id} className="grid gap-4 rounded-2xl border p-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-            <div><div className="aspect-[3/1] overflow-hidden rounded-xl bg-zinc-950"><img src={ad.image_url} alt={ad.alt_text} className="h-full w-full object-contain" /></div><p className="mt-2 text-xs text-zinc-500">{ad.width && ad.height ? `${ad.width} × ${ad.height}px` : "Dimensions unavailable"}</p><p className="mt-1 text-xs font-bold text-red-600">{a(HOMEPAGE_AD_PLACEMENT_LABELS[ad.placement])}</p></div>
+            <div><div className="aspect-[3/1] overflow-hidden rounded-xl bg-zinc-950"><img src={ad.image_url} alt={ad.alt_text} className="h-full w-full object-contain" /></div><p className="mt-2 text-xs text-zinc-500">{ad.width && ad.height ? `${ad.width} × ${ad.height}px` : "Dimensions unavailable"}</p><p className="mt-1 text-xs font-bold text-red-600">{a(HOMEPAGE_AD_PLACEMENT_LABELS[ad.placement])}</p>
+              <div className="mt-3 rounded-xl border border-dashed p-3">
+                <p className="text-xs font-bold text-zinc-700">{a("Burmese version")}</p>
+                {ad.image_url_my
+                  ? <div className="mt-2 aspect-[3/1] overflow-hidden rounded-lg bg-zinc-950"><img src={ad.image_url_my} alt="Burmese banner" className="h-full w-full object-contain" /></div>
+                  : <p className="mt-1 text-xs text-zinc-500">{a("None. Burmese visitors see the English banner.")}</p>}
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <label className={`cursor-pointer rounded-full border px-3 py-1.5 text-xs font-semibold hover:bg-zinc-50 ${busy === ad.id ? "pointer-events-none opacity-50" : ""}`}>
+                    {ad.image_url_my ? a("Replace") : a("Upload Burmese banner")}
+                    <input type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(event) => { const picked = event.target.files?.[0] ?? null; event.target.value = ""; void uploadBurmese(ad, picked); }} />
+                  </label>
+                  {ad.image_url_my && <button type="button" disabled={busy === ad.id} onClick={() => void removeBurmese(ad)} className="rounded-full px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">{a("Remove")}</button>}
+                </div>
+              </div></div>
             <div className="space-y-3">
               <div className="grid gap-3 sm:grid-cols-2"><input aria-label="Advertisement title" value={draft.title} onChange={(event) => setDrafts((all) => ({ ...all, [ad.id]: { ...draft, title: event.target.value } }))} className="rounded-xl border px-3 py-2 text-sm" /><input aria-label="Advertisement link" value={draft.href} onChange={(event) => setDrafts((all) => ({ ...all, [ad.id]: { ...draft, href: event.target.value } }))} className="rounded-xl border px-3 py-2 text-sm" /></div>
               <input aria-label="Advertisement image description" value={draft.alt_text} onChange={(event) => setDrafts((all) => ({ ...all, [ad.id]: { ...draft, alt_text: event.target.value } }))} className="w-full rounded-xl border px-3 py-2 text-sm" />

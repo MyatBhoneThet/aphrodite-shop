@@ -63,7 +63,7 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
       .then(async (response) => {
         if (!response.ok) return;
         const data = await response.json() as {
-          ads?: { id: string; title: string; alt_text: string; image_url: string; href: string }[];
+          ads?: { id: string; title: string; alt_text: string; image_url: string; image_url_my?: string | null; href: string }[];
         };
         if (cancelled || !data.ads?.length) return;
         const customSlides: HomeAd[] = data.ads.map((ad) => ({
@@ -76,6 +76,7 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
           theme: "crimson",
           image: ad.image_url,
           imageAlt: ad.alt_text,
+          imageMy: ad.image_url_my ?? undefined,
         }));
         setSlides([...customSlides, ...homeAds]);
         setSlide({ index: 0, prev: -1, dir: 1 });
@@ -117,18 +118,26 @@ export default function HeroSlider({ language }: { language: "en" | "my" }) {
           const theme = themes[ad.theme];
           const photos = (ad.photos ?? []).filter(photo => !failedImages.includes(photo.src));
           const cards = (ad.cards ?? []).filter(card => !failedImages.includes(card.src));
+          // A banner image has its words baked in. Burmese visitors get the
+          // Burmese image when there is one; a built-in slide otherwise shows
+          // its designed (Burmese-text) version; an uploaded banner with no
+          // Burmese copy keeps the English image rather than showing nothing.
+          const image = language === "my"
+            ? ad.imageMy ?? (ad.id.startsWith("custom-") || !ad.titleMy ? ad.image : undefined)
+            : ad.image;
+          const imageAlt = language === "my" && ad.imageMy ? ad.imageAltMy ?? ad.imageAlt ?? title : ad.imageAlt ?? title;
           return <div key={ad.id} inert={position !== index} aria-hidden={position !== index}
             className={position === index ? `relative z-10 col-start-1 row-start-1 visible ${prev >= 0 ? `ad-in-${way}` : ""}` : position === prev ? `absolute inset-0 ad-out-${way}` : "invisible absolute inset-0"}
             role="group" aria-roledescription="slide" aria-label={`${position + 1} of ${count}: ${title}`}>
 
-          {active.image && !failedImages.includes(active.image) ? (
+          {image && !failedImages.includes(image) ? (
             <Link
               href={active.href}
               className="relative block aspect-[3/1] w-full overflow-hidden bg-zinc-950"
             >
               {/* A 1800 × 600 banner fills this fixed 3:1 frame without cropping. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={active.image} alt={active.imageAlt ?? title} className="absolute inset-0 h-full w-full object-contain" onError={() => failed(active.image!)} />
+              <img src={image} alt={imageAlt} className="absolute inset-0 h-full w-full object-contain" onError={() => failed(image)} />
             </Link>
           ) : (
             <div className="relative aspect-[3/1] w-full overflow-hidden">
