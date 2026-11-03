@@ -3419,6 +3419,19 @@ const MAX_PAYMENT_SLIP_BYTES = 10 * 1024 * 1024;
  * The customer's proof of a bank or MMQR transfer. Uploading again after a
  * rejection puts the order back in the admin's queue.
  */
+/** Checks a slip file's type and size. Used before an order is created, so a bad file never leaves an order behind. */
+export function assertPaymentSlipFile(file: unknown): asserts file is File {
+  if (!(file instanceof File) || file.size <= 0) {
+    throw badRequest("Upload your transfer slip before placing the order. A photo or screenshot of the transfer is needed.");
+  }
+  if (!PAYMENT_SLIP_TYPES.has(file.type)) {
+    throw badRequest("Upload the slip as a JPG, PNG, WebP or PDF file.");
+  }
+  if (file.size > MAX_PAYMENT_SLIP_BYTES) {
+    throw badRequest("The slip must be smaller than 10 MB.");
+  }
+}
+
 export async function addPaymentSlip(
   user: CurrentUser,
   orderId: string,
@@ -3433,12 +3446,7 @@ export async function addPaymentSlip(
   if (order.status === "cancelled" || order.status === "returned") {
     throw conflict("This order is closed.");
   }
-  if (!PAYMENT_SLIP_TYPES.has(file.type)) {
-    throw badRequest("Upload the slip as a JPG, PNG, WebP or PDF file.");
-  }
-  if (file.size <= 0 || file.size > MAX_PAYMENT_SLIP_BYTES) {
-    throw badRequest("The slip must be smaller than 10 MB.");
-  }
+  assertPaymentSlipFile(file);
 
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(-120) || "slip";
   const storagePath = `${user.id}/${orderId}/${randomUUID()}-${safeName}`;

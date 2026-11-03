@@ -428,6 +428,20 @@ export const storefrontBurmese: Record<string, string> = {
   "parts selected": "အစိတ်အပိုင်း ရွေးထားပြီး",
   "PC parts": "ကွန်ပျူတာ အစိတ်အပိုင်းများ",
   "Customize & edit build": "စိတ်ကြိုက် ပြင်ဆင်ရန်",
+  // Add-to-cart feedback and the required transfer slip. New: please have a native speaker review them.
+  "Added to cart": "ဈေးခြင်းထဲ ထည့်ပြီး",
+  "Added to your cart": "ဈေးခြင်းထဲသို့ ထည့်ပြီးပါပြီ",
+  "Keep shopping": "ဆက်လက်ဈေးဝယ်ရန်",
+  "in your cart": "ဈေးခြင်းထဲတွင် ရှိပြီး",
+  "Could not add it to your cart. Check your connection and try again.": "ဈေးခြင်းထဲ ထည့်၍မရပါ။ အင်တာနက်ကို စစ်ဆေးပြီး ထပ်မံကြိုးစားပါ။",
+  "Required": "မဖြစ်မနေ လိုအပ်သည်",
+  "Pay first, then attach a photo or screenshot of your transfer. You cannot place the order without it.": "အရင်ငွေလွှဲပြီးမှ ငွေလွှဲထားသော ဓာတ်ပုံ သို့မဟုတ် screenshot ကို တင်ပါ။ ၎င်းမပါဘဲ အော်ဒါမတင်နိုင်ပါ။",
+  "Slip attached": "ပြေစာ တင်ပြီး",
+  "Choose a photo or PDF of your slip": "ပြေစာ၏ ဓာတ်ပုံ သို့မဟုတ် PDF ကို ရွေးပါ",
+  "Use a JPG, PNG, WebP or PDF file up to 10 MB.": "JPG, PNG, WebP သို့မဟုတ် PDF ဖိုင် (အများဆုံး ၁၀ MB) ကို သုံးပါ။",
+  "Upload your transfer slip before placing the order.": "အော်ဒါမတင်မီ ငွေလွှဲပြေစာကို တင်ပါ။",
+  "Attach your transfer slip above to place the order.": "အော်ဒါတင်ရန် အပေါ်တွင် ငွေလွှဲပြေစာကို တင်ပါ။",
+  "Your transfer slip": "သင့်ငွေလွှဲပြေစာ",
 };
 
 export function translateStorefrontText(language: Language, value: string): string {

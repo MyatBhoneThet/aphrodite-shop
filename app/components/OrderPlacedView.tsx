@@ -10,10 +10,13 @@ const ratingWords = ["", "Poor", "Fair", "Good", "Very good", "Excellent"];
 export default function OrderPlacedView({
   orderId,
   prepaid,
+  slipMissed = false,
   title,
 }: {
   orderId: string;
   prepaid: boolean;
+  /** The order was placed but its slip could not be saved; it must be sent again. */
+  slipMissed?: boolean;
   title: string;
 }) {
   const [rating, setRating] = useState(0);
@@ -58,7 +61,9 @@ export default function OrderPlacedView({
           <p className="mt-2 inline-block rounded-full bg-zinc-100 px-4 py-1.5 text-sm font-bold tracking-wide text-zinc-700">Order #{orderId.slice(0, 8).toUpperCase()}</p>
           <p className="mx-auto mt-4 max-w-md text-zinc-500">
             {prepaid
-              ? "Thank you! We've received your order. Upload or confirm your payment slip from My orders so we can verify it and start shipping."
+              ? slipMissed
+                ? "Thank you! We've received your order, but your payment slip could not be saved. Please upload it again from My orders so we can verify it and start shipping."
+                : "Thank you! We've received your order and your payment slip. We will check your payment and then start shipping."
               : "Thank you! Your order is now pending COD verification. Please keep your phone available. The store may call before approving and shipping your order."}
           </p>
           <div className="mt-7 flex flex-wrap justify-center gap-3">

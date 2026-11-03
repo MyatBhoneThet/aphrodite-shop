@@ -30,6 +30,10 @@ export default function WishlistPage() {
   const [alerts, setAlerts] = useState<FollowedAlert[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  // Which wishlist item is being added, and which was just added, so the
+  // button itself shows that the click worked.
+  const [addingId, setAddingId] = useState<number | null>(null);
+  const [addedId, setAddedId] = useState<number | null>(null);
 
   const loadWishlist = useCallback(async () => {
     setIsLoading(true);
@@ -85,17 +89,30 @@ export default function WishlistPage() {
   }
 
   async function addToCart(productId: number) {
+    if (addingId !== null) return;
     setError("");
+    setAddedId(null);
+    setAddingId(productId);
 
-    const response = await fetch("/api/cart", {
-      method: "POST",
-      headers: { ...authHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ product_id: productId, quantity: 1 }),
-    });
+    try {
+      const response = await fetch("/api/cart", {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ product_id: productId, quantity: 1 }),
+      });
 
-    if (!response.ok) {
-      const data = (await response.json().catch(() => null)) as { error?: string } | null;
-      setError(data?.error ?? "Unable to add to cart.");
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+        setError(data?.error ?? "Unable to add to cart.");
+        return;
+      }
+
+      setAddedId(productId);
+      window.setTimeout(() => setAddedId((current) => (current === productId ? null : current)), 3000);
+    } catch {
+      setError("Could not add it to your cart. Check your connection and try again.");
+    } finally {
+      setAddingId(null);
     }
   }
 
@@ -235,11 +252,14 @@ export default function WishlistPage() {
                 <div className="mt-2 flex flex-wrap justify-center gap-1 sm:mt-4 sm:gap-2">
                   <button
                     onClick={() => addToCart(item.product.id)}
-                    disabled={item.product.stock === "Out of Stock"}
-                    className="rounded-full bg-red-600 px-2 py-1.5 text-[11px] font-semibold text-white disabled:bg-zinc-400 sm:px-4 sm:py-2 sm:text-sm"
+                    disabled={item.product.stock === "Out of Stock" || addingId !== null}
+                    className={`rounded-full px-2 py-1.5 text-[11px] font-semibold text-white transition-colors disabled:bg-zinc-400 sm:px-4 sm:py-2 sm:text-sm ${addedId === item.product.id ? "bg-emerald-600" : "bg-red-600"}`}
                   >
-                    Add to cart
+                    {addingId === item.product.id ? "Adding…" : addedId === item.product.id ? "✓ Added to cart" : "Add to cart"}
                   </button>
+                  {addedId === item.product.id && (
+                    <Link href="/cart" role="status" className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-1.5 text-[11px] font-semibold text-emerald-800 sm:px-4 sm:py-2 sm:text-sm">View cart</Link>
+                  )}
                   <button
                     onClick={() => removeItem(item.id)}
                     className="rounded-full border bg-white px-2 py-1.5 text-[11px] text-red-600 sm:px-4 sm:py-2 sm:text-sm"

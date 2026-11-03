@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Product, UserRole } from "../../data/products";
 import ProductPrice from "../../components/ProductPrice";
 import ProductShare from "../../components/ProductShare";
@@ -76,6 +76,13 @@ export default function ProductDetailsClient({
   const [wishlistItemId, setWishlistItemId] = useState<string | null>(null);
   const [cartMessage, setCartMessage] = useState("");
   const [cartAdded, setCartAdded] = useState(false);
+  // Add-to-cart feedback you cannot miss: the button shows it is working and
+  // then turns green, a popup confirms, and a pill keeps saying what is in the cart.
+  const [isAdding, setIsAdding] = useState(false);
+  const [justAdded, setJustAdded] = useState(false);
+  const [addedToast, setAddedToast] = useState<{ name: string; quantity: number } | null>(null);
+  const [inCart, setInCart] = useState(0);
+  const addedTimers = useRef<number[]>([]);
   const [alerts, setAlerts] = useState<FollowedAlert[]>([]);
 
   // Pricing is always computed server-side; changing the quantity refetches
@@ -119,6 +126,39 @@ export default function ProductDetailsClient({
       window.clearInterval(timer);
     };
   }, [productId, quantity]);
+
+  // How many of this product are already in the cart, so it is visible
+  // before anyone presses the button again.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInCart() {
+      if (userStatus === "checking") return;
+      if (!currentUser) {
+        const line = readGuestCart().find((entry) => entry.productId === productId);
+        if (!cancelled) setInCart(line?.quantity ?? 0);
+        return;
+      }
+      if (currentUser.role === "admin" || currentUser.role === "staff") return;
+
+      const response = await fetch("/api/cart", { headers: authHeaders(), cache: "no-store" }).catch(() => null);
+      if (!response?.ok || cancelled) return;
+      const data = (await response.json().catch(() => null)) as { items?: { product_id: number; quantity: number }[] } | null;
+      if (cancelled) return;
+      setInCart((data?.items ?? []).filter((item) => item.product_id === productId).reduce((sum, item) => sum + item.quantity, 0));
+    }
+
+    const timer = window.setTimeout(() => void loadInCart(), 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [currentUser, userStatus, productId]);
+
+  useEffect(() => {
+    const timers = addedTimers.current;
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, []);
 
   useEffect(() => {
     async function loadWishlist() {
@@ -247,7 +287,19 @@ export default function ProductDetailsClient({
     }
   }
 
+  function announceAdded(productItem: Product, addedQuantity: number) {
+    addedTimers.current.forEach((timer) => window.clearTimeout(timer));
+    setInCart((count) => count + addedQuantity);
+    setJustAdded(true);
+    setAddedToast({ name: productItem.name, quantity: addedQuantity });
+    addedTimers.current = [
+      window.setTimeout(() => setJustAdded(false), 2500),
+      window.setTimeout(() => setAddedToast(null), 6000),
+    ];
+  }
+
   async function addToCart(productItem: Product) {
+    if (isAdding) return;
     setCartAdded(false);
 
     if (productItem.stock === "Out of Stock") {
@@ -261,26 +313,35 @@ export default function ProductDetailsClient({
       writeGuestCart(addGuestLine(readGuestCart(), productItem.id, quantity));
       setCartMessage(text("Added to your cart. You only need to log in when you check out."));
       setCartAdded(true);
+      announceAdded(productItem, quantity);
       return;
     }
 
-    const response = await fetch("/api/cart", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders(),
-      },
-      body: JSON.stringify({ product_id: productItem.id, quantity }),
-    });
+    setIsAdding(true);
+    try {
+      const response = await fetch("/api/cart", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(),
+        },
+        body: JSON.stringify({ product_id: productItem.id, quantity }),
+      });
 
-    if (!response.ok) {
-      const data = (await response.json()) as { error?: string };
-      setCartMessage(data.error ?? "Unable to add product to cart.");
-      return;
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+        setCartMessage(data?.error ?? "Unable to add product to cart.");
+        return;
+      }
+
+      setCartMessage(t("detail.addedToCart"));
+      setCartAdded(true);
+      announceAdded(productItem, quantity);
+    } catch {
+      setCartMessage(text("Could not add it to your cart. Check your connection and try again."));
+    } finally {
+      setIsAdding(false);
     }
-
-    setCartMessage(t("detail.addedToCart"));
-    setCartAdded(true);
   }
 
   async function toggleWishlist(productItem: Product) {
@@ -555,9 +616,13 @@ export default function ProductDetailsClient({
               <button
                 type="button"
                 onClick={() => void addToCart(product)}
-                disabled={product.stock === "Out of Stock" || product.price <= 0 || userStatus === "checking"}
-                className="hidden min-h-11 rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white disabled:bg-zinc-400 sm:px-7 sm:py-3 sm:text-base lg:inline-flex lg:items-center">
-                {product.price <= 0 ? t("detail.pricePending") : t("detail.addToCart")}
+                disabled={product.stock === "Out of Stock" || product.price <= 0 || userStatus === "checking" || isAdding}
+                className={`hidden min-h-11 rounded-lg px-3 py-2 text-xs font-semibold text-white transition-colors disabled:bg-zinc-400 sm:px-7 sm:py-3 sm:text-base lg:inline-flex lg:items-center ${justAdded ? "bg-emerald-600" : "bg-red-600"}`}>
+                {isAdding
+                  ? text("Adding…")
+                  : justAdded
+                    ? `✓ ${text("Added to cart")}`
+                    : product.price <= 0 ? t("detail.pricePending") : t("detail.addToCart")}
               </button>
               <button type="button" onClick={() => void toggleWishlist(product)}
                 className="min-h-11 rounded-lg border px-3 py-2 text-xs font-semibold sm:px-7 sm:py-3 sm:text-base">
@@ -584,6 +649,13 @@ export default function ProductDetailsClient({
                 alerts={alerts}
                 onChange={setAlerts}
               />
+            )}
+
+            {inCart > 0 && (
+              <p className="mt-4 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200">
+                <span aria-hidden="true">✓</span> {inCart} {text("in your cart")} ·{" "}
+                <Link href="/cart" className="underline">{text("View cart")}</Link>
+              </p>
             )}
 
             {cartMessage && (
@@ -671,6 +743,12 @@ export default function ProductDetailsClient({
               )}
             </p>
           )}
+          {!cartMessage && inCart > 0 && (
+            <p className="mb-2 truncate text-xs font-semibold text-emerald-700">
+              ✓ {inCart} {text("in your cart")}{" "}
+              <Link href="/cart" className="underline">{text("View cart")}</Link>
+            </p>
+          )}
           <div className="mx-auto flex max-w-7xl items-center gap-3">
             <div className="min-w-0 flex-1">
               <p className="truncate text-[11px] font-semibold text-zinc-500">
@@ -685,15 +763,34 @@ export default function ProductDetailsClient({
             <button
               type="button"
               onClick={() => void addToCart(product)}
-              disabled={product.stock === "Out of Stock" || product.price <= 0 || userStatus === "checking"}
-              className="min-h-12 shrink-0 rounded-xl bg-red-600 px-6 text-sm font-bold text-white disabled:bg-zinc-400"
+              disabled={product.stock === "Out of Stock" || product.price <= 0 || userStatus === "checking" || isAdding}
+              className={`min-h-12 shrink-0 rounded-xl px-6 text-sm font-bold text-white transition-colors disabled:bg-zinc-400 ${justAdded ? "bg-emerald-600" : "bg-red-600"}`}
             >
-              {product.stock === "Out of Stock"
-                ? text("Out of stock")
-                : product.price <= 0
-                  ? t("detail.pricePending")
-                  : t("detail.addToCart")}
+              {isAdding
+                ? text("Adding…")
+                : justAdded
+                  ? `✓ ${text("Added to cart")}`
+                  : product.stock === "Out of Stock"
+                    ? text("Out of stock")
+                    : product.price <= 0
+                      ? t("detail.pricePending")
+                      : t("detail.addToCart")}
             </button>
+          </div>
+        </div>
+      )}
+      {addedToast && (
+        <div role="status" aria-live="polite" className="order-popup-in fixed inset-x-3 bottom-24 z-[60] rounded-2xl border border-emerald-200 bg-white p-4 shadow-2xl shadow-emerald-900/20 lg:inset-x-auto lg:bottom-auto lg:right-6 lg:top-24 lg:w-96">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-lg font-black text-white" aria-hidden="true">✓</span>
+            <div className="min-w-0 flex-1">
+              <p className="font-black text-zinc-900">{text("Added to your cart")}</p>
+              <p className="mt-0.5 truncate text-sm text-zinc-600">{addedToast.name} × {addedToast.quantity}</p>
+              <div className="mt-3 flex gap-2">
+                <Link href="/cart" className="rounded-full bg-red-600 px-4 py-2 text-xs font-bold text-white hover:bg-red-700">{text("View cart")}</Link>
+                <button type="button" onClick={() => setAddedToast(null)} className="rounded-full px-3 py-2 text-xs font-semibold text-zinc-500 hover:bg-zinc-100">{text("Keep shopping")}</button>
+              </div>
+            </div>
           </div>
         </div>
       )}

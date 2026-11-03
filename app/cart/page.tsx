@@ -114,6 +114,13 @@ export default function CartPage() {
   const [isClearingCart, setIsClearingCart] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [placedOrderId, setPlacedOrderId] = useState<string | null>(null);
+  // The transfer slip for a bank transfer or MMQR order. It is required: the
+  // order cannot be placed until one is attached.
+  const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [slipPreview, setSlipPreview] = useState("");
+  const [slipError, setSlipError] = useState("");
+  // The order went through but the slip could not be saved; it can be sent again from My orders.
+  const [slipMissed, setSlipMissed] = useState(false);
   // Items from the signed-out cart that the account cart refused (e.g. out of stock).
   const [guestNotices, setGuestNotices] = useState<string[]>([]);
 
@@ -588,6 +595,25 @@ export default function CartPage() {
     }
   }
 
+  // The preview is a data: URL because the site's Content Security Policy
+  // blocks blob: images.
+  function chooseSlip(file: File | null) {
+    setSlipError("");
+    setSlipFile(null);
+    setSlipPreview("");
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(file.type) || file.size > 10 * 1024 * 1024) {
+      setSlipError(text("Use a JPG, PNG, WebP or PDF file up to 10 MB."));
+      return;
+    }
+    setSlipFile(file);
+    if (file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = () => setSlipPreview(String(reader.result));
+      reader.readAsDataURL(file);
+    }
+  }
+
   async function handleCheckout(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -612,6 +638,11 @@ export default function CartPage() {
       return;
     }
 
+    if (paymentMethod !== "cash_on_delivery" && !slipFile) {
+      setError(text("Upload your transfer slip before placing the order."));
+      return;
+    }
+
     if (hasPendingPrices) {
       setError("A cart item is waiting for a confirmed price. Remove it or contact support before ordering.");
       return;
@@ -629,36 +660,48 @@ export default function CartPage() {
       if (saveAddress && !selectedAddressId && deliveryLocation) {
         await persistCurrentAddress();
       }
-      const response = await fetch("/api/orders", {
-        method: "POST",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          shipping_name: shippingName.trim(),
-          shipping_phone: shippingPhone.trim(),
-          shipping_address_line1: addressLine1.trim(),
-          shipping_address_line2: addressLine2.trim() || null,
-          shipping_city: shippingCity.trim(),
-          shipping_state: shippingState.trim(),
-          shipping_postal_code: postalCode.trim(),
-          shipping_country: shippingCountry.trim(),
-          payment_method: paymentMethod,
-          payment_account: paymentMethod === "cash_on_delivery" ? null : paymentAccount,
-          cod_confirmation: paymentMethod === "cash_on_delivery" ? codConfirmed : undefined,
-          cod_contact_confirmation:
-            paymentMethod === "cash_on_delivery" ? codContactConfirmed : undefined,
-          delivery_location_consent: Boolean(deliveryLocation),
-          delivery_location: deliveryLocation,
-          notes: notes.trim() || null,
-          po_number: cart?.wholesale ? poNumber.trim() || null : undefined,
-          selected_cart_item_ids: [...selectedItemIds],
-          // Server detects price drift against this and answers 409;
-          // authoritative prices are always recomputed server-side.
-          expected_total: selectedTotal,
-        }),
-      });
+      const orderPayload = {
+        shipping_name: shippingName.trim(),
+        shipping_phone: shippingPhone.trim(),
+        shipping_address_line1: addressLine1.trim(),
+        shipping_address_line2: addressLine2.trim() || null,
+        shipping_city: shippingCity.trim(),
+        shipping_state: shippingState.trim(),
+        shipping_postal_code: postalCode.trim(),
+        shipping_country: shippingCountry.trim(),
+        payment_method: paymentMethod,
+        payment_account: paymentMethod === "cash_on_delivery" ? null : paymentAccount,
+        cod_confirmation: paymentMethod === "cash_on_delivery" ? codConfirmed : undefined,
+        cod_contact_confirmation:
+          paymentMethod === "cash_on_delivery" ? codContactConfirmed : undefined,
+        delivery_location_consent: Boolean(deliveryLocation),
+        delivery_location: deliveryLocation,
+        notes: notes.trim() || null,
+        po_number: cart?.wholesale ? poNumber.trim() || null : undefined,
+        selected_cart_item_ids: [...selectedItemIds],
+        // Server detects price drift against this and answers 409;
+        // authoritative prices are always recomputed server-side.
+        expected_total: selectedTotal,
+      };
+
+      // Bank transfer and MMQR send the slip together with the order, so an
+      // order without a slip can never be created.
+      let response: Response;
+      if (paymentMethod !== "cash_on_delivery" && slipFile) {
+        const form = new FormData();
+        form.set("order", JSON.stringify(orderPayload));
+        form.set("slip", slipFile);
+        response = await fetch("/api/orders", { method: "POST", headers: authHeaders(), body: form });
+      } else {
+        response = await fetch("/api/orders", {
+          method: "POST",
+          headers: { ...authHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify(orderPayload),
+        });
+      }
 
       const data = (await response.json().catch(() => null)) as
-        | { order?: { id: string }; error?: string }
+        | { order?: { id: string }; slipSaved?: boolean; error?: string }
         | null;
 
       if (response.status === 409) {
@@ -673,6 +716,7 @@ export default function CartPage() {
         throw new Error(data?.error ?? "Unable to place order.");
       }
 
+      setSlipMissed(data?.slipSaved === false);
       setPlacedOrderId(data?.order?.id ?? null);
       setCart(null);
       window.sessionStorage.removeItem(CHECKOUT_SELECTION_KEY);
@@ -786,7 +830,7 @@ export default function CartPage() {
   }
 
   if (placedOrderId) {
-    return <OrderPlacedView orderId={placedOrderId} prepaid={paymentMethod !== "cash_on_delivery"} title={t("cart.orderPlaced")} />;
+    return <OrderPlacedView orderId={placedOrderId} prepaid={paymentMethod !== "cash_on_delivery"} slipMissed={slipMissed} title={t("cart.orderPlaced")} />;
   }
 
   return (
@@ -1115,6 +1159,32 @@ export default function CartPage() {
                         </label>
                       ))}
                     <p className="rounded-xl bg-white p-3 text-xs text-zinc-600">{t("payment.slip.help")}</p>
+
+                    <div className={`rounded-xl border-2 p-4 ${slipFile ? "border-emerald-300 bg-emerald-50" : "border-amber-300 bg-amber-50"}`}>
+                      <p className="text-sm font-bold">
+                        {slipFile ? "✓ " : ""}{t("payment.slip.title")}
+                        <span className="ml-2 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">{text("Required")}</span>
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-700">{text("Pay first, then attach a photo or screenshot of your transfer. You cannot place the order without it.")}</p>
+                      {slipFile ? (
+                        <div className="mt-3 flex items-center gap-3">
+                          {slipPreview
+                            ? <img src={slipPreview} alt={text("Your transfer slip")} className="h-20 w-20 rounded-lg border bg-white object-cover" />
+                            : <span className="flex h-20 w-20 items-center justify-center rounded-lg border bg-white text-xs font-bold text-zinc-600">PDF</span>}
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold">{slipFile.name}</p>
+                            <p className="text-xs text-zinc-600">{(slipFile.size / 1024).toFixed(0)} KB · {text("Slip attached")}</p>
+                            <button type="button" onClick={() => chooseSlip(null)} className="mt-1 text-xs font-semibold text-red-600 underline">{text("Remove")}</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="mt-3 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-amber-500 bg-white px-4 py-4 text-sm font-semibold text-amber-900 hover:bg-amber-100">
+                          {text("Choose a photo or PDF of your slip")}
+                          <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="sr-only" onChange={(event) => { chooseSlip(event.target.files?.[0] ?? null); event.target.value = ""; }} />
+                        </label>
+                      )}
+                      {slipError && <p role="alert" className="mt-2 text-xs font-semibold text-red-600">{slipError}</p>}
+                    </div>
                   </div>}
                 </fieldset>
 
@@ -1122,13 +1192,16 @@ export default function CartPage() {
 
                 <button
                   type="submit"
-                  disabled={isPlacingOrder || hasPendingPrices || Boolean(wholesaleProblem)}
+                  disabled={isPlacingOrder || hasPendingPrices || Boolean(wholesaleProblem) || (paymentMethod !== "cash_on_delivery" && !slipFile)}
                   className="w-full rounded-full bg-red-600 px-5 py-4 font-semibold text-white disabled:bg-zinc-400"
                 >
                   {isPlacingOrder
                     ? t("cart.placingOrder")
                     : t(`cart.place.${paymentMethod}`)}
                 </button>
+                {paymentMethod !== "cash_on_delivery" && !slipFile && (
+                  <p className="-mt-2 text-center text-xs font-semibold text-amber-800">{text("Attach your transfer slip above to place the order.")}</p>
+                )}
               </form>}
             </div>
           </div>

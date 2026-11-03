@@ -81,6 +81,13 @@ export type HomepageAdRow = {
   alt_text: string;
   image_url: string;
   storage_path: string;
+  /**
+   * Optional Burmese version of the banner. Banner text is part of the image,
+   * so a Burmese visitor can only see Burmese words if there is a second image.
+   * Missing means "show the English one".
+   */
+  image_url_my?: string | null;
+  storage_path_my?: string | null;
   href: string;
   placement: HomepageAdPlacement;
   width: number | null;
@@ -950,7 +957,12 @@ export async function insertHomepageAd(fields: Omit<HomepageAdRow, "id" | "creat
 
 export async function updateHomepageAd(
   id: string,
-  fields: Partial<Pick<HomepageAdRow, "title" | "alt_text" | "href" | "placement" | "is_active" | "sort_order">>
+  fields: Partial<
+    Pick<
+      HomepageAdRow,
+      "title" | "alt_text" | "href" | "placement" | "is_active" | "sort_order" | "image_url_my" | "storage_path_my"
+    >
+  >
 ) {
   const ads = await readHomepageAdManifest();
   const index = ads.findIndex((ad) => ad.id === id);
