@@ -64,10 +64,9 @@ export default function ProductSection({
         <div>
           <h2 className="text-2xl font-black sm:text-4xl">{title}</h2>
           <p className="mt-1 text-xs text-zinc-500 sm:mt-2 sm:text-sm">
-            {/* Every version counts, so this matches the sheet and the admin sync. */}
-            {products.length === 1
+            {groups.length === 1
               ? t("section.countOne")
-              : t("section.count", { count: products.length.toLocaleString() })}
+              : t("section.count", { count: groups.length.toLocaleString() })}
           </p>
         </div>
 

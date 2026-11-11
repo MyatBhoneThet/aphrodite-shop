@@ -1,4 +1,5 @@
 "use client";
+import AssignedSerials from "../components/AssignedSerials";
 
 import { formatCurrency, formatDateTime } from "../lib/format";
 import { useLanguage } from "../lib/language";
@@ -121,10 +122,11 @@ export default function OrdersTable({
                     const product = item.product ?? item.products;
 
                     return (
-                      <p key={item.id} className="text-xs">
+                      <div key={item.id} className="text-xs">
                         {product?.name ?? `Product #${item.product_id}`} ×{" "}
                         {item.quantity}
-                      </p>
+                        <AssignedSerials units={item.allocated_units} />
+                      </div>
                     );
                   })}
                 </div>

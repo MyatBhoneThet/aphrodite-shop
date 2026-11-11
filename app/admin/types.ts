@@ -69,6 +69,7 @@ export type AdminOrderItem = {
   id: string;
   product_id: number;
   quantity: number;
+  allocated_units?: { code: string; serialNumber: string }[];
   unit_price: number;
   product?: Product | null;
   products?: Product | null;

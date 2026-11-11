@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { authHeaders } from "../lib/client-auth";
 import { useLanguage } from "../lib/language";
 import { orderTracking, trackingSteps } from "../lib/order-tracking";
-import { statusBannerHasExpired } from "../lib/order-status-visibility";
+import { orderStatusFeed } from "../lib/order-status-feed";
 import { refundSteps, refundTracking, type RefundStep } from "../lib/refund-tracking";
 import type { TranslationKey } from "../lib/translations";
+import AssignedSerials from "./AssignedSerials";
 
 type HeaderOrder = {
   id: string;
@@ -23,6 +24,7 @@ type HeaderOrder = {
   order_items?: {
     id: string;
     quantity: number;
+    allocated_units?: { code: string; serialNumber: string }[];
     product?: { name?: string | null } | null;
   }[];
 };
@@ -65,14 +67,15 @@ const orderReturnStepKeys: Record<(typeof returnSteps)[number], TranslationKey> 
 };
 
 export default function LastOrderStatusBar({ enabled }: { enabled: boolean }) {
-  const { t, text, language } = useLanguage();
-  const [order, setOrder] = useState<HeaderOrder | null>(null);
-  const [itemReturn, setItemReturn] = useState<HeaderReturn | null>(null);
+  const { language } = useLanguage();
+  const [orders, setOrders] = useState<HeaderOrder[]>([]);
+  const [requests, setRequests] = useState<HeaderReturn[]>([]);
+  const [expanded, setExpanded] = useState(false);
+  const feedId = useId();
 
   useEffect(() => {
     if (!enabled) {
-      queueMicrotask(() => setOrder(null));
-      queueMicrotask(() => setItemReturn(null));
+      queueMicrotask(() => { setOrders([]); setRequests([]); setExpanded(false); });
       return;
     }
 
@@ -85,39 +88,27 @@ export default function LastOrderStatusBar({ enabled }: { enabled: boolean }) {
       loading = true;
       try {
         const headers = authHeaders();
-        const [orderResponse, returnResponse] = await Promise.all([
-          fetch("/api/orders?limit=20", { headers, cache: "no-store", signal: controller.signal }),
+        const loadOrderPages = async () => {
+          const loaded: HeaderOrder[] = [];
+          for (let offset = 0; offset < 1000; offset += 100) {
+            const response = await fetch(`/api/orders?limit=100&offset=${offset}`, { headers, cache: "no-store", signal: controller.signal });
+            if (!response.ok) throw new Error("Unable to refresh order updates");
+            const data = await response.json() as { orders?: HeaderOrder[] };
+            const page = data.orders ?? [];
+            loaded.push(...page);
+            if (page.length < 100) break;
+          }
+          return loaded;
+        };
+        const [recentOrders, returnResponse] = await Promise.all([
+          loadOrderPages(),
           fetch("/api/returns", { headers, cache: "no-store", signal: controller.signal }),
         ]);
-        if (!orderResponse.ok) return;
-        const data = await orderResponse.json() as { orders?: HeaderOrder[] };
-        const recentOrders = data.orders ?? [];
-        const latestOrder = recentOrders[0] ?? null;
-        let latestReturn: HeaderReturn | null = null;
-        if (returnResponse.ok && latestOrder) {
-          const returnData = await returnResponse.json() as { requests?: HeaderReturn[] };
-          const requests = [...(returnData.requests ?? [])].sort(
-            (left, right) => Date.parse(right.created_at) - Date.parse(left.created_at)
-          );
-          latestReturn = requests.find((request) =>
-            !["completed", "declined", "cancelled"].includes(request.status) &&
-            recentOrders.some((order) => order.id === request.order_id)
-          ) ?? requests.find((request) => request.order_id === latestOrder.id) ?? null;
-        }
-        const displayedOrder = latestReturn
-          ? recentOrders.find((candidate) => candidate.id === latestReturn.order_id) ?? latestOrder
-          : latestOrder;
-        // A finished order, cancellation or refund stays for a day, then the bar
-        // goes away. Anything still in progress (including a refund on its way)
-        // stays until it is done.
-        const shownReturn = latestReturn?.order_id === displayedOrder?.id ? latestReturn : null;
-        const expired = statusBannerHasExpired(displayedOrder, shownReturn);
-        if (active && expired) {
-          setOrder(null);
-          setItemReturn(null);
-        } else if (active) {
-          setOrder(displayedOrder);
-          setItemReturn(latestReturn?.order_id === displayedOrder?.id ? latestReturn : null);
+        if (!active) return;
+        setOrders(recentOrders);
+        if (returnResponse.ok) {
+          const data = await returnResponse.json() as { requests?: HeaderReturn[] };
+          if (active) setRequests(data.requests ?? []);
         }
       } catch {
         // The header remains usable when the status request is offline.
@@ -140,13 +131,33 @@ export default function LastOrderStatusBar({ enabled }: { enabled: boolean }) {
     };
   }, [enabled]);
 
-  if (!enabled || !order) return null;
+  const updates = orderStatusFeed(orders, requests);
+  if (!enabled || !updates.length) return null;
+  const shown = expanded ? updates : updates.slice(0, 1);
+  return <section aria-label={language === "my" ? "အော်ဒါအခြေအနေများ" : "Your order updates"}>
+    <div id={feedId} role="region" aria-label="Order processing updates" tabIndex={expanded ? 0 : undefined}
+      className={expanded ? "max-h-[24rem] overflow-y-auto overscroll-contain scroll-smooth focus-visible:outline-2 focus-visible:outline-emerald-500" : undefined}>
+      {shown.map(({ order, itemReturn }, index) => <OrderStatusBanner key={order.id} order={order} itemReturn={itemReturn}
+        controls={index === 0 && updates.length > 1 ? <button type="button" aria-expanded={expanded} aria-controls={feedId} onClick={() => setExpanded(value => !value)}
+          className="shrink-0 rounded-full border border-white/30 px-3 py-1 text-[11px] font-bold text-white transition hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:text-xs">
+          {expanded ? (language === "my" ? "လျှော့ပြရန်" : "Show fewer orders") : (language === "my" ? `အခြားအော်ဒါများ (${updates.length - 1}) ↓` : `See more orders (${updates.length - 1}) ↓`)}
+        </button> : null} />)}
+    </div>
+  </section>;
+}
+
+function OrderStatusBanner({ order, itemReturn, controls }: { order: HeaderOrder; itemReturn: HeaderReturn | null; controls: ReactNode }) {
+  const { t, text, language } = useLanguage();
+  const cancelled = order.status === "cancelled";
+  const orderHref = `/orders/${encodeURIComponent(order.id)}`;
+
 
   const firstItem = order.order_items?.[0];
+  const serials = order.order_items?.flatMap(item => item.allocated_units ?? []);
   const productName = firstItem?.product?.name?.trim() || `Order #${order.id.slice(0, 8).toUpperCase()}`;
   const extraItems = Math.max(0, (order.order_items?.length ?? 0) - 1);
   const returnStatus = order.return_request_status ?? "none";
-  const isReturn = Boolean(itemReturn) || order.status === "returned" || returnStatus !== "none";
+  const isReturn = !cancelled && (Boolean(itemReturn) || order.status === "returned" || returnStatus !== "none");
 
   if (isReturn) {
     const itemTracking = itemReturn ? refundTracking(itemReturn) : null;
@@ -164,8 +175,7 @@ export default function LastOrderStatusBar({ enabled }: { enabled: boolean }) {
     const progress = returnStep < 0 ? 0 : ((returnStep + 1) / visibleSteps.length) * 100;
 
     return (
-      <Link
-        href={itemReturn ? "/returns" : "/orders"}
+      <article
         className="order-status-banner group relative block overflow-hidden border-t border-emerald-200 bg-gradient-to-r from-emerald-950 via-teal-900 to-emerald-950 text-white focus-visible:outline-offset-[-3px]"
         aria-label={`${t("refund.title")}: ${productName}. ${statusLabel}`}
       >
@@ -174,13 +184,14 @@ export default function LastOrderStatusBar({ enabled }: { enabled: boolean }) {
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-emerald-300/50 bg-emerald-400/15 text-xl shadow-[0_0_24px_rgba(52,211,153,0.35)] motion-safe:animate-pulse" aria-hidden="true">↩</span>
             <div className="min-w-0">
               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">{t("refund.title")}</p>
-              <p className="line-clamp-2 text-sm font-black sm:text-base lg:line-clamp-1">{productName}{firstItem && firstItem.quantity > 1 ? ` × ${firstItem.quantity}` : ""}</p>
+              <p className="line-clamp-2 text-sm font-black sm:text-base lg:line-clamp-1"><Link href={orderHref} className="hover:underline">{productName}{firstItem && firstItem.quantity > 1 ? ` × ${firstItem.quantity}` : ""}</Link></p>
+              <AssignedSerials units={serials} className="mt-1 space-y-0.5 text-[10px] text-emerald-200" />
               {extraItems > 0 && <p className="text-[11px] text-emerald-200">{language === "my" ? `နောက်ထပ် ${extraItems} မျိုး` : `+${extraItems} more product${extraItems === 1 ? "" : "s"}`}</p>}
             </div>
             <div className="col-span-2 min-w-0 lg:col-span-1">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                 <p className="min-w-0 text-xs font-bold text-emerald-100 sm:truncate sm:text-sm" role="status" aria-live="polite">{statusLabel}</p>
-                <span className="shrink-0 text-[11px] font-bold text-emerald-200 transition group-hover:translate-x-1 sm:text-xs">{t("refund.view")} →</span>
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-1"><Link href={orderHref} className="text-[11px] font-bold text-emerald-200 hover:underline sm:text-xs">{t("refund.view")} →</Link></div>
               </div>
               {returnStep >= 0 && (
                 <>
@@ -197,51 +208,61 @@ export default function LastOrderStatusBar({ enabled }: { enabled: boolean }) {
                   </ol>
                 </>
               )}
+              {controls && <div className="mt-1 flex justify-end">{controls}</div>}
             </div>
           </div>
         </div>
-      </Link>
+      </article>
     );
   }
 
   const tracking = orderTracking(order);
-  const statusLabel = tracking.stage ? t(`tracking.${tracking.stage}`) : tracking.label;
+  const statusLabel = tracking.stage ? t(`tracking.${tracking.stage}`) : text(tracking.label);
+  const colours = cancelled ? {
+    surface: "border-red-200 from-red-950 via-rose-900 to-red-950",
+    icon: "border-red-300/50 bg-red-400/15", title: "text-red-300", muted: "text-red-200", body: "text-red-100",
+  } : {
+    surface: "border-emerald-200 from-emerald-950 via-teal-900 to-emerald-950",
+    icon: "border-emerald-300/50 bg-emerald-400/15", title: "text-emerald-300", muted: "text-emerald-200", body: "text-emerald-100",
+  };
   const progress = tracking.step < 0 ? 0 : ((tracking.step + 1) / trackingSteps.length) * 100;
 
   return (
-    <Link
-      href="/orders"
-      className="order-status-banner group relative block overflow-hidden border-t border-emerald-200 bg-gradient-to-r from-emerald-950 via-teal-900 to-emerald-950 text-white focus-visible:outline-offset-[-3px]"
-      aria-label={`${text("Last order process")}: ${productName}. ${statusLabel}`}
+    <article
+      className={`order-status-banner group relative block overflow-hidden border-t bg-gradient-to-r text-white focus-visible:outline-offset-[-3px] ${colours.surface}`}
+      aria-label={`${text("Last order process")} · #${order.id.slice(0, 8).toUpperCase()}: ${productName}. ${statusLabel}`}
     >
       <div className="relative z-10 mx-auto max-w-[92rem] px-4 py-3 lg:px-6">
         <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 lg:grid-cols-[auto_18rem_minmax(0,1fr)] lg:gap-x-6 lg:gap-y-0">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-emerald-300/50 bg-emerald-400/15 text-xl shadow-[0_0_24px_rgba(52,211,153,0.35)] motion-safe:animate-pulse" aria-hidden="true">
-            🚚
+          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-xl ${colours.icon}`} aria-hidden="true">
+            {cancelled ? "✕" : "🚚"}
           </span>
 
           <div className="min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">
-              {text("Last order process")}
+            <p className={`text-[10px] font-black uppercase tracking-[0.2em] ${colours.title}`}>
+              {text("Last order process")} · #{order.id.slice(0, 8).toUpperCase()}
             </p>
             <p className="line-clamp-2 text-sm font-black sm:text-base lg:line-clamp-1">
-              {productName}{firstItem && firstItem.quantity > 1 ? ` × ${firstItem.quantity}` : ""}
+              <Link href={orderHref} className="hover:underline">{productName}{firstItem && firstItem.quantity > 1 ? ` × ${firstItem.quantity}` : ""}</Link>
             </p>
+            <AssignedSerials units={serials} className={`mt-1 space-y-0.5 text-[10px] ${colours.muted}`} />
             {extraItems > 0 && (
-              <p className="text-[11px] text-emerald-200">
+              <p className={`text-[11px] ${colours.muted}`}>
                 {language === "my" ? `နောက်ထပ် ${extraItems} မျိုး` : `+${extraItems} more product${extraItems === 1 ? "" : "s"}`}
               </p>
             )}
           </div>
 
           <div className="col-span-2 min-w-0 lg:col-span-1">
-            <div className="flex items-center justify-between gap-3">
-              <p className="min-w-0 text-xs font-bold text-emerald-100 sm:truncate sm:text-sm" role="status" aria-live="polite">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <p className={`min-w-0 text-xs font-bold sm:truncate sm:text-sm ${colours.body}`} role="status" aria-live="polite">
                 {statusLabel}
               </p>
-              <span className="shrink-0 text-[11px] font-bold text-emerald-200 transition group-hover:translate-x-1 sm:text-xs">
-                {text("View tracking")} →
-              </span>
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-1">
+                <Link href={orderHref} className={`text-[11px] font-bold hover:underline sm:text-xs ${colours.muted}`}>
+                  {text("View tracking")} →
+                </Link>
+              </div>
             </div>
 
             {tracking.step >= 0 && (
@@ -267,9 +288,10 @@ export default function LastOrderStatusBar({ enabled }: { enabled: boolean }) {
                 </ol>
               </>
             )}
+            {controls && <div className="mt-1 flex justify-end">{controls}</div>}
           </div>
         </div>
       </div>
-    </Link>
+    </article>
   );
 }

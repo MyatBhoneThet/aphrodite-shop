@@ -1,4 +1,5 @@
 import type { Language } from "./translations";
+import { keepTechnicalTermsEnglish } from "./technical-terms";
 
 // Display-only translations: catalog identifiers and submitted values stay unchanged.
 export const storefrontBurmese: Record<string, string> = {
@@ -442,12 +443,36 @@ export const storefrontBurmese: Record<string, string> = {
   "Upload your transfer slip before placing the order.": "အော်ဒါမတင်မီ ငွေလွှဲပြေစာကို တင်ပါ။",
   "Attach your transfer slip above to place the order.": "အော်ဒါတင်ရန် အပေါ်တွင် ငွေလွှဲပြေစာကို တင်ပါ။",
   "Your transfer slip": "သင့်ငွေလွှဲပြေစာ",
+  // Delivery-location welcome shown immediately after login.
+  "Where are we delivering?": "မည်သည့်နေရာသို့ ပို့ဆောင်ရမည်နည်း။",
+  "We deliver within Myanmar only. Allowing location does two things: it checks whether your device appears to be in Myanmar, and it shares that one position with authorised store administrators so they can review your orders.": "ကျွန်ုပ်တို့သည် မြန်မာနိုင်ငံအတွင်းသာ ပို့ဆောင်ပါသည်။ တည်နေရာကို ခွင့်ပြုခြင်းဖြင့် သင့်စက်သည် မြန်မာနိုင်ငံအတွင်း ရှိမရှိ စစ်ဆေးပြီး သင့်အော်ဒါများကို စစ်ဆေးနိုင်ရန် ထိုတည်နေရာတစ်ခုကို ခွင့်ပြုထားသော ဆိုင်စီမံခန့်ခွဲသူများထံ မျှဝေပါသည်။",
+  "One position is saved for up to 30 days, with the accuracy and time your device reports. There is no continuous tracking, and it does not change your delivery address. You can remove it at any time on the": "တည်နေရာတစ်ခုကို သင့်စက်က ဖော်ပြသော တိကျမှုနှင့် အချိန်တို့နှင့်အတူ ရက် ၃၀ အထိ သိမ်းဆည်းထားပါသည်။ ဆက်တိုက် ခြေရာခံခြင်း မရှိသလို သင့်ပို့ဆောင်ရေးလိပ်စာကိုလည်း မပြောင်းလဲပါ။ အချိန်မရွေး ဖယ်ရှားနိုင်သည့်နေရာမှာ",
+  "Location page": "တည်နေရာ စာမျက်နှာ",
+  "Sharing is optional. You can continue without it.": "တည်နေရာမျှဝေခြင်းမှာ ဆန္ဒအလျောက်ဖြစ်ပြီး မမျှဝေဘဲ ဆက်လက်အသုံးပြုနိုင်ပါသည်။",
+  "Checking and sharing…": "စစ်ဆေးပြီး မျှဝေနေသည်…",
+  "Allow and share my location": "ကျွန်ုပ်၏တည်နေရာကို ခွင့်ပြုပြီး မျှဝေရန်",
+  "Continue without sharing": "တည်နေရာမမျှဝေဘဲ ဆက်ရန်",
+  "Continue to shop": "ဆိုင်သို့ ဆက်သွားရန်",
+  "Shared. Remove it any time on the": "တည်နေရာ မျှဝေပြီးပါပြီ။ အချိန်မရွေး ဖယ်ရှားနိုင်သည့်နေရာမှာ",
+  "How do I place my delivery pin?": "ပို့ဆောင်ရန် မြေပုံအမှတ်ကို မည်သို့ သတ်မှတ်ရမည်နည်း။",
+  "Location is optional and cannot prove identity. Approximate boundaries:": "တည်နေရာမျှဝေခြင်းမှာ မဖြစ်မနေမဟုတ်သလို မည်သူမည်ဝါဖြစ်ကြောင်း သက်သေမပြနိုင်ပါ။ ခန့်မှန်းနယ်နိမိတ် ရင်းမြစ်များ:",
+  "Border or island locations may need manual confirmation.": "နယ်စပ် သို့မဟုတ် ကျွန်းဒေသများကို ကိုယ်တိုင် အတည်ပြုရန် လိုနိုင်ပါသည်။",
+  "Location needs HTTPS (or localhost) and a supported browser. You can still enter a Myanmar delivery address at checkout.": "တည်နေရာအသုံးပြုရန် HTTPS (သို့မဟုတ် localhost) နှင့် ပံ့ပိုးထားသော browser လိုအပ်ပါသည်။ ငွေရှင်းချိန်တွင် မြန်မာနိုင်ငံရှိ ပို့ဆောင်ရေးလိပ်စာကို ဆက်လက်ထည့်နိုင်ပါသည်။",
+  "Your location was shared with the store. It is too approximate to confirm the country, so please use your written Myanmar delivery address at checkout.": "သင့်တည်နေရာကို ဆိုင်နှင့် မျှဝေပြီးပါပြီ။ နိုင်ငံကို အတည်ပြုရန် တိကျမှု မလုံလောက်သဖြင့် ငွေရှင်းချိန်တွင် မြန်မာနိုင်ငံရှိ လိပ်စာအပြည့်အစုံကို အသုံးပြုပါ။",
+  "The location is too approximate to check, and it could not be shared. Please use your written Myanmar delivery address at checkout.": "တည်နေရာသည် စစ်ဆေးရန် တိကျမှု မလုံလောက်သလို မျှဝေ၍လည်း မရပါ။ ငွေရှင်းချိန်တွင် မြန်မာနိုင်ငံရှိ လိပ်စာအပြည့်အစုံကို အသုံးပြုပါ။",
+  "Your device appears to be in Myanmar. Courier availability still depends on your delivery address.": "သင့်စက်သည် မြန်မာနိုင်ငံအတွင်း ရှိနေပုံရပါသည်။ ပို့ဆောင်နိုင်မှုသည် သင့်ပို့ဆောင်ရေးလိပ်စာပေါ်တွင် မူတည်နေဆဲ ဖြစ်ပါသည်။",
+  "Your device appears to be outside Myanmar. We do not ship internationally, but you can order for a recipient with a Myanmar delivery address.": "သင့်စက်သည် မြန်မာနိုင်ငံပြင်ပတွင် ရှိနေပုံရပါသည်။ နိုင်ငံတကာသို့ မပို့ဆောင်သော်လည်း မြန်မာနိုင်ငံရှိ လက်ခံသူ၏လိပ်စာဖြင့် မှာယူနိုင်ပါသည်။",
+  "Your location has been shared with authorised store administrators.": "သင့်တည်နေရာကို ခွင့်ပြုထားသော ဆိုင်စီမံခန့်ခွဲသူများနှင့် မျှဝေပြီးပါပြီ။",
+  "It could not be shared with the store just now — you can try again from the Location page.": "ယခုအချိန်တွင် ဆိုင်နှင့် မျှဝေ၍ မရပါ။ တည်နေရာစာမျက်နှာမှ ထပ်မံကြိုးစားနိုင်ပါသည်။",
+  "Location was not allowed, so nothing was shared. You can enable it in your browser’s site permissions or continue without sharing.": "တည်နေရာခွင့်ပြုချက် မရသဖြင့် မည်သည့်အချက်အလက်မျှ မမျှဝေပါ။ Browser ၏ site permission တွင် ဖွင့်နိုင်သည် သို့မဟုတ် မမျှဝေဘဲ ဆက်နိုင်ပါသည်။",
+  "We could not get your location. Try again, or enter a Myanmar delivery address at checkout.": "သင့်တည်နေရာကို မရရှိနိုင်ပါ။ ထပ်မံကြိုးစားပါ သို့မဟုတ် ငွေရှင်းချိန်တွင် မြန်မာနိုင်ငံရှိ ပို့ဆောင်ရေးလိပ်စာကို ထည့်ပါ။",
+  "GPS could not find your position. You can place the pin manually.": "GPS က သင့်တည်နေရာကို မတွေ့ပါ။ မြေပုံအမှတ်ကို ကိုယ်တိုင် သတ်မှတ်နိုင်ပါသည်။",
 };
 
 export function translateStorefrontText(language: Language, value: string): string {
   if (language === "en") return value;
-  if (storefrontBurmese[value]) return storefrontBurmese[value];
-  if (value.endsWith(" Specifications")) return `${translateStorefrontText(language, value.slice(0, -15))} အသေးစိတ်အချက်အလက်များ`;
+  if (storefrontBurmese[value]) return keepTechnicalTermsEnglish(storefrontBurmese[value], value);
+  if (value.endsWith(" Specifications")) return keepTechnicalTermsEnglish(`${translateStorefrontText(language, value.slice(0, -15))} အသေးစိတ်အချက်အလက်များ`, value);
   const photo = value.match(/^(?:Photo|Product view) (\d+)$/);
   if (photo) return `ပစ္စည်းပုံ ${photo[1]}`;
   return value;

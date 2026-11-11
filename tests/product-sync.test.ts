@@ -6,6 +6,7 @@ vi.mock("../app/lib/google-sheets", async (importOriginal) => {
     ...original,
     fetchProductsSheet: vi.fn(),
     hasGoogleSheetsConfig: vi.fn(() => true),
+    writePendingLaptopUnits: vi.fn(),
   };
 });
 
@@ -17,10 +18,11 @@ vi.mock("../app/lib/supabase", async (importOriginal) => {
     upsertProductionProducts: vi.fn(),
     syncSheetWholesale: vi.fn(),
     archiveRemovedProducts: vi.fn(),
+    selectPendingLaptopSheetUnits: vi.fn(),
   };
 });
 
-import { fetchProductsSheet } from "../app/lib/google-sheets";
+import { fetchProductsSheet, writePendingLaptopUnits } from "../app/lib/google-sheets";
 import {
   autoSyncIntervalMinutes,
   autoSyncStatus,
@@ -32,6 +34,8 @@ import { withSheetStockLock } from "../app/lib/sheet-stock-lock";
 import {
   archiveRemovedProducts,
   previewStockCorrections,
+  syncSheetWholesale,
+  selectPendingLaptopSheetUnits,
   upsertProductionProducts,
 } from "../app/lib/supabase";
 
@@ -54,9 +58,42 @@ beforeEach(() => {
     .mockResolvedValue({ aboveSheet: [], removedFromSheet: [], heldBack: [] });
   vi.mocked(upsertProductionProducts).mockReset().mockResolvedValue([{ id: 14 }] as never);
   vi.mocked(archiveRemovedProducts).mockReset().mockResolvedValue(undefined as never);
+  vi.mocked(selectPendingLaptopSheetUnits).mockReset().mockResolvedValue([]);
+  vi.mocked(writePendingLaptopUnits).mockReset().mockResolvedValue(undefined);
 });
 
 describe("automatic sync", () => {
+  it("retries reserved serial write-backs even when the sheet fingerprint has not changed", async () => {
+    await runAutomaticProductSync();
+    const pending = [{ key: "unit-1", code: "JET444", serialNumber: "MOCK-SN-020", row: 21, quantity: 0, pending_quantity: 0 }];
+    vi.mocked(selectPendingLaptopSheetUnits).mockResolvedValue(pending);
+    vi.mocked(writePendingLaptopUnits).mockRejectedValueOnce(new Error("Sheet unavailable"));
+    expect((await runAutomaticProductSync()).lastResult).toBe("failed");
+    expect((await runAutomaticProductSync()).lastResult).toBe("unchanged");
+    expect(writePendingLaptopUnits).toHaveBeenCalledTimes(2);
+    expect(writePendingLaptopUnits).toHaveBeenLastCalledWith(pending);
+    expect(upsertProductionProducts).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces legacy laptop listings and syncs one-unit wholesale terms without bypassing new-unit deletion guards", async () => {
+    const products = [{ sourceKey: "production:laptops:pool:model-1", sourceSheet: "Laptops", name: "Laptop", unitInventory: true, stockQuantity: 1, sheetWholesale: { unitPrice: 1800000, minQuantity: 1 } }];
+    vi.mocked(fetchProductsSheet).mockResolvedValue(Object.assign({}, sheet(1), { products }) as never);
+    const old = { id: 20, sourceKey: "production:laptops:old-model", sourceSheet: "Laptops", name: "Old laptop", websiteQuantity: 1, sheetQuantity: 0 };
+    const oldTab = { ...old, id: 21, sourceKey: "production:laptops1:old-model", sourceSheet: "Laptops1" };
+    const newUnit = { ...old, id: 22, sourceKey: "production:laptops:pool:missing-model" };
+    const accessory = { ...old, id: 23, sourceKey: "production:accessories:mouse", sourceSheet: "Accessories" };
+    vi.mocked(previewStockCorrections).mockResolvedValue({ aboveSheet: [], removedFromSheet: [], heldBack: [old, oldTab, newUnit, accessory] });
+    const dryRun = await runProductSync({ dryRun: true });
+    expect(dryRun.stockCorrections?.removedFromSheet).toEqual([old, oldTab]);
+    expect(dryRun.stockCorrections?.heldBack).toEqual([newUnit, accessory]);
+    expect(archiveRemovedProducts).not.toHaveBeenCalled();
+    // Fresh preview, as the real read would return.
+    vi.mocked(previewStockCorrections).mockResolvedValue({ aboveSheet: [], removedFromSheet: [], heldBack: [old, oldTab, newUnit, accessory] });
+    await runProductSync({ dryRun: false });
+    expect(archiveRemovedProducts).toHaveBeenCalledWith([old, oldTab]);
+    expect(syncSheetWholesale).toHaveBeenCalledWith([{ source_key: products[0].sourceKey, unit_price: 1800000, min_quantity: 1 }]);
+  });
+
   it("saves the sheet on the first check, then skips the database while the sheet is unchanged", async () => {
     expect((await runAutomaticProductSync()).lastResult).toBe("synced");
     expect((await runAutomaticProductSync()).lastResult).toBe("unchanged");

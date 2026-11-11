@@ -27,37 +27,38 @@ describe("promotion import and timing", () => {
     expect(readSheetPromotion(headers, [1500000, "2026-10-02", "2026-10-01"], 2000000)).toBeNull();
     expect(readSheetPromotion([], [], 2000000)).toBeNull();
   });
-  it("starts inclusively and expires exclusively, without another sync", () => {
+  it("keeps scheduled promotions inactive while the feature is paused", () => {
     const offer = { ...promo, startsAt: now.toISOString(), endsAt: "2026-10-02T00:00:00Z" };
     expect(activePromotion(2000000, offer, new Date(now.getTime()-1))).toBeNull();
-    expect(activePromotion(2000000, offer, now)?.price).toBe(1500000);
+    expect(activePromotion(2000000, offer, now)).toBeNull();
     expect(activePromotion(2000000, offer, new Date(offer.endsAt))).toBeNull();
     expect(activePromotion(2000000, { ...offer, endsAt: "invalid" }, now)).toBeNull();
   });
 });
 
 describe("promotion pricing", () => {
-  it("charges retail customers the sale price and retains the regular price", () => {
-    expect(priceLine({ retailPrice: 2000000, promotion: promo, quantity: 2, tiers: [], now })).toMatchObject({ unitPrice: 1500000, retailUnitPrice: 2000000, lineTotal: 3000000, savings: 1000000, promotional: true, tierId: null });
+  it("charges retail while stored promotion prices are paused", () => {
+    expect(priceLine({ retailPrice: 2000000, promotion: promo, quantity: 2, tiers: [], now })).toMatchObject({ unitPrice: 2000000, retailUnitPrice: 2000000, lineTotal: 4000000, savings: 0, promotional: false, tierId: null });
   });
-  it("chooses the lower eligible price without stacking", () => {
+  it("keeps wholesale pricing active while promotions are paused", () => {
     const quote = (unit_price: number) => priceLine({ retailPrice: 2000000, promotion: promo, quantity: 3, tiers: [{ ...tier, unit_price }], now });
-    expect(quote(1800000)).toMatchObject({ unitPrice: 1500000, promotional: true, tierId: null, priceListId: null });
+    expect(quote(1800000)).toMatchObject({ unitPrice: 1800000, promotional: false, tierId: "tier", priceListId: "list" });
     expect(quote(1400000)).toMatchObject({ unitPrice: 1400000, promotional: false, tierId: "tier" });
     expect(quote(1500000)).toMatchObject({ unitPrice: 1500000, promotional: false, tierId: "tier" });
   });
   it("calculates percentage wholesale bands from regular retail", () => {
-    expect(priceLine({ retailPrice: 2000000, promotion: promo, quantity: 3, tiers: [], productId: 1, percentBands: [{ id: "band", price_list_id: "list", product_id: null, min_quantity: 3, discount_percent: 10, is_active: true, effective_from: null, effective_to: null }], now }).unitPrice).toBe(1500000);
+    expect(priceLine({ retailPrice: 2000000, promotion: promo, quantity: 3, tiers: [], productId: 1, percentBands: [{ id: "band", price_list_id: "list", product_id: null, min_quantity: 3, discount_percent: 10, is_active: true, effective_from: null, effective_to: null }], now }).unitPrice).toBe(1800000);
   });
-  it("does not suggest a higher next-tier price", () => {
-    expect(priceLine({ retailPrice: 2000000, promotion: promo, quantity: 1, tiers: [tier], now }).nextTier).toBeNull();
+  it("continues to suggest wholesale tiers below retail", () => {
+    expect(priceLine({ retailPrice: 2000000, promotion: promo, quantity: 1, tiers: [tier], now }).nextTier?.unitPrice).toBe(1800000);
     expect(priceLine({ retailPrice: 2000000, promotion: promo, quantity: 1, tiers: [{ ...tier, unit_price: 1400000 }], now }).nextTier?.unitPrice).toBe(1400000);
   });
-  it("uses the matching variant's regular price and discounts in filters", () => {
+  it("uses regular prices in variant cards and filters while promotions are paused", () => {
     const a = product(1, 2000000, promo), b = product(2, 1800000);
-    expect(effectiveProductPrice(a)).toBe(1500000);
-    expect(variantOptions([a,b])[0]).toMatchObject({ price: 1500000, regularPrice: 2000000 });
-    expect(filterAndSortProducts([b,a], { ...EMPTY_PRODUCT_FILTERS, maxPrice: "1600000", sort: "price-asc" }).map(p=>p.id)).toEqual([1]);
+    expect(effectiveProductPrice(a)).toBe(2000000);
+    expect(variantOptions([a,b])[0]).toMatchObject({ price: 2000000 });
+    expect(variantOptions([a,b])[0]).not.toHaveProperty("regularPrice");
+    expect(filterAndSortProducts([b,a], { ...EMPTY_PRODUCT_FILTERS, maxPrice: "1600000", sort: "price-asc" }).map(p=>p.id)).toEqual([]);
     expect(discountPercent(2000000, 1500000)).toBe(25);
     expect(discountPercent(1999, 1499)).toBe(25);
   });

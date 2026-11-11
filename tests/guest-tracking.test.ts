@@ -109,6 +109,12 @@ describe("what a signed-out caller is shown", () => {
 
   const view = guestTrackingView(order);
 
+  it("shows only the assigned code/SN fields after the order/phone lookup", () => {
+    const tracked = guestTrackingView({ ...order, order_items: [{ quantity: 1, allocated_units: [{ key: "private-unit-key", code: "JET444", serialNumber: "MOCK-SN-020", row: 21, quantity: 1 }] }] } as OrderRow);
+    expect(tracked.assignedUnits).toEqual([{ code: "JET444", serialNumber: "MOCK-SN-020" }]);
+    expect(JSON.stringify(tracked)).not.toContain("private-unit-key");
+  });
+
   it("answers the question that was asked", () => {
     expect(view.code).toBe("cbf22014");
     expect(view.status).toBe("shipped");

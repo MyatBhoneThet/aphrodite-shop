@@ -234,6 +234,7 @@ export async function getInvoice(user: CurrentUser, orderId: string) {
         name: item.products?.name ?? `Product #${item.product_id}`,
         quantity: item.quantity,
         unit_price: item.unit_price,
+        ...(item.allocated_units?.length ? { allocated_units: item.allocated_units } : {}),
       })),
     },
     // A proforma asks for payment, so it carries the bank details.

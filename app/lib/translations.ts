@@ -1,3 +1,5 @@
+import { keepTechnicalTermsEnglish } from "./technical-terms";
+
 export type Language = "en" | "my";
 
 /**
@@ -880,7 +882,8 @@ export function translate(
   const entry = translations[key];
   if (!entry) return String(key);
 
-  return entry[language].replace(/\{(\w+)\}/g, (match, name: string) =>
+  const result = entry[language].replace(/\{(\w+)\}/g, (match, name: string) =>
     name in vars ? String(vars[name]) : match
   );
+  return language === "my" ? keepTechnicalTermsEnglish(result, entry.en) : result;
 }

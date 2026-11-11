@@ -1,4 +1,5 @@
 "use client";
+import AssignedSerials from "../components/AssignedSerials";
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -182,6 +183,7 @@ function TrackingResult({
       {tracking.statusDetail && (
         <p className="mt-2 text-sm text-zinc-600">{tracking.statusDetail}</p>
       )}
+      <AssignedSerials units={tracking.assignedUnits} />
 
       {/* Progress rail */}
       {progress.step >= 0 && (

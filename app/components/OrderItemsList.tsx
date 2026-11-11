@@ -9,6 +9,7 @@ export type OrderLine = {
   product_id: number;
   quantity: number;
   unit_price: number;
+  allocated_units?: { code: string; serialNumber: string }[];
   product?: {
     name: string;
     image?: string;
@@ -71,6 +72,11 @@ export default function OrderItemsList({ items }: { items: OrderLine[] }) {
                 <span className="min-w-0">
                   <span className="line-clamp-2 text-base font-medium text-zinc-900">{name}</span>
                   {extra && <span className="mt-1 block truncate text-sm text-zinc-400">{extra}</span>}
+                  {item.allocated_units?.map(unit => (
+                    <span key={`${unit.code}:${unit.serialNumber}`} className="mt-1 block text-xs text-zinc-500">
+                      {unit.code} · S/N: {unit.serialNumber}
+                    </span>
+                  ))}
                   <span className="mt-1 block text-sm text-zinc-500 sm:hidden">
                     {formatCurrency(item.unit_price)} · Qty: {item.quantity}
                   </span>

@@ -24,6 +24,7 @@ type ReceiptOrder = {
     quantity: number;
     unit_price: number;
     product_id: number;
+    allocated_units?: { code: string; serialNumber: string }[];
     product?: { name: string } | null;
   }[];
 };
@@ -85,7 +86,7 @@ export default function ReceiptPage() {
         </section>
         <div className="my-8 overflow-x-auto" tabIndex={0} role="region" aria-label="Receipt items"><table className="w-full min-w-[480px] print:min-w-0 border-collapse text-left text-sm">
           <thead><tr className="border-b text-xs uppercase tracking-wider text-zinc-400"><th className="py-3">Item</th><th className="py-3 text-center">Qty</th><th className="py-3 text-right">Price</th><th className="py-3 text-right">Amount</th></tr></thead>
-          <tbody>{(order.order_items ?? []).map((item) => <tr key={item.id} className="border-b"><td className="py-4 font-semibold">{item.product?.name ?? `Product #${item.product_id}`}</td><td className="py-4 text-center">{item.quantity}</td><td className="py-4 text-right">{formatCurrency(item.unit_price)}</td><td className="py-4 text-right font-semibold">{formatCurrency(item.unit_price * item.quantity)}</td></tr>)}</tbody>
+          <tbody>{(order.order_items ?? []).map((item) => <tr key={item.id} className="border-b"><td className="py-4 font-semibold">{item.product?.name ?? `Product #${item.product_id}`}{item.allocated_units?.map(unit => <span key={unit.code} className="block text-xs font-normal text-zinc-500">{unit.code} · S/N: {unit.serialNumber}</span>)}</td><td className="py-4 text-center">{item.quantity}</td><td className="py-4 text-right">{formatCurrency(item.unit_price)}</td><td className="py-4 text-right font-semibold">{formatCurrency(item.unit_price * item.quantity)}</td></tr>)}</tbody>
         </table></div>
         <div className="ml-auto max-w-sm rounded-2xl bg-zinc-950 p-6 text-white"><div className="flex flex-wrap justify-between gap-2 text-xl font-black"><span>Total</span><span>{formatCurrency(order.total_amount)}</span></div><div className="mt-3 flex flex-wrap justify-between gap-2 text-sm text-zinc-300"><span>Payment</span><span>Cash on delivery</span></div><div className="mt-1 flex flex-wrap justify-between gap-2 text-sm text-zinc-300"><span>Payment status</span><span className="capitalize">{order.payment_status}</span></div></div>
         <footer className="mt-10 border-t pt-6 text-xs leading-5 text-zinc-500"><p>This document confirms the order. For cash-on-delivery orders it becomes proof of payment only after the payment status is marked collected.</p><p className="mt-2">Eligible wrong, damaged, or defective items may be requested for return within 7 days after delivery. See the return policy for the complete inspection, pickup, and refund process.</p></footer>

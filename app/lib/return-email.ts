@@ -1,4 +1,5 @@
 import { emailFooterHtml } from "./email-footer";
+import { assignedSerials, serialDescription } from "./serial-allocations";
 import {
   isUnreachableFromEmail,
   publicSiteUrl,
@@ -126,6 +127,7 @@ export function returnStatusEmailContent(
   const details = [
     ["Order", `#${shortCode(request.order_id)}`],
     ["Item", `${product} × ${request.quantity}`],
+    ...assignedSerials(request.order_items?.allocated_units).map(unit => ["Assigned laptop", serialDescription(unit)]),
     ["Resolution", label(request.resolution_granted ?? request.preferred_resolution)],
     ["Refund amount", formatMoney(request.refund_amount)],
     ["Expected refund", formatDate(request.expected_refund_at)],

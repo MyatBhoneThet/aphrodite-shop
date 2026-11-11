@@ -1,5 +1,6 @@
 import { translations, type Language } from "./translations";
 import { storefrontBurmese } from "./storefront-translations";
+import { keepTechnicalTermsEnglish } from "./technical-terms";
 
 export const adminBurmese: Record<string, string> = {
   // Confirmation dialogs for risky admin actions. New lines: please have a native speaker review them.
@@ -503,7 +504,7 @@ const dictionary = new Map(Object.entries({
 export function translateAdminText(language: Language, value: string): string {
   if (language === "en") return value;
   const translated = dictionary.get(normalize(value));
-  if (translated) return translated;
+  if (translated) return keepTechnicalTermsEnglish(translated, value);
   const count = value.match(/^(\d+) (pending|out of stock|waiting)$/);
   if (count) return `${translateAdminText(language, count[2])} ${count[1]} ခု`;
   return value;

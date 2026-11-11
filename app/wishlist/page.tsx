@@ -237,7 +237,7 @@ export default function WishlistPage() {
                 </Link>
 
                 <div className="mt-1 sm:mt-2"><ProductPrice price={effectiveProductPrice(item.product)} regularPrice={item.product.price} compactMobile /></div>
-                <DeliveryEstimateBadge estimate={deliveryEstimate} compact mobileDense />
+                <DeliveryEstimateBadge estimate={deliveryEstimate} product={item.product} compact mobileDense />
 
                 <p
                   className={`mt-1 text-xs font-bold ${

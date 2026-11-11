@@ -745,12 +745,20 @@ export async function getProductForViewer(
   id: number,
   quantity = 1
 ) {
-  const product =
+  let product =
     viewer?.role === "admin" || viewer?.role === "staff"
       ? await getProductByIdService(id)
       : await getProductById(id);
 
   if (!product) return null;
+
+  const replacement = Number(product.fullSpecs?.replacementProductId);
+  if (Number.isInteger(replacement) && replacement > 0 && replacement !== id) {
+    id = replacement;
+    product = viewer?.role === "admin" || viewer?.role === "staff"
+      ? await getProductByIdService(id) : await getProductById(id);
+    if (!product) return null;
+  }
 
   const context = await wholesaleContext(viewer, [id]);
   const tiers = context?.tiersByProduct.get(id) ?? [];
@@ -1973,7 +1981,7 @@ export async function createOrder(
 
   // Single transaction: order + items + inventory deduction + cart clear all
   // succeed or all roll back (see checkout_order in supabase/schema.sql).
-  let result: { order_id: string };
+  let result: Awaited<ReturnType<typeof checkoutOrderRpc>>;
 
   try {
     result = await checkoutOrderRpc({
@@ -2056,7 +2064,8 @@ export async function createOrder(
   if (hasGoogleSheetsConfig()) {
     const sheetItems = lines.flatMap((line) => {
       const sourceKey = productsById.get(line.product_id)?.source_key;
-      return sourceKey ? [{ sourceKey, quantity: line.quantity }] : [];
+      const units = result.allocations?.find(allocation => allocation.product_id === line.product_id)?.units;
+      return sourceKey ? [{ sourceKey, quantity: line.quantity, units }] : [];
     });
 
     if (sheetItems.length > 0) {
@@ -3862,7 +3871,10 @@ async function orderLineRestockItems(order: OrderRow): Promise<SheetRestockItem[
     quantityByKey.set(sourceKey, (quantityByKey.get(sourceKey) ?? 0) + line.quantity);
   }
 
-  return [...quantityByKey].map(([sourceKey, quantity]) => ({ sourceKey, quantity }));
+  return [...quantityByKey].map(([sourceKey, quantity]) => {
+    const units = lines.filter(line => sourceKeyById.get(line.product_id) === sourceKey).flatMap(line => line.allocated_units ?? []);
+    return { sourceKey, quantity, ...(units.length ? { units } : {}) };
+  });
 }
 
 /**
@@ -3896,7 +3908,9 @@ async function restoreSheetStockLocked(actorId: string, order: OrderRow) {
     const deducted = events.find((event) => event.action === SHEET_STOCK_DEDUCTED);
     let items: SheetRestockItem[];
 
-    if (deducted) {
+    if (order.order_items?.some(line => (line.allocated_units?.length ?? 0) > 0)) {
+      items = await orderLineRestockItems(order);
+    } else if (deducted) {
       items = readSheetDeductionRecord(deducted.new_data);
     } else if (events.some((event) => event.action === SHEET_WRITE_BACK_FAILED)) {
       // Checkout's deduction never reached the sheet. Adding units back now

@@ -81,7 +81,7 @@ export default function ProductCard({ product, model, options = [], deliveryEsti
             />
           </div>
           <div className={compactMobile ? "hidden sm:block" : undefined}>
-            <DeliveryEstimateBadge estimate={deliveryEstimate} compact />
+            <DeliveryEstimateBadge estimate={deliveryEstimate} product={product} compact />
           </div>
         </div>
       </Link>

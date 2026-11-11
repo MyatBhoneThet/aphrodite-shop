@@ -17,7 +17,7 @@ type Invoice = {
   order: {
     id: string; created_at: string; po_number: string | null; total_amount: number; payment_method: string | null;
     shipping_name: string; shipping_phone: string; shipping_address: string;
-    items: { name: string; quantity: number; unit_price: number }[];
+    items: { name: string; quantity: number; unit_price: number; allocated_units?: { code: string; serialNumber: string }[] }[];
   };
   pay_to: { label: string; holder: string; account_number: string | null }[];
 };
@@ -103,7 +103,7 @@ export default function InvoicePage() {
             <tbody>
               {order.items.map((item, index) => (
                 <tr key={`${item.name}-${index}`} className="border-b align-top">
-                  <td className="py-3 pr-2 font-semibold">{item.name}<span className="block text-[11px] font-normal text-zinc-500 sm:hidden print:hidden">{formatCurrency(item.unit_price)} each</span></td>
+                  <td className="py-3 pr-2 font-semibold">{item.name}{item.allocated_units?.map(unit => <span key={unit.code} className="block text-xs font-normal text-zinc-500">{unit.code} · S/N: {unit.serialNumber}</span>)}<span className="block text-[11px] font-normal text-zinc-500 sm:hidden print:hidden">{formatCurrency(item.unit_price)} each</span></td>
                   <td className="py-3 text-center">{item.quantity}</td>
                   <td className="hidden py-3 text-right sm:table-cell print:table-cell">{formatCurrency(item.unit_price)}</td>
                   <td className="py-3 pl-2 text-right">{formatCurrency(item.unit_price * item.quantity)}</td>

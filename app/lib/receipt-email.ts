@@ -9,6 +9,7 @@ import {
 } from "./mailer";
 import type { OrderRow } from "./supabase";
 import { translate } from "./translations";
+import { assignedSerials, serialDescription } from "./serial-allocations";
 
 /**
  * Customer order emails: "Order received" at checkout, and a full paid receipt
@@ -279,7 +280,7 @@ function cancellationRefundSentContent(
 }
 
 /** Subject, HTML and plain-text body for one order email. */
-export function orderEmailContent(
+function baseOrderEmailContent(
   order: OrderRow,
   kind: OrderEmailKind,
   receiptNumber?: string,
@@ -434,6 +435,29 @@ export function orderEmailContent(
   ].join("\n");
 
   return { subject, html, text };
+}
+
+/** Every lifecycle email carries the same persisted serial assignments. */
+export function orderEmailContent(
+  order: OrderRow,
+  kind: OrderEmailKind,
+  receiptNumber?: string,
+  env: NodeJS.ProcessEnv = process.env,
+  attempt?: DeliveryAttemptInfo,
+  progressStage?: OrderProgressEmailStage
+): OrderEmailContent {
+  const content = baseOrderEmailContent(order, kind, receiptNumber, env, attempt, progressStage);
+  const serialRows: [string, string][] = (order.order_items ?? []).flatMap(item =>
+    assignedSerials(item.allocated_units).map(unit => [item.products?.name ?? `Product #${item.product_id}`, serialDescription(unit)] as [string, string])
+  );
+  if (!serialRows.length) return content;
+  const footer = emailFooterHtml();
+  const serialHtml = `<div style="padding:0 24px 24px">${detailSectionHtml("Assigned laptops — Code / S/N", serialRows)}</div>`;
+  return {
+    ...content,
+    html: content.html.replace(footer, serialHtml + footer),
+    text: content.text + "\n" + detailSectionText("Assigned laptops — Code / S/N", serialRows).join("\n"),
+  };
 }
 
 const EMAIL_TIMELINE_STAGES = [

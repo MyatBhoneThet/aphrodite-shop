@@ -22,20 +22,20 @@ const product: Product = {
 };
 
 describe("product price-alert email", () => {
-  it("shows the selected product's promotion and links back to it", () => {
+  it("shows the retail price and omits paused promotion pricing", () => {
     const content = productPriceAlertEmailContent(
       product,
       product.price,
       { PUBLIC_SITE_URL: "https://shop.example.com" } as unknown as NodeJS.ProcessEnv
     );
 
-    expect(content.subject).toContain("Promotion: Dell Latitude 3420");
+    expect(content.subject).toContain("Price drop: Dell Latitude 3420");
     expect(content.html).toContain("MMK 668,660");
-    expect(content.html).toContain("MMK 600,000");
-    expect(content.html).toContain("Save MMK 68,660 (10%)");
-    expect(content.html).toContain("အထူးလျှော့ဈေး");
+    expect(content.html).not.toContain("MMK 600,000");
+    expect(content.html).not.toContain("Save MMK 68,660 (10%)");
+    expect(content.html).not.toContain("အထူးလျှော့ဈေး");
     expect(content.html).toContain("https://shop.example.com/products/14");
-    expect(content.text).toContain("Current price: MMK 600,000");
+    expect(content.text).toContain("Current price: MMK 668,660");
   });
 
   it("escapes product data in the HTML message", () => {

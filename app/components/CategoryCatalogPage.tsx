@@ -21,6 +21,7 @@ import ProductFilters from "./ProductFilters";
 import ProductSection from "./ProductSection";
 import { useLanguage } from "../lib/language";
 import { activePromotion } from "../lib/promotions";
+import { groupProductVariants } from "../lib/product-variants";
 import { useDeliveryEstimate } from "../lib/useDeliveryEstimate";
 
 type Props = {
@@ -184,7 +185,7 @@ export default function CategoryCatalogPage({ section }: Props) {
     }
     return { promotionProducts, regularProducts };
   }, [visibleProducts, promotionTime]);
-  const resultCount = visibleProducts.length;
+  const resultCount = groupProductVariants(visibleProducts).length;
   const sectionKey = `${section}-${search}-${JSON.stringify(filters)}`;
 
   const brands = useMemo(
@@ -203,9 +204,8 @@ export default function CategoryCatalogPage({ section }: Props) {
   );
   const searchSuggestions = useMemo(
     () =>
-      products
-        .filter((product) => matchesSearch(product, search))
-        .slice(0, 6),
+      groupProductVariants(products.filter((product) => matchesSearch(product, search)))
+        .slice(0, 6).map(group => group.product),
     [products, search]
   );
   const userRole: UserRole = currentUser?.role ?? "normal";

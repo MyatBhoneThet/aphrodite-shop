@@ -137,6 +137,19 @@ const humanize = (value: string) => value.replaceAll("_", " ");
 const returnWindowIsOpen = (order: Order) =>
   !order.delivered_at || Date.now() <= new Date(order.delivered_at).getTime() + 7 * 24 * 60 * 60 * 1000;
 
+async function fetchCustomerOrders(selectedId?: string, signal?: AbortSignal): Promise<Order[]> {
+  const response = await fetch("/api/orders", { headers: authHeaders(), cache: "no-store", signal });
+  if (!response.ok) throw new Error("Unable to refresh your orders. Please try again.");
+  const data = await response.json() as { orders: Order[] };
+  if (selectedId && !data.orders.some(order => order.id === selectedId)) {
+    const selectedResponse = await fetch(`/api/orders/${encodeURIComponent(selectedId)}`, { headers: authHeaders(), cache: "no-store", signal });
+    if (!selectedResponse.ok) throw new Error("This order could not be found.");
+    const selected = await selectedResponse.json() as { order?: Order };
+    if (selected.order) data.orders.push(selected.order);
+  }
+  return data.orders;
+}
+
 export default function OrdersView() {
   const { user, status: userStatus } = useCurrentUser();
   const { t, text } = useLanguage();
@@ -173,11 +186,8 @@ export default function OrdersView() {
   }, [orderId, orders]);
 
   const refreshOrders = useCallback(async () => {
-    const response = await fetch("/api/orders", { headers: authHeaders(), cache: "no-store" });
-    if (!response.ok) return;
-    const data = (await response.json()) as { orders: Order[] };
-    setOrders(data.orders);
-  }, []);
+    setOrders(await fetchCustomerOrders(orderId));
+  }, [orderId]);
 
   const refreshReturns = useCallback(async () => {
     const response = await fetch("/api/returns", { headers: authHeaders(), cache: "no-store" });
@@ -235,10 +245,8 @@ export default function OrdersView() {
       if (loading) return;
       loading = true;
       try {
-        const response = await fetch("/api/orders", { headers: authHeaders(), cache: "no-store", signal: controller.signal });
-        if (!response.ok) throw new Error("Unable to refresh your orders. Please try again.");
-        const data = (await response.json()) as { orders: Order[] };
-        if (active) setOrders(data.orders);
+        const loaded = await fetchCustomerOrders(orderId, controller.signal);
+        if (active) setOrders(loaded);
         // Returns are listed separately: one order can hold several, each with
         // its own decision.
         if (active) await refreshReturns();
@@ -254,7 +262,7 @@ export default function OrdersView() {
     const interval = window.setInterval(refresh, 30000);
     window.addEventListener("focus", refresh);
     return () => { active = false; controller.abort(); window.clearInterval(interval); window.removeEventListener("focus", refresh); };
-  }, [userStatus, user, refreshReturns]);
+  }, [userStatus, user, refreshReturns, orderId]);
 
   /** "Cancel my order": cancelled at once when the shop has not checked it yet, otherwise sent as a request. */
   async function cancelFromHelp(order: Order, reason: string) {

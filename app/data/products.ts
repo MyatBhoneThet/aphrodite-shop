@@ -20,6 +20,8 @@ export type Product = {
   stock: "In Stock" | "Out of Stock";
   /** Authoritative numeric inventory. Only serialized for admins. */
   stockQuantity?: number;
+  /** Public stock total for a product backed by individually identified units. */
+  availableQuantity?: number;
   specs: {
     [key: string]: unknown;
     cpu?: string;
@@ -29,6 +31,7 @@ export type Product = {
     detail?: string;
   };
   fullSpecs: {
+    deliveryStockLocations?: { status: string; quantity: number }[];
     [key: string]: unknown;
     processor?: string;
     ram?: string;

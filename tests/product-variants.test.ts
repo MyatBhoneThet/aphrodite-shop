@@ -34,6 +34,43 @@ function laptop(
 }
 
 describe("grouping versions of one model", () => {
+  it("shows duplicate serial units once and links to an available unit", () => {
+    const sold = laptop(10, { name: "Dell Latitude 3420", stock: "Out of Stock", stockQuantity: 0 });
+    const available = laptop(11, { name: "Dell Latitude 3420", stockQuantity: 1, price: 3_800_000 });
+    const groups = groupProductVariants([sold, available]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].product.id).toBe(11);
+    expect(groups[0].options).toEqual([]);
+    expect(sold.stockQuantity).toBe(0);
+    expect(available.stockQuantity).toBe(1);
+  });
+
+  it("groups duplicates across photos, serial numbers and specification property order", () => {
+    const a = laptop(1, { name: "Latitude", fullSpecs: { condition: "Brand New", serialNumber: "serial-a", gallery: [{ url: "/a.jpg" }] } });
+    const b = laptop(2, { name: " latitude ", brand: "DELL", image: "/b.jpg", specs: { storage: "256 GB SSD", ram: "16 GB RAM", cpu: "Intel Core i7 11th Gen" }, fullSpecs: { gallery: [{ url: "/b.jpg" }], serialNumber: "serial-b", condition: "brand new" } });
+    expect(groupProductVariants([a, b])).toHaveLength(1);
+  });
+
+  it("keeps different specifications, condition and warranty as distinct listings", () => {
+    const a = laptop(1, { name: "Latitude", fullSpecs: { condition: "New", warranty: "1 year" } });
+    const ram = { ...a, id: 2, specs: { ...a.specs, ram: "32 GB RAM" } };
+    const used = { ...a, id: 3, fullSpecs: { ...a.fullSpecs, condition: "Used" } };
+    const warranty = { ...a, id: 4, fullSpecs: { ...a.fullSpecs, warranty: "2 years" } };
+    expect(groupProductVariants([a, ram, used, warranty])).toHaveLength(4);
+  });
+
+  it("groups accessories and PC parts only within their own categories and source tabs", () => {
+    const accessory = laptop(1, { type: "accessory", sourceSheet: "Accessories", category: "SSD", name: "WD Green", brand: "WD", specs: {}, fullSpecs: {} });
+    expect(groupProductVariants([accessory, { ...accessory, id: 2 }, { ...accessory, id: 3, category: "Storage" }, { ...accessory, id: 4, sourceSheet: "PC Parts" }])).toHaveLength(3);
+  });
+
+  it("keeps explicit variant groups scoped to their category", () => {
+    expect(groupProductVariants([
+      laptop(1, { category: "Laptop" }, { label: "256 GB SSD" }),
+      laptop(2, { category: "Other" }, { label: "512 GB SSD" }),
+    ])).toHaveLength(2);
+  });
+
   it("shows one card for all versions, linking to the first in stock", () => {
     const products = [
       laptop(1),

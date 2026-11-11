@@ -784,7 +784,7 @@ export default function CartPage() {
           : <p className="font-bold text-zinc-500">{text("Price pending")}</p>}
         {item.product.price > 0 && (item.pricing.tierMinQuantity || item.pricing.promotional) && <p className="mt-1 text-xs font-semibold text-green-700">{item.pricing.label} · {text("save")} {formatCurrency(item.pricing.savings)}</p>}
         {item.product.price > 0 && item.pricing.nextTier && !checkoutMode && <p className="mt-1 text-xs text-zinc-500">{text("Add")} {item.pricing.nextTier.unitsAway} {text("more to pay")} {formatCurrency(item.pricing.nextTier.unitPrice)}/{text("unit")}</p>}
-        <DeliveryEstimateBadge estimate={savedAddressDeliveryEstimate} compact mobileDense />
+        <DeliveryEstimateBadge estimate={savedAddressDeliveryEstimate} product={item.product} compact mobileDense />
         {!checkoutMode && <div className="mt-1.5 flex items-center gap-1.5 sm:mt-2 sm:gap-2">
           <button type="button" onClick={() => item.quantity > 1 ? void updateQuantity(item.id, item.quantity - 1) : void removeItem(item.id)} className="h-8 w-8 rounded-full border font-bold sm:h-10 sm:w-10" aria-label={t("detail.decrease")}>−</button>
           <span className="w-6 text-center sm:w-8">{item.quantity}</span>

@@ -65,7 +65,7 @@ describe("storefront language rendering", () => {
       const html = renderToStaticMarkup(React.createElement(ProductCard, { product, userRole: "normal" }));
       for (const label of ["Processor", "RAM", "Storage"]) {
         expect(html).toContain(translateStorefrontText(language, label));
-        if (language === "my") expect(html).not.toMatch(new RegExp(`>\\s*${label}\\s*<`));
+        if (language === "my") expect(translateStorefrontText(language, label)).toBe(label);
       }
       for (const value of Object.values(product.specs)) expect(html).toContain(value);
     }
@@ -87,5 +87,29 @@ describe("storefront language rendering", () => {
     expect(translateStorefrontText("my", "Photo 3")).toBe("ပစ္စည်းပုံ 3");
     expect(translateStorefrontText("my", "Dell Latitude 3420")).toBe("Dell Latitude 3420");
     expect(translateStorefrontText("my", "256 GB SSD")).toBe("256 GB SSD");
+  });
+
+  it("keeps hardware terms in English inside Myanmar interface copy", () => {
+    expect(translateStorefrontText("my", "Processor")).toBe("Processor");
+    expect(translateStorefrontText("my", "RAM")).toBe("RAM");
+    expect(translateStorefrontText("my", "Memory")).toBe("Memory");
+    expect(translateStorefrontText("my", "Storage")).toBe("Storage");
+    expect(translateStorefrontText("my", "Choose a processor and motherboard first"))
+      .toBe("Processor နှင့် Motherboard ကို ဦးစွာ ရွေးပါ");
+    expect(translate("my", "builder.memoryWarning", { memory: "DDR5" }))
+      .toContain("Memory");
+  });
+
+  it("translates the post-login delivery welcome screen", () => {
+    for (const label of [
+      "Where are we delivering?",
+      "Allow and share my location",
+      "Continue without sharing",
+      "How do I place my delivery pin?",
+      "Location page",
+    ]) {
+      expect(translateStorefrontText("my", label)).not.toBe(label);
+      expect(translateStorefrontText("en", label)).toBe(label);
+    }
   });
 });

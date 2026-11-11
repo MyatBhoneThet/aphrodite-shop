@@ -1,4 +1,5 @@
 import type { DeliveryEventStage, OrderRow } from "./supabase";
+import { assignedSerials, type AssignedSerial } from "./serial-allocations";
 
 /**
  * Looking up a delivery without signing in.
@@ -85,6 +86,7 @@ export type GuestTrackingView = {
   /** Town/city only -- enough to confirm the right order, not the doorstep. */
   destination: string | null;
   itemCount: number;
+  assignedUnits?: AssignedSerial[];
   events: GuestTrackingEvent[];
 };
 
@@ -100,7 +102,9 @@ export type GuestTrackingView = {
  * who got hold of a code and a phone number.
  */
 export function guestTrackingView(order: OrderRow): GuestTrackingView {
+  const units = assignedSerials(order.order_items?.flatMap(item => item.allocated_units ?? []));
   return {
+    ...(units.length ? { assignedUnits: units } : {}),
     code: order.id.replaceAll("-", "").slice(0, 8).toLowerCase(),
     status: order.status,
     placedAt: order.created_at,

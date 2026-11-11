@@ -14,7 +14,26 @@ type SheetsBatchGetResponse = {
 
 export type ProductionSheetName = "Laptops" | "Accessories" | "PC Parts";
 
+export type LaptopSheetUnit = { key: string; code: string; serialNumber: string; row: number; quantity: number };
+
+/** Retry database-reserved unit changes after a prior sheet write failed. */
+export async function writePendingLaptopUnits(units: (LaptopSheetUnit & { pending_quantity?: number })[]) {
+  const pending = units.filter(unit => unit.pending_quantity === 0 || unit.pending_quantity === 1);
+  if (!pending.length) return;
+  const { spreadsheetId } = getGoogleSheetsConfig();
+  const values = await fetchProductsSheet();
+  const current = new Map(values.products.flatMap(product => product.sheetUnits ?? []).map(unit => [unit.key, unit]));
+  await writeQuantityCells(spreadsheetId, pending.flatMap(unit => {
+    const row = current.get(unit.key);
+    if (!row || row.quantity === unit.pending_quantity) return [];
+    return [{ range: `'Laptops'!${columnLetter(values.quantityColumns.Laptops)}${row.row}`, values: [[unit.pending_quantity!]] }];
+  }), "Reserved laptop serials are safe in the database, but their sheet availability could not be updated. The next sync will retry.");
+}
+
 export type ProductSheetRow = Omit<Product, "id"> & {
+  /** Compact laptop rows represent one individually identified physical unit. */
+  unitInventory?: boolean;
+  sheetUnits?: LaptopSheetUnit[];
   /** Undefined = legacy sheet: preserve tiers. Null = explicitly not enabled. */
   sheetWholesale?: { unitPrice: number; minQuantity: number } | null;
   rowNumber: number;
@@ -192,6 +211,22 @@ function parseQuantity(value: unknown) {
   return Math.max(0, parseNumber(value) ?? 0);
 }
 
+function parseUnitAvailability(value: unknown, row: number) {
+  const text = cleanText(value);
+  if (text !== "0" && text !== "1") {
+    throw badRequest(`Laptops row ${row}: QTY must be 0 (out of stock) or 1 (in stock).`);
+  }
+  return Number(text);
+}
+
+function readLaptopWholesale(headers: string[], cells: unknown[], retail: number): ProductSheetRow["sheetWholesale"] {
+  const index = requireColumn(headers, "Laptops", "wholesale_si_price_update");
+  const price = parsePrice(cells[index]);
+  // B2B Price update is deliberately reserved; never use it as a fallback.
+  if (!price || price > 2147483647 || retail <= 0 || price > retail) return null;
+  return { unitPrice: price, minQuantity: 1 };
+}
+
 function findHeaderRow(
   values: unknown[][],
   sheet: ProductionSheetName,
@@ -200,7 +235,17 @@ function findHeaderRow(
   const searchLimit = Math.min(values.length, 20);
 
   for (let index = 0; index < searchLimit; index += 1) {
-    const headers = (values[index] ?? []).map(normalizeHeader);
+    const headers = (values[index] ?? []).map((value) => {
+      const header = normalizeHeader(value);
+      if (sheet === "Laptops" && header === "specs_details") return "specs_detail";
+      if (sheet === "Laptops" && header === "retail_price") return "retail_price_mmk";
+      return header;
+    });
+    if (sheet === "Laptops" && headers.includes("code") && headers.includes("sn")) {
+      if (requiredHeaders.every(header => header === "pur_no" || headers.includes(header))) {
+        return { headers, index };
+      }
+    }
     if (requiredHeaders.every((header) => headers.includes(header))) {
       return { headers, index };
     }
@@ -292,14 +337,15 @@ function findSpecPart(parts: string[], pattern: RegExp) {
 
 function laptopSpecifications(detail: string, warranty: string) {
   const parts = detail
-    .split("•")
+    .split(/[•/]/)
     .map((part) => cleanText(part))
     .filter(Boolean);
   const cpu = findSpecPart(parts, /\b(intel|amd|apple|ryzen|core)\b/i);
-  const ram = findSpecPart(parts, /\b(ram|memory|ddr\d*)\b/i);
+  const ram = findSpecPart(parts, /\b(ram|memory|ddr\d*)\b/i)
+    ?? findSpecPart(parts, /^\d+\s*GB$/i);
   const storage = findSpecPart(parts, /\b(ssd|hdd|nvme|storage)\b/i);
   const display = findSpecPart(parts, /\b(display|screen|inch|fhd|qhd|uhd|oled)\b/i);
-  const graphics = findSpecPart(parts, /\b(graphics|gpu|geforce|radeon|iris)\b/i);
+  const graphics = findSpecPart(parts, /\b(graphics|gpu|geforce|radeon|iris|rtx|gtx)\b/i);
 
   return {
     specs: {
@@ -412,6 +458,10 @@ function parseLaptops(values: unknown[][]) {
   const warrantyIndex = requireColumn(headers, sheet, "warranty");
   const quantityIndex = requireColumn(headers, sheet, "qty");
   const retailMmkIndex = requireColumn(headers, sheet, "retail_price_mmk");
+  const unitInventory = headers.includes("code") && headers.includes("sn");
+  const identities = new Set<string>();
+  const codes = new Set<string>();
+  const serials = new Set<string>();
   const rows: SheetSourceRow[] = [];
 
   values.slice(headerIndex + 1).forEach((cells, offset) => {
@@ -428,18 +478,39 @@ function parseLaptops(values: unknown[][]) {
     const modelNumber = cleanText(cells[modelNumberIndex]);
     const detail = cleanText(cells[specsIndex]);
     const warranty = cleanText(cells[warrantyIndex]);
-    const stockQuantity = parseQuantity(cells[quantityIndex]);
+    const stockQuantity = unitInventory
+      ? parseUnitAvailability(cells[quantityIndex], rowNumber)
+      : parseQuantity(cells[quantityIndex]);
+    const code = cleanText(cells[headers.indexOf("code")]);
+    const serial = cleanText(cells[headers.indexOf("sn")]);
+    if (unitInventory && (!code || !serial)) {
+      throw badRequest(`Laptops row ${rowNumber}: Code and SN are required for each laptop.`);
+    }
+    const unitKey = createSourceKey(sheet, [code, serial]).replace("production:laptops:", "production:laptops:unit:");
+    const condition = cleanText(cells[headers.indexOf("grade")]);
+    const sourceKey = unitInventory
+      ? createSourceKey(sheet, [brand, modelNumber || name, condition, warranty, specFingerprint(detail)]).replace("production:laptops:", "production:laptops:pool:")
+      : createSourceKey(sheet, [brand, modelNumber || name]);
+    if (unitInventory && (identities.has(unitKey) || codes.has(code.toLowerCase()) || serials.has(serial.toLowerCase()))) {
+      throw badRequest(`Laptops row ${rowNumber}: duplicate Code and SN identity. Each Code and each SN must be unique.`);
+    }
+    identities.add(unitKey);
+    codes.add(code.toLowerCase());
+    serials.add(serial.toLowerCase());
     const { specs, fullSpecs } = laptopSpecifications(detail, warranty);
+    if (condition) Object.assign(fullSpecs, { condition });
+    const deliveryStatus = cleanText(cells[headers.indexOf("status")]);
+    if (deliveryStatus) Object.assign(fullSpecs, { deliveryStockLocations: [{ status: deliveryStatus, quantity: stockQuantity }] });
     Object.assign(fullSpecs, { promotion: readSheetPromotion(headers, cells, price), gallery: sheetGallery(headers, cells), photoSource: cleanText(cells[headers.indexOf("photo_source_url")]) });
 
     rows.push({
       spec: detail,
       product: productRow({
         rowNumber,
-        sourceKey: createSourceKey(sheet, [brand, modelNumber || name]),
+        sourceKey,
         sourceSheet: sheet,
         name,
-        sheetWholesale: readSheetWholesale(headers, cells, price),
+        sheetWholesale: unitInventory ? readLaptopWholesale(headers, cells, price) : readSheetWholesale(headers, cells, price),
         type: "laptop",
         category: "Laptop",
         brand,
@@ -448,6 +519,10 @@ function parseLaptops(values: unknown[][]) {
         specs,
         fullSpecs,
       }),
+    });
+    if (unitInventory) Object.assign(rows[rows.length - 1].product, {
+      unitInventory: true,
+      sheetUnits: [{ key: unitKey, code, serialNumber: serial, row: rowNumber, quantity: stockQuantity }],
     });
   });
 
@@ -566,7 +641,7 @@ function specFingerprint(spec: string) {
 
 function specParts(spec: string) {
   return spec
-    .split(/[•|;,\n]/)
+    .split(/[•/|;,\n]/)
     .map((part) => cleanText(part))
     .filter(Boolean);
 }
@@ -675,8 +750,10 @@ function mergeProductRows(rows: ProductSheetRow[]) {
       continue;
     }
 
+    const deliveryStockLocations = [...(current.fullSpecs.deliveryStockLocations ?? []), ...(row.fullSpecs.deliveryStockLocations ?? [])];
     current.sourceRows.push(...row.sourceRows);
     current.rowQuantities.push(...row.rowQuantities);
+    if (row.sheetUnits) current.sheetUnits = [...(current.sheetUnits ?? []), ...row.sheetUnits];
     current.stockQuantity =
       (current.stockQuantity ?? 0) + (row.stockQuantity ?? 0);
     current.stock = current.stockQuantity > 0 ? "In Stock" : "Out of Stock";
@@ -690,7 +767,7 @@ function mergeProductRows(rows: ProductSheetRow[]) {
       current.specs = row.specs;
       current.fullSpecs = row.fullSpecs;
     }
-    current.fullSpecs = { ...current.fullSpecs, promotion };
+    current.fullSpecs = { ...current.fullSpecs, promotion, ...(deliveryStockLocations.length ? { deliveryStockLocations } : {}) };
   }
 
   return [...products.values()].sort((left, right) =>
@@ -843,6 +920,8 @@ export function isProductionSheetName(value: unknown): value is ProductionSheetN
 
 // Website-only keys of full_specs; they are not product specifications.
 const NON_SPEC_KEYS = new Set([
+  "code",
+  "serialNumber",
   "gallery",
   "galleryManagedBy",
   "photoSource",
@@ -921,6 +1000,15 @@ export function buildSheetProductRow(values: unknown[][], input: SheetProductInp
     cells[column] = value;
   };
   const quantity = Math.max(0, Math.floor(input.stockQuantity));
+  const unitInventory = sheet === "Laptops" && headers.includes("code") && headers.includes("sn");
+  if (unitInventory) {
+    parseUnitAvailability(input.stockQuantity, values.length + 1);
+    const code = cleanText(input.fullSpecs?.code);
+    const serial = cleanText(input.fullSpecs?.serialNumber);
+    if (!code || !serial) throw badRequest("Add Code and serialNumber specifications for this individual laptop, or add its row in the Laptops sheet.");
+    set(headers.indexOf("code"), code);
+    set(headers.indexOf("sn"), serial);
+  }
   const price = input.price > 0 ? Math.round(input.price) : null;
   const warranty = cleanText((input.fullSpecs as Record<string, unknown> | undefined)?.warranty);
   const detail = specsToSheetDetail(input.specs, input.fullSpecs);
@@ -930,6 +1018,7 @@ export function buildSheetProductRow(values: unknown[][], input: SheetProductInp
   set(requireColumn(headers, sheet, "retail_price_mmk"), price);
 
   if (sheet === "Laptops") {
+    set(headers.indexOf("grade"), cleanText(input.fullSpecs?.condition));
     set(requireColumn(headers, sheet, "model"), cleanText(input.name));
     set(requireColumn(headers, sheet, "specs_detail"), detail);
     set(requireColumn(headers, sheet, "warranty"), warranty);
@@ -983,7 +1072,7 @@ export async function appendSheetProduct(input: SheetProductInput) {
   if (!added) {
     throw badRequest("This product could not be placed in the Google Sheet. Check its name.");
   }
-  if (added.sourceRows.length > 1) {
+  if (added.sourceRows.length > 1 && !added.unitInventory) {
     const others = added.sourceRows.filter((row) => row !== rowNumber).join(", ");
     throw conflict(
       `The "${input.sheet}" tab already has this product (row ${others}). Change its stock there or edit the existing product instead of adding it again.`
@@ -1093,6 +1182,7 @@ function columnLetter(index: number) {
 }
 
 export type SheetQuantityUpdate = {
+  units?: LaptopSheetUnit[];
   sourceKey: string;
   sheet: ProductionSheetName;
   cells: { row: number; from: number; to: number }[];
@@ -1114,7 +1204,7 @@ export type SheetQuantityUpdate = {
  * committed, so a failure here must never fail the order.
  */
 export async function decrementSheetQuantities(
-  items: { sourceKey: string; quantity: number }[]
+  items: { sourceKey: string; quantity: number; units?: LaptopSheetUnit[] }[]
 ) {
   const wanted = items.filter((item) => item.quantity > 0);
   if (wanted.length === 0) return [];
@@ -1145,7 +1235,10 @@ export async function decrementSheetQuantities(
     const cells: SheetQuantityUpdate["cells"] = [];
     let remaining = item.quantity;
 
-    for (const rowQuantity of product.rowQuantities) {
+    const assigned = product.unitInventory
+      ? allocatedSheetRows(product, item.units ?? [], item.quantity)
+      : product.rowQuantities;
+    for (const rowQuantity of assigned) {
       if (remaining <= 0) break;
 
       const deduction = Math.min(rowQuantity.quantity, remaining);
@@ -1164,6 +1257,7 @@ export async function decrementSheetQuantities(
     }
 
     updates.push({
+      ...(item.units ? { units: item.units } : {}),
       sourceKey: item.sourceKey,
       sheet: product.sourceSheet,
       cells,
@@ -1224,7 +1318,19 @@ export type SheetRestockItem = {
   sourceKey: string;
   quantity: number;
   rows?: { row: number; quantity: number }[];
+  units?: LaptopSheetUnit[];
 };
+
+/** Resolve durable serial identities against today's row positions. */
+export function allocatedSheetRows(product: ProductSheetRow, units: LaptopSheetUnit[], quantity: number) {
+  if (units.length !== quantity || new Set(units.map(unit => unit.key)).size !== quantity) {
+    throw badRequest("The order must reserve one distinct laptop serial per purchased unit.");
+  }
+  return units.flatMap(unit => {
+    const current = product.sheetUnits?.find(candidate => candidate.key === unit.key);
+    return current ? [{ row: current.row, quantity: current.quantity }] : [];
+  });
+}
 
 export type SheetDeductionRecord = { items: SheetRestockItem[] };
 
@@ -1246,6 +1352,7 @@ export function sheetDeductionRecord(
         }));
         return {
           sourceKey: update.sourceKey,
+          ...(update.units ? { units: update.units } : {}),
           quantity: rows.reduce((sum, row) => sum + row.quantity, 0),
           rows,
         };
@@ -1261,7 +1368,7 @@ export function readSheetDeductionRecord(value: unknown): SheetRestockItem[] {
 
   return items.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
-    const { sourceKey, quantity, rows } = item as Record<string, unknown>;
+    const { sourceKey, quantity, rows, units } = item as Record<string, unknown>;
 
     if (
       typeof sourceKey !== "string" ||
@@ -1285,7 +1392,7 @@ export function readSheetDeductionRecord(value: unknown): SheetRestockItem[] {
         })
       : undefined;
 
-    return [{ sourceKey, quantity, rows: safeRows }];
+    return [{ sourceKey, quantity, rows: safeRows, ...(Array.isArray(units) ? { units: units as LaptopSheetUnit[] } : {}) }];
   });
 }
 
@@ -1297,8 +1404,18 @@ export function readSheetDeductionRecord(value: unknown): SheetRestockItem[] {
 export function planSheetRestock(
   currentRows: { row: number; quantity: number }[],
   quantity: number,
-  preferredRows: { row: number; quantity: number }[] = []
+  preferredRows: { row: number; quantity: number }[] = [],
+  unitInventory = false
 ) {
+  if (unitInventory) {
+    let remaining = Math.max(0, Math.floor(quantity));
+    const cells = currentRows.flatMap(row => {
+      if (row.quantity !== 0 || remaining <= 0) return [];
+      remaining -= 1;
+      return [{ row: row.row, from: 0, to: 1 }];
+    });
+    return { cells, unrestored: remaining };
+  }
   const additions = new Map<number, number>();
   const knownRows = new Set(currentRows.map((row) => row.row));
   let remaining = Math.max(0, Math.floor(quantity));
@@ -1355,6 +1472,7 @@ export async function incrementSheetQuantities(items: SheetRestockItem[]) {
             sourceKey: item.sourceKey,
             quantity: current.quantity + item.quantity,
             rows: [...(current.rows ?? []), ...(item.rows ?? [])],
+            units: [...(current.units ?? []), ...(item.units ?? [])],
           }
         : { ...item }
     );
@@ -1371,7 +1489,8 @@ export async function incrementSheetQuantities(items: SheetRestockItem[]) {
   const data: { range: string; values: number[][] }[] = [];
 
   for (const item of grouped.values()) {
-    const product = bySourceKey.get(item.sourceKey);
+    const product = bySourceKey.get(item.sourceKey)
+      ?? products.find(candidate => candidate.sheetUnits?.some(unit => unit.key === item.sourceKey));
 
     if (!product) {
       updates.push({
@@ -1385,10 +1504,15 @@ export async function incrementSheetQuantities(items: SheetRestockItem[]) {
     }
 
     const column = columnLetter(quantityColumns[product.sourceSheet]);
+    const legacyUnit = product.sheetUnits?.find(unit => unit.key === item.sourceKey);
+    const preferred = product.unitInventory && item.units
+      ? allocatedSheetRows(product, item.units, item.quantity)
+      : legacyUnit ? [{ row: legacyUnit.row, quantity: legacyUnit.quantity }] : product.rowQuantities;
     const { cells, unrestored } = planSheetRestock(
-      product.rowQuantities,
+      preferred,
       item.quantity,
-      item.rows
+      item.rows,
+      product.unitInventory
     );
 
     for (const cell of cells) {
@@ -1429,7 +1553,8 @@ export async function incrementSheetQuantities(items: SheetRestockItem[]) {
  */
 export function planSheetQuantitySet(
   currentRows: { row: number; quantity: number }[],
-  target: number
+  target: number,
+  unitInventory = false
 ) {
   const wanted = Math.max(0, Math.floor(target));
   const total = currentRows.reduce((sum, row) => sum + Math.max(0, row.quantity), 0);
@@ -1438,6 +1563,17 @@ export function planSheetQuantitySet(
   if (currentRows.length === 0 || wanted === total) return { cells, total };
 
   if (wanted > total) {
+    if (unitInventory) {
+      let remaining = wanted - total;
+      for (const row of currentRows) {
+        if (remaining <= 0) break;
+        if (row.quantity !== 0) continue;
+        cells.push({ row: row.row, from: 0, to: 1 });
+        remaining -= 1;
+      }
+      if (remaining > 0) throw badRequest("Add a new Code/SN row for each additional laptop.");
+      return { cells, total };
+    }
     const first = currentRows[0];
     cells.push({
       row: first.row,
@@ -1488,7 +1624,10 @@ export async function setSheetProductQuantity(
   if (!product) return { status: "not_in_sheet" };
 
   const column = columnLetter(quantityColumns[product.sourceSheet]);
-  const { cells, total } = planSheetQuantitySet(product.rowQuantities, target);
+  if (product.unitInventory && (!Number.isInteger(target) || target < 0 || target > product.rowQuantities.length)) {
+    throw badRequest(`This model has ${product.rowQuantities.length} physical laptop rows. Stock must be between 0 and that total.`);
+  }
+  const { cells, total } = planSheetQuantitySet(product.rowQuantities, target, product.unitInventory);
 
   await writeQuantityCells(
     spreadsheetId,

@@ -13,6 +13,7 @@ export const trackingLabels: Record<DeliveryEventStage, string> = {
 };
 export type TrackableOrder = {
   status: string;
+  order_items?: { allocated_units?: { code: string; serialNumber: string }[] }[];
   delivery_events?: { stage: string; happened_at: string }[];
 };
 export const trackingSteps = ["order_placed", "verified", "packed", "handed_to_courier", "out_for_delivery", "delivered"] as const;

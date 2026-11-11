@@ -38,6 +38,16 @@ function request(overrides: Partial<ReturnRequestRow> = {}): ReturnRequestRow {
 }
 
 describe("return and refund status email", () => {
+  it("retains the assigned code and serial in return/refund updates", () => {
+    const record = request();
+    record.order_items!.allocated_units = [{ key: "one", code: "JET444", serialNumber: "MOCK-SN-020", row: 21, quantity: 1 }];
+    for (const event of ["requested", "approved", "collected", "inspected", "refund_approved", "completed"] as const) {
+      const content = returnStatusEmailContent(record, event);
+      expect(content.html).toContain("JET444"); expect(content.html).toContain("MOCK-SN-020");
+      expect(content.text).toContain("Code: JET444 · S/N: MOCK-SN-020");
+    }
+  });
+
   it.each([
     ["requested", "Return request received"],
     ["approved", "Return approved — under review"],

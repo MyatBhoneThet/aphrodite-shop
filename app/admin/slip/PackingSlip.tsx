@@ -1,4 +1,5 @@
 import Image from "next/image";
+import AssignedSerials from "../../components/AssignedSerials";
 import { formatCurrency, formatDateTime } from "@/app/lib/format";
 
 export type SlipOrder = {
@@ -17,7 +18,7 @@ export type SlipOrder = {
   courier_name?: string | null;
   delivery_tracking_number?: string | null;
   created_at: string;
-  order_items?: { id: string; quantity: number; unit_price: number; product_id: number; product?: { name: string; brand?: string } | null }[];
+  order_items?: { id: string; quantity: number; unit_price: number; product_id: number; allocated_units?: { code: string; serialNumber: string }[]; product?: { name: string; brand?: string } | null }[];
 };
 
 /**
@@ -84,7 +85,7 @@ export default function PackingSlip({ order, isAdmin }: { order: SlipOrder; isAd
               {(order.order_items ?? []).map((item) => (
                 <tr key={item.id} className="border-b align-top">
                   <td className="py-3"><span className="inline-block h-5 w-5 rounded border-2 border-zinc-950" aria-hidden /></td>
-                  <td className="py-3 font-semibold">{item.product?.name ?? `Product #${item.product_id}`}{item.product?.brand && <span className="block text-xs font-normal text-zinc-500">{item.product.brand}</span>}</td>
+                  <td className="py-3 font-semibold">{item.product?.name ?? `Product #${item.product_id}`}{item.product?.brand && <span className="block text-xs font-normal text-zinc-500">{item.product.brand}</span>}<AssignedSerials units={item.allocated_units} /></td>
                   <td className="py-3 text-center font-black">{item.quantity}</td>
                   <td className="py-3 text-right">{formatCurrency(item.unit_price * item.quantity)}</td>
                 </tr>

@@ -1,3 +1,5 @@
+import type { Product } from "../data/products";
+
 export const APHRODITE_STORE_LOCATION = {
   latitude: 16.7730669,
   longitude: 96.1460789,
@@ -7,8 +9,8 @@ export const APHRODITE_STORE_LOCATION = {
 export const NEAR_DELIVERY_RADIUS_KM = 15;
 
 export type DeliveryEstimate = {
-  minDays: 2 | 3;
-  maxDays: 3 | 5;
+  minDays: 2 | 3 | 10;
+  maxDays: 3 | 5 | 10;
   distanceKm: number;
   township: string;
 };
@@ -36,6 +38,17 @@ export function estimateDelivery(latitude: number, longitude: number, township: 
     : { minDays: 3, maxDays: 5, distanceKm, township };
 }
 
+/** Bangkok stock needs ten days; local stock uses the saved destination. */
+export function productDeliveryEstimate(product: Pick<Product, "fullSpecs"> | undefined, destination: DeliveryEstimate | null): DeliveryEstimate | null {
+  const locations = product?.fullSpecs.deliveryStockLocations ?? [];
+  const available = locations.filter(location => location.quantity > 0);
+  const relevant = available.length ? available : locations;
+  if (relevant.some(location => /\bbkk\b/i.test(location.status))) {
+    return { minDays: 10, maxDays: 10, distanceKm: destination?.distanceKm ?? 0, township: destination?.township ?? "" };
+  }
+  return destination;
+}
+
 export function deliveryDateRange(estimate: DeliveryEstimate, now = new Date()) {
   const start = new Date(now);
   const end = new Date(now);
@@ -43,6 +56,7 @@ export function deliveryDateRange(estimate: DeliveryEstimate, now = new Date()) 
   end.setDate(end.getDate() + estimate.maxDays);
   const month = new Intl.DateTimeFormat("en", { month: "short" });
   const sameMonth = start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth();
+  if (estimate.minDays === estimate.maxDays) return `${month.format(start)} ${start.getDate()}`;
   return sameMonth
     ? `${month.format(start)} ${start.getDate()}–${end.getDate()}`
     : `${month.format(start)} ${start.getDate()}–${month.format(end)} ${end.getDate()}`;

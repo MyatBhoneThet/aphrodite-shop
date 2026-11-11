@@ -424,7 +424,9 @@ export default function ProductDetailsClient({
                   : "bg-red-100 text-red-700"
               }`}
             >
-              {text(product.stock)}
+              {product.availableQuantity != null && product.stock === "In Stock"
+                ? `${product.availableQuantity} ${text("In Stock")}`
+                : text(product.stock)}
             </p>
 
             {variants.length > 1 && (
@@ -499,7 +501,7 @@ export default function ProductDetailsClient({
                 </p>
               )}
 
-              <DeliveryEstimateBadge estimate={deliveryEstimate} />
+              <DeliveryEstimateBadge estimate={deliveryEstimate} product={product} />
 
               <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-2 sm:mt-5 sm:gap-x-3 sm:gap-y-3">
                 <span className="shrink-0 text-xs font-semibold sm:text-sm">{t("detail.quantity")}</span>
@@ -515,13 +517,13 @@ export default function ProductDetailsClient({
                   <input
                     type="number"
                     min={1}
-                    max={9999}
+                    max={product.availableQuantity ?? 9999}
                     value={quantity}
                     onChange={(event) => {
                       const next = Number(event.target.value);
                       setQuantity(
                         Number.isFinite(next)
-                          ? Math.min(9999, Math.max(1, Math.floor(next)))
+                          ? Math.min(product.availableQuantity ?? 9999, Math.max(1, Math.floor(next)))
                           : 1
                       );
                     }}
@@ -529,7 +531,7 @@ export default function ProductDetailsClient({
                   />
                   <button
                     type="button"
-                    onClick={() => setQuantity(Math.min(9999, quantity + 1))}
+                    onClick={() => setQuantity(Math.min(product.availableQuantity ?? 9999, quantity + 1))}
                     className="h-9 w-9 rounded-full border font-bold"
                     aria-label={t("detail.increase")}
                   >
@@ -720,7 +722,7 @@ export default function ProductDetailsClient({
                   <h3 className="mt-3 flex-1 text-sm font-medium leading-5 sm:mt-4 sm:text-base sm:leading-normal">{item.name}</h3>
 
                   <div className="mt-4"><ProductPrice price={effectiveProductPrice(item)} regularPrice={item.price} /></div>
-                  <DeliveryEstimateBadge estimate={deliveryEstimate} compact />
+                  <DeliveryEstimateBadge estimate={deliveryEstimate} product={item} compact />
                 </Link>
               ))}
             </div>

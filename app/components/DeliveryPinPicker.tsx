@@ -77,7 +77,7 @@ export default function DeliveryPinPicker({ value, onChange, onPinPlaced, addres
       setLocating(false);
       setMessage(error.code === 1
         ? text("GPS permission was denied. Click the map or enter coordinates instead; you do not need to enable GPS.")
-        : "GPS could not find your position. You can place the pin manually.");
+        : text("GPS could not find your position. You can place the pin manually."));
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
   }
 

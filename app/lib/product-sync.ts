@@ -4,12 +4,15 @@ import {
   appendSheetProduct,
   fetchProductsSheet,
   hasGoogleSheetsConfig,
+  writePendingLaptopUnits,
   type SheetProductInput,
 } from "./google-sheets";
 import { withSheetStockLock } from "./sheet-stock-lock";
 import { sendTriggeredProductAlertEmails } from "./product-alert-email";
 import {
   archiveRemovedProducts,
+  linkLaptopPoolAliases,
+  selectPendingLaptopSheetUnits,
   previewStockCorrections,
   syncSheetWholesale,
   upsertProductionProducts,
@@ -48,6 +51,18 @@ async function planSync(sheet: SheetSnapshot) {
   let stockCorrections: StockCorrectionPlan | null = null;
   try {
     stockCorrections = await previewStockCorrections(sheet.products);
+    const laptops = sheet.products.filter(product => product.sourceSheet === "Laptops");
+    if (laptops.length > 0 && laptops.every(product => product.unitInventory)) {
+      // The intentional switch from model totals to individually identified
+      // units replaces the old laptop catalogue, even above the bulk-delete
+      // threshold. Retain that guard for missing rows in the new layout.
+      const superseded = stockCorrections.heldBack.filter(item =>
+        (item.sourceSheet === "Laptops" || item.sourceSheet === "Laptops1") &&
+        !item.sourceKey.startsWith("production:laptops:pool:")
+      );
+      stockCorrections.removedFromSheet.push(...superseded);
+      stockCorrections.heldBack = stockCorrections.heldBack.filter(item => !superseded.includes(item));
+    }
   } catch (previewError) {
     console.error("[product-sync] stock correction preview failed", {
       error: previewError instanceof Error ? previewError.message : String(previewError),
@@ -69,6 +84,10 @@ async function applySheetSnapshot(sheet: SheetSnapshot) {
   let wholesale: Awaited<ReturnType<typeof syncSheetWholesale>> | null = null;
   try {
     syncedProducts = await upsertProductionProducts(products);
+    const pendingUnits = syncedProducts.flatMap(product => product.sheet_units ?? []);
+    if (pendingUnits.length) await writePendingLaptopUnits(pendingUnits);
+    const pools = products.filter((product): product is typeof product & { sheetUnits: NonNullable<typeof product.sheetUnits> } => Boolean(product.sheetUnits?.length));
+    if (pools.length) await linkLaptopPoolAliases(pools);
     const managed = products.filter((product) => product.sheetWholesale !== undefined);
     if (managed.length) {
       wholesale = await syncSheetWholesale(
@@ -267,6 +286,8 @@ export async function runAutomaticProductSync(): Promise<AutoSyncStatus> {
       const sheet = await fetchProductsSheet();
 
       if (sheetFingerprint(sheet) === state.fingerprint) {
+        const pending = await selectPendingLaptopSheetUnits();
+        if (pending.length) await writePendingLaptopUnits(pending);
         // A scheduled promotion can become active as time passes even when no
         // spreadsheet cell changed, so alert checks must still run.
         await sendTriggeredProductAlertEmails();

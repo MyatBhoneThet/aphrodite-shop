@@ -4,6 +4,7 @@ import type { Product, UserRole } from "../data/products";
 import { useLanguage } from "../lib/language";
 import ProductCard from "./ProductCard";
 import type { DeliveryEstimate } from "../lib/delivery-estimate";
+import { groupProductVariants } from "../lib/product-variants";
 
 type Props = {
   products: Product[];
@@ -19,6 +20,7 @@ export default function RecentlyViewedSection({
   deliveryEstimate = null,
 }: Props) {
   const { t } = useLanguage();
+  const groups = groupProductVariants(products);
   if (products.length === 0) return null;
 
   function scrollToHistory() {
@@ -48,10 +50,12 @@ export default function RecentlyViewedSection({
         </div>
 
         <div className="grid grid-cols-3 gap-2 sm:gap-6">
-          {products.map((product) => (
+          {groups.map(({ product, model, options }) => (
             <ProductCard
               key={product.id}
               product={product}
+              model={model}
+              options={options}
               userRole={userRole}
               deliveryEstimate={deliveryEstimate}
               compactMobile
@@ -66,8 +70,8 @@ export default function RecentlyViewedSection({
         className="floating-control fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-3 z-40 flex h-12 min-w-12 items-center justify-center rounded-full border border-zinc-200 bg-white px-3 text-sm font-bold shadow-xl transition hover:-translate-y-1 hover:border-red-500 sm:bottom-5 sm:right-5 sm:h-auto sm:px-4 sm:py-3"
         aria-label={t("recent.title")}
       >
-        <span className="sm:hidden" aria-hidden="true">🕘 {products.length}</span>
-        <span className="hidden sm:inline">🕘 {t("recent.title")} ({products.length})</span>
+        <span className="sm:hidden" aria-hidden="true">🕘 {groups.length}</span>
+        <span className="hidden sm:inline">🕘 {t("recent.title")} ({groups.length})</span>
       </button>
     </>
   );

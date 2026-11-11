@@ -72,25 +72,65 @@ export type ProductGroup<T extends Product> = {
   options: ProductVariantOption[];
 };
 
-/** One entry per model, in the order the list first mentions it. */
+const LISTING_METADATA = new Set([
+  "gallery", "galleryManagedBy", "photoSource", "promotion", "variant",
+  "archived", "deleted", "code", "serialNumber", "sn",
+]);
+
+function normalizeListingValue(value: unknown): unknown {
+  if (typeof value === "string") return value.trim().toLowerCase().replace(/\s+/g, " ").replace(/\s*[•/]\s*/g, " / ");
+  if (Array.isArray(value)) return value.map(normalizeListingValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value)
+      .filter(([key, entry]) => !LISTING_METADATA.has(key) && entry !== undefined && entry !== null && entry !== "")
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, entry]) => [key, normalizeListingValue(entry)]));
+  }
+  return value;
+}
+
+/** A display identity only. Serial units and checkout product IDs stay separate. */
+export function productListingKey(product: Product): string {
+  const scope = [product.sourceSheet ?? "", product.type, product.category, product.brand];
+  const variant = productVariant(product);
+  return JSON.stringify(normalizeListingValue([
+    ...scope,
+    variant ? ["variant", variant.group] : [
+      "product", product.name || product.id, product.specs, product.fullSpecs,
+    ],
+  ]));
+}
+
+/** One entry per variant model or matching product, within its own category. */
 export function groupProductVariants<T extends Product>(products: T[]): ProductGroup<T>[] {
   const entries: T[][] = [];
   const byGroup = new Map<string, T[]>();
 
   for (const product of products) {
-    const variant = productVariant(product);
-    const members = variant ? byGroup.get(variant.group) : undefined;
+    const key = productListingKey(product);
+    const members = byGroup.get(key);
     if (members) {
       members.push(product);
       continue;
     }
     const entry = [product];
-    if (variant) byGroup.set(variant.group, entry);
+    byGroup.set(key, entry);
     entries.push(entry);
   }
 
   return entries.map((members) => {
     if (members.length < 2) return { product: members[0], model: null, options: [] };
+
+    if (!productVariant(members[0])) {
+      const available = members.filter(member => member.stock === "In Stock");
+      const candidates = available.length ? available : members;
+      const product = [...candidates].sort((a, b) => {
+        const aPrice = effectiveProductPrice(a);
+        const bPrice = effectiveProductPrice(b);
+        return (aPrice > 0 ? aPrice : Infinity) - (bPrice > 0 ? bPrice : Infinity) || a.id - b.id;
+      })[0];
+      return { product, model: null, options: [] };
+    }
 
     const options = variantOptions(members);
     const chosen = options.find((option) => option.stock === "In Stock") ?? options[0];

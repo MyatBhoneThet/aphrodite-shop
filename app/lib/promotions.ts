@@ -9,6 +9,9 @@ export type Promotion = {
 
 const MYANMAR_OFFSET_MS = 390 * 60_000;
 
+// Temporarily paused across storefront, quotes, checkout and price alerts.
+export const PROMOTION_PRICES_ENABLED = false;
+
 /** Sheets serials and timezone-less inputs are wall-clock times in Myanmar. */
 export function parsePromotionDate(value: unknown): string | null | undefined {
   if (value === undefined || value === null || String(value).trim() === "") return null;
@@ -27,6 +30,7 @@ export function parsePromotionDate(value: unknown): string | null | undefined {
 }
 
 export function activePromotion(retailPrice: number, value: unknown, now = new Date()): Promotion | null {
+  if (!PROMOTION_PRICES_ENABLED) return null;
   if (!value || typeof value !== "object") return null;
   const p = value as Partial<Promotion>;
   if (!Number.isFinite(retailPrice) || retailPrice <= 0 || typeof p.price !== "number" || !Number.isInteger(p.price) || p.price <= 0 || p.price >= retailPrice || p.price > 2147483647) return null;

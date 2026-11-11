@@ -513,7 +513,7 @@ export default function FindMyLaptopPage() {
                           {pick.product.brand}
                         </p>
                         <div className="mt-2 sm:mt-3"><ProductPrice price={effectiveProductPrice(pick.product)} regularPrice={pick.product.price} compactMobile /></div>
-                        <DeliveryEstimateBadge estimate={deliveryEstimate} compact mobileDense />
+                        <DeliveryEstimateBadge estimate={deliveryEstimate} product={pick.product} compact mobileDense />
 
                         {pick.caveat && (
                           <p className="mt-2 inline-flex rounded-full bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-800 sm:px-3 sm:text-xs">

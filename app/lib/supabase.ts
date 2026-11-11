@@ -4,6 +4,7 @@ import { ADMIN_SESSION_COOKIE, parseCookieHeader } from "./admin-session";
 import { USER_SESSION_COOKIE } from "./user-session";
 import * as galleryHelpers from "./product-gallery";
 import { specVariantBaseKey } from "./google-sheets";
+import type { LaptopSheetUnit } from "./google-sheets";
 import { forbidden, notFound, unauthorized } from "./errors";
 import { conflict, serviceUnavailable } from "./errors";
 import type { SupabaseSocialProvider } from "./oauth";
@@ -71,6 +72,8 @@ export type ProductRow = {
   model_3d: string | null;
   stock: "In Stock" | "Out of Stock";
   stock_quantity?: number;
+  available_quantity?: number | null;
+  sheet_units?: LaptopSheetUnit[];
   specs: Product["specs"];
   full_specs: Product["fullSpecs"];
 };
@@ -414,6 +417,7 @@ export type OrderItemRow = {
   product_id: number;
   quantity: number;
   unit_price: number;
+  allocated_units?: LaptopSheetUnit[];
   products?: ProductRow | null;
 };
 
@@ -522,6 +526,7 @@ const PUBLIC_PRODUCT_COLUMNS = [
   "specs",
   "full_specs",
   "source_sheet",
+  "available_quantity",
 ].join(",");
 
 const UPSTREAM_TIMEOUT_MS = 10_000;
@@ -1212,6 +1217,7 @@ export function mapProductRow(row: ProductRow): Product {
     model3D: row.model_3d ?? undefined,
     stock: row.stock,
     stockQuantity: row.stock_quantity ?? 0,
+    ...(row.available_quantity != null ? { availableQuantity: row.available_quantity } : {}),
     specs: row.specs ?? {},
     fullSpecs: row.full_specs ?? {},
   };
@@ -1220,6 +1226,7 @@ export function mapProductRow(row: ProductRow): Product {
 type ProductWrite = Partial<Product> & {
   sourceKey?: string;
   sourceSheet?: string;
+  sheetUnits?: LaptopSheetUnit[];
 };
 
 export function mapProductToRow(product: ProductWrite) {
@@ -1249,6 +1256,7 @@ function mapProductionProductToRow(
   product: ProductWrite & { sourceKey: string; sourceSheet: string }
 ): Record<string, unknown> {
   return {
+    sheet_units: product.sheetUnits ?? [],
     source_key: product.sourceKey,
     source_sheet: product.sourceSheet,
     name: product.name ?? null,
@@ -3853,7 +3861,7 @@ export async function checkoutOrderRpc(payload: {
   cart_item_ids: string[];
   lines: CheckoutLine[];
 }) {
-  return supabaseRest<{ order_id: string; total_amount: number }>(
+  return supabaseRest<{ order_id: string; total_amount: number; allocations?: { product_id: number; units: LaptopSheetUnit[] }[] }>(
     "rpc/checkout_order",
     {
       method: "POST",
@@ -4174,6 +4182,25 @@ export function getCodReviewContext(actorId: string, orderId: string) {
 
 export function syncSheetWholesale(rows: { source_key: string; unit_price: number | null; min_quantity: number | null }[]) {
   return codRpc<{ synced: number; price_list_id: string }>("sync_sheet_b2b", { p_rows: rows });
+}
+
+export function linkLaptopPoolAliases(pools: { sourceKey: string; sheetUnits: LaptopSheetUnit[] }[]) {
+  return codRpc("link_laptop_pool_aliases", { p_pools: pools.map(pool => ({ source_key: pool.sourceKey, unit_keys: pool.sheetUnits.map(unit => unit.key) })) });
+}
+
+/** A pending reservation must be retried even when the sheet is unchanged. */
+export async function selectPendingLaptopSheetUnits() {
+  const pending: (LaptopSheetUnit & { pending_quantity?: number })[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const rows = await supabaseRest<Pick<ProductRow, "sheet_units">[]>(
+      `products?select=sheet_units&source_key=like.production:laptops:pool:*&full_specs->>archived=is.null&limit=1000&offset=${offset}&order=id.asc`
+    );
+    pending.push(...rows.flatMap(row => row.sheet_units ?? []).filter(unit => {
+      const target = (unit as LaptopSheetUnit & { pending_quantity?: number }).pending_quantity;
+      return target === 0 || target === 1;
+    }));
+    if (rows.length < 1000) return pending;
+  }
 }
 
 /** One feedback per customer per order; sending again edits the earlier one.

@@ -42,6 +42,36 @@ beforeEach(() => {
   mail.createTransport.mockReset().mockReturnValue({ sendMail: mail.sendMail });
 });
 
+describe("serial assignments throughout the email lifecycle", () => {
+  const allocated = [
+    { key: "one", code: "JET444", serialNumber: "MOCK-SN-020", row: 21, quantity: 1 },
+    { key: "two", code: "JET445", serialNumber: "MOCK-SN-021", row: 22, quantity: 1 },
+  ];
+  const withSerials = { ...order, order_items: [{ ...order.order_items![0], quantity: 2, allocated_units: allocated }] };
+
+  it.each(["placed", "delivered", "attempt_failed", "cancelled", "cancellation_refund_sent"] as const)("includes both assigned codes/SNs in %s HTML and plain text", kind => {
+    const content = orderEmailContent(withSerials, kind, "APH-1", GMAIL_ENV);
+    for (const unit of allocated) {
+      expect(content.html).toContain(unit.code); expect(content.html).toContain(unit.serialNumber);
+      expect(content.text).toContain(unit.code); expect(content.text).toContain(unit.serialNumber);
+    }
+  });
+
+  it.each(["verified", "packed", "handed_to_courier", "out_for_delivery", "delivered"] as const)("keeps the same serials in the %s progress email", stage => {
+    const content = orderEmailContent(withSerials, "progress", undefined, GMAIL_ENV, undefined, stage);
+    expect(content.text).toContain("Code: JET444 · S/N: MOCK-SN-020");
+    expect(content.text).toContain("Code: JET445 · S/N: MOCK-SN-021");
+  });
+
+  it("escapes serials and codes without consulting current inventory", () => {
+    const hostile = { ...withSerials, order_items: [{ ...withSerials.order_items[0], allocated_units: [{ ...allocated[0], code: '<img src=x>', serialNumber: '<script>bad</script>' }] }] };
+    const content = orderEmailContent(hostile, "placed", undefined, GMAIL_ENV);
+    expect(content.html).toContain("&lt;img src=x&gt;");
+    expect(content.html).toContain("&lt;script&gt;bad&lt;/script&gt;");
+    expect(content.html).not.toContain("<script>");
+  });
+});
+
 describe("send receipt again", () => {
   it("accepts the admin resend action and nothing extra with it", () => {
     expect(orderMutationSchema.safeParse({ action: "resend_receipt" }).success).toBe(true);

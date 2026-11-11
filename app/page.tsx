@@ -26,6 +26,7 @@ import {
 } from "./lib/product-filters";
 import { useDeliveryEstimate } from "./lib/useDeliveryEstimate";
 import InlineAdBanner from "./components/InlineAdBanner";
+import { groupProductVariants } from "./lib/product-variants";
 
 export default function HomePage() {
   const [search, setSearch] = useState("");
@@ -263,7 +264,7 @@ export default function HomePage() {
         brands={brands}
         categories={categories}
         filters={filters}
-        resultCount={visibleProducts.length}
+        resultCount={groupProductVariants(visibleProducts).length}
         onChange={setFilters}
       />
 
