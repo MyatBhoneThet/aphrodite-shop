@@ -5,29 +5,28 @@ import { useAdminText } from "../lib/useAdminText";
 import { useRef, useState } from "react";
 import { authHeaders } from "../lib/client-auth";
 import { normalizeGallery, safeImageUrl, type ProductPhoto } from "../lib/product-gallery";
+import ProductPhotoEditor from "./ProductPhotoEditor";
 
 const MAX_PHOTOS = 12;
+const PHOTO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 type Props = {
   photos: ProductPhoto[];
   onChange: (photos: ProductPhoto[]) => void;
 };
 
-// Uploads straight to Supabase Storage through /api/admin/product-photos and
-// keeps only the returned https URLs. We never preview a local blob: URL —
-// the site's Content-Security-Policy allows images from 'self', data: and
-// https: only, so a blob: preview would silently render blank.
 export default function ProductPhotoUploader({ photos, onChange }: Props) {
   const a = useAdminText();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [isUploading, setIsUploading] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
+  const [fileIndex, setFileIndex] = useState(0);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState("");
 
-  async function uploadFiles(files: File[]) {
-    if (!files.length) return;
-    setError(null);
+  function chooseFiles(selected: File[]) {
+    if (!selected.length) return;
 
     const room = MAX_PHOTOS - photos.length;
     if (room <= 0) {
@@ -35,34 +34,47 @@ export default function ProductPhotoUploader({ photos, onChange }: Props) {
       return;
     }
 
+    const supported = selected.filter((file) => PHOTO_TYPES.has(file.type));
+    const notices = [];
+    if (supported.length < selected.length) notices.push(a("Choose JPG, PNG or WebP photos."));
+    if (supported.length > room) notices.push(`Only ${room} more photo(s) fit, so the rest were not added.`);
+    setError(notices.join(" ") || null);
+    setFileIndex(0);
+    setFiles(supported.slice(0, room));
+  }
+
+  async function storePhoto(file: File) {
     const body = new FormData();
-    files.slice(0, room).forEach((file) => body.append("file", file));
+    body.append("file", file);
+    const response = await fetch("/api/admin/product-photos", {
+      method: "POST",
+      headers: authHeaders(),
+      body,
+    });
+    const data = (await response.json().catch(() => null)) as {
+      photos?: ProductPhoto[];
+      error?: string;
+    } | null;
+    if (!response.ok || !data?.photos?.length) throw new Error(data?.error ?? "Upload failed.");
 
-    setIsUploading(true);
-    try {
-      const response = await fetch("/api/admin/product-photos", {
-        method: "POST",
-        headers: authHeaders(),
-        body,
-      });
+    return data.photos[0];
+  }
 
-      const data = (await response.json().catch(() => null)) as {
-        photos?: ProductPhoto[];
-        error?: string;
-      } | null;
+  async function uploadPhoto(file: File) {
+    const photo = await storePhoto(file);
+    onChange(normalizeGallery([...photos, photo]));
+    advance();
+  }
 
-      if (!response.ok) throw new Error(data?.error ?? "Upload failed.");
+  async function replacePhoto(index: number, file: File) {
+    const replacement = await storePhoto(file);
+    update(index, { url: replacement.url });
+    setEditingIndex(null);
+  }
 
-      onChange(normalizeGallery([...photos, ...(data?.photos ?? [])]));
-      if (files.length > room) {
-        setError(`Only ${room} more photo(s) fit, so the rest were not added.`);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
-    } finally {
-      setIsUploading(false);
-      if (inputRef.current) inputRef.current.value = "";
-    }
+  function advance() {
+    if (fileIndex + 1 < files.length) setFileIndex(fileIndex + 1);
+    else setFiles([]);
   }
 
   function addLink() {
@@ -94,7 +106,8 @@ export default function ProductPhotoUploader({ photos, onChange }: Props) {
     <div>
       <label className="mb-1 block text-sm font-semibold">{a("Product photos")}</label>
 
-      <div
+      <button
+        type="button"
         onDragOver={(event) => {
           event.preventDefault();
           setIsDragging(true);
@@ -103,21 +116,23 @@ export default function ProductPhotoUploader({ photos, onChange }: Props) {
         onDrop={(event) => {
           event.preventDefault();
           setIsDragging(false);
-          void uploadFiles(Array.from(event.dataTransfer.files));
+          chooseFiles(Array.from(event.dataTransfer.files));
         }}
         onClick={() => inputRef.current?.click()}
-        className={`cursor-pointer rounded-xl border-2 border-dashed px-4 py-6 text-center transition ${
+        className={`block w-full cursor-pointer rounded-xl border-2 border-dashed px-4 py-6 text-center transition ${
           isDragging
             ? "border-red-500 bg-red-50"
             : "border-zinc-300 hover:border-red-400 hover:bg-zinc-50"
         }`}
       >
-        <p className="text-sm font-semibold text-zinc-700">
-          {isUploading ? a("Uploading...") : a("Click to choose photos, or drag them here")}
-        </p>
-        <p className="mt-1 text-xs text-zinc-500">
-           {a("JPG, PNG or WebP · up to 5 MB each · up to")} {MAX_PHOTOS}  {a("photos")} </p>
-      </div>
+        <span className="block text-sm font-semibold text-zinc-700">
+          {a("Click to choose photos, or drag them here")}
+        </span>
+        <span className="mt-1 block text-xs text-zinc-500">
+          {a("JPG, PNG or WebP · up to 5 MB each · up to")} {MAX_PHOTOS} {a("photos")}
+        </span>
+        <span className="mt-1 block text-xs text-zinc-500">{a("Crop and resize before uploading.")}</span>
+      </button>
 
       <input
         ref={inputRef}
@@ -125,8 +140,32 @@ export default function ProductPhotoUploader({ photos, onChange }: Props) {
         accept="image/png,image/jpeg,image/webp"
         multiple
         hidden
-        onChange={(event) => void uploadFiles(Array.from(event.target.files ?? []))}
+        onChange={(event) => {
+          chooseFiles(Array.from(event.target.files ?? []));
+          event.target.value = "";
+        }}
       />
+
+      {files[fileIndex] && (
+        <ProductPhotoEditor
+          key={fileIndex}
+          file={files[fileIndex]}
+          position={fileIndex + 1}
+          total={files.length}
+          onUpload={uploadPhoto}
+          onSkip={advance}
+          onCancel={() => setFiles([])}
+        />
+      )}
+
+      {editingIndex !== null && photos[editingIndex] && (
+        <ProductPhotoEditor
+          key={photos[editingIndex].url}
+          photo={photos[editingIndex]}
+          onUpload={(file) => replacePhoto(editingIndex, file)}
+          onCancel={() => setEditingIndex(null)}
+        />
+      )}
 
       {error && <p className="mt-2 text-xs font-semibold text-red-600">{a(error)}</p>}
 
@@ -135,7 +174,7 @@ export default function ProductPhotoUploader({ photos, onChange }: Props) {
           {photos.map((photo, index) => (
             <li
               key={photo.url}
-              className="flex items-center gap-3 rounded-xl border px-3 py-2"
+              className="flex flex-wrap items-center gap-3 rounded-xl border px-3 py-2"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -165,6 +204,13 @@ export default function ProductPhotoUploader({ photos, onChange }: Props) {
                 )}
               </div>
 
+              <button
+                type="button"
+                onClick={() => setEditingIndex(index)}
+                className="shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold hover:bg-zinc-100"
+              >
+                {a("Crop / resize")}
+              </button>
               <button
                 type="button"
                 onClick={() => remove(index)}

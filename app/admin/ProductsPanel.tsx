@@ -315,9 +315,10 @@ export default function ProductsPanel({
             </div>
 
             <ProductPhotoUploader
+              key={productForm.id ?? "new"}
               photos={productForm.gallery}
               onChange={(gallery) =>
-                setProductForm({ ...productForm, gallery })
+                setProductForm((current) => current.id === productForm.id ? { ...current, gallery } : current)
               }
             />
 
