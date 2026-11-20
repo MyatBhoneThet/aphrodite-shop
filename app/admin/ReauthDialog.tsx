@@ -2,25 +2,32 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { authHeaders } from "@/app/lib/client-auth";
+import AuthenticatorSelect, { loadAuthenticatorStatus, type AuthenticatorStatus } from "./AuthenticatorSelect";
 import { registerReauthOpener } from "./reauth";
 
 /** Mounted once on the admin page. Opens when a risky action asks to be confirmed. */
 export default function ReauthDialog() {
   const [open, setOpen] = useState(false);
-  const [enrolled, setEnrolled] = useState(true);
+  const [status, setStatus] = useState<AuthenticatorStatus | null>(null);
+  const [selectedFactor, setSelectedFactor] = useState("");
   const [value, setValue] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const settle = useRef<((ok: boolean) => void) | null>(null);
+  const enrolled = status?.enrolled ?? true;
+  const factorId = status?.factors.length === 1 ? status.factors[0].id : selectedFactor;
 
   useEffect(() => {
     registerReauthOpener(async () => {
-      try {
-        const response = await fetch("/api/auth/mfa/status", { headers: authHeaders(), cache: "no-store" });
-        if (response.ok) setEnrolled(Boolean(((await response.json()) as { enrolled?: boolean }).enrolled));
-      } catch { /* default to the code prompt */ }
       setValue("");
       setError("");
+      setSelectedFactor("");
+      try {
+        setStatus(await loadAuthenticatorStatus());
+      } catch (reason) {
+        setStatus(null);
+        setError(reason instanceof Error ? reason.message : "Could not load your authenticators.");
+      }
       setOpen(true);
       return new Promise<boolean>((resolve) => { settle.current = resolve; });
     });
@@ -35,13 +42,14 @@ export default function ReauthDialog() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (!status || (enrolled && !factorId) || busy) return;
     setBusy(true);
     setError("");
     try {
       const response = await fetch(enrolled ? "/api/auth/mfa/verify" : "/api/auth/reauth", {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify(enrolled ? { code: value } : { password: value }),
+        body: JSON.stringify(enrolled ? { code: value, factor_id: factorId } : { password: value }),
       });
       if (!response.ok) {
         const body = (await response.json().catch(() => null)) as { error?: string } | null;
@@ -63,6 +71,9 @@ export default function ReauthDialog() {
         <p className="mt-1 text-sm text-zinc-600">
           {enrolled ? "This is a sensitive action. Enter the 6-digit code from your authenticator app." : "This is a sensitive action. Enter your password again."}
         </p>
+        {status && enrolled && (
+          <AuthenticatorSelect factors={status.factors} value={selectedFactor} onChange={setSelectedFactor} disabled={busy} />
+        )}
         <input
           autoFocus
           required
@@ -79,7 +90,7 @@ export default function ReauthDialog() {
         {error && <p role="alert" className="mt-2 text-sm font-semibold text-red-600">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={() => close(false)} className="rounded-full border px-5 py-2 text-sm font-semibold">Cancel</button>
-          <button type="submit" disabled={busy || !value} className="rounded-full bg-red-600 px-5 py-2 text-sm font-bold text-white disabled:opacity-50">{busy ? "Checking…" : "Confirm"}</button>
+          <button type="submit" disabled={busy || !value || !status || (enrolled && !factorId)} className="rounded-full bg-red-600 px-5 py-2 text-sm font-bold text-white disabled:opacity-50">{busy ? "Checking…" : "Confirm"}</button>
         </div>
       </form>
     </div>

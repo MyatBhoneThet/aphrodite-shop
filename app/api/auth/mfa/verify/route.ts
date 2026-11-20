@@ -19,9 +19,13 @@ export async function POST(request: NextRequest) {
     const code = parseCode(body?.code);
     const totps = user.mfa.factors.filter((factor) => factor.factor_type === "totp");
     const requested = typeof body?.factor_id === "string" ? body.factor_id : null;
+    const verified = totps.filter((factor) => factor.status === "verified");
+    if (!requested && verified.length > 1) {
+      throw badRequest("Choose the authenticator generating your code. Refresh the page if you don't see the chooser.");
+    }
     const factor = requested
       ? totps.find((entry) => entry.id === requested)
-      : totps.find((entry) => entry.status === "verified");
+      : verified[0];
     if (!factor) throw badRequest("Set up your authenticator first.");
 
     let session;
