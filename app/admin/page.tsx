@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { emptyOrderFilters, filterOrders, paginate, type OrderFilters } from "@/app/lib/admin-order-filter";
-import type { Product } from "../data/products";
 import { adminLogout, authHeaders } from "../lib/client-auth";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { useAdminText } from "../lib/useAdminText";
@@ -20,7 +19,6 @@ import OrderResolutionDialog from "./OrderResolutionDialog";
 import OrdersPanel from "./OrdersPanel";
 import OrderWorkflowDialog from "./OrderWorkflowDialog";
 import PricingPanel from "./PricingPanel";
-import { getErrorMessage } from "./product-form";
 import ProductsPanel from "./ProductsPanel";
 import QueuePanel from "./QueuePanel";
 import ConfirmDialogHost from "./ConfirmDialogHost";
@@ -40,8 +38,8 @@ import WholesalePanel from "./WholesalePanel";
 /**
  * The admin / staff back office.
  *
- * This file only decides what is on screen and loads the shared data (products
- * and orders). The work itself lives next to it: one panel component per
+ * This file decides what is on screen and loads the shared order data.
+ * The work itself lives next to it: one panel component per
  * screen, and one hook each for the product form, the order actions and the
  * sheet sync.
  */
@@ -60,7 +58,7 @@ export default function AdminPage() {
 
   const [activePanel, setActivePanel] = useState<AdminPanelId>("dashboard");
 
-  const [products, setProducts] = useState<Product[]>([]);
+  const [catalogVersion, setCatalogVersion] = useState(0);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [orderFilters, setOrderFilters] = useState<OrderFilters>(emptyOrderFilters);
   const [orderPage, setOrderPage] = useState(1);
@@ -73,25 +71,9 @@ export default function AdminPage() {
   const loadDashboardData = useCallback(async () => {
     setIsLoadingData(true);
     setError("");
+    setCatalogVersion(version => version + 1);
 
     try {
-      // Authenticated so the response includes admin-only fields
-      // (legacy wholesale price + numeric inventory).
-      const productsResponse = await fetch("/api/products?limit=100", {
-        headers: authHeaders(),
-        cache: "no-store",
-      });
-
-      if (!productsResponse.ok) {
-        throw new Error(await getErrorMessage(productsResponse));
-      }
-
-      const productsData = (await productsResponse.json()) as {
-        products: Product[];
-      };
-
-      setProducts(productsData.products ?? []);
-
       // Auth rides in the httpOnly admin session cookie (or a legacy
       // localStorage bearer token via authHeaders()).
       const ordersResponse = await fetch("/api/orders", {
@@ -133,18 +115,6 @@ export default function AdminPage() {
     [orders, orderFilters, isStaff]
   );
   const pagedOrders = useMemo(() => paginate(filteredOrders, orderPage), [filteredOrders, orderPage]);
-
-  const filteredProducts = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
-
-    if (!keyword) return products;
-
-    return products.filter((product) =>
-      `${product.name} ${product.brand} ${product.category} ${product.stock}`
-        .toLowerCase()
-        .includes(keyword)
-    );
-  }, [products, search]);
 
   async function handleLogout() {
     await adminLogout();
@@ -299,8 +269,7 @@ export default function AdminPage() {
 
           {activePanel === "products" && (
             <ProductsPanel
-              products={filteredProducts}
-              allProducts={products}
+              catalogVersion={catalogVersion}
               productForm={productAdmin.productForm}
               setProductForm={productAdmin.setProductForm}
               isProductFormOpen={productAdmin.isProductFormOpen}

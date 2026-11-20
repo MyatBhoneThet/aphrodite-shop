@@ -1,19 +1,21 @@
 "use client";
 
 import type { Dispatch, FormEvent, SetStateAction } from "react";
+import { useEffect, useState } from "react";
 import type { Product } from "../data/products";
+import { belongsToCatalogSection } from "../lib/catalog";
 import { useAdminText } from "../lib/useAdminText";
+import ProductCatalogList from "./ProductCatalogList";
 import ProductPhotoUploader from "./ProductPhotoUploader";
 import RecentlyDeletedProducts from "./RecentlyDeletedProducts";
-import ProductsTable from "./ProductsTable";
-import { useState } from "react";
+import { loadProductCatalog } from "./product-catalog";
 import { categoriesForSheet, emptyProductForm, productToForm, switchSheetTab } from "./product-form";
 import type { ProductFormState } from "./types";
 
+const VIEWS = ["All Products", "Laptops", "Accessories", "PC Parts"] as const;
+
 type Props = {
-  products: Product[];
-  /** Every product, whatever the search box says: the source of the category list. */
-  allProducts: Product[];
+  catalogVersion: number;
   productForm: ProductFormState;
   setProductForm: Dispatch<SetStateAction<ProductFormState>>;
   isProductFormOpen: boolean;
@@ -31,8 +33,7 @@ type Props = {
 
 /** The product list with its add / edit form. */
 export default function ProductsPanel({
-  products: filteredProducts,
-  allProducts,
+  catalogVersion,
   productForm,
   setProductForm,
   isProductFormOpen,
@@ -48,6 +49,33 @@ export default function ProductsPanel({
 }: Props) {
   const a = useAdminText();
   const [isNewCategory, setIsNewCategory] = useState(false);
+  const [view, setView] = useState<(typeof VIEWS)[number]>("All Products");
+  const [pageSize, setPageSize] = useState(25);
+  const [catalog, setCatalog] = useState<{ version: number; products: Product[] | null; error: string } | null>(null);
+  const isLoading = catalog?.version !== catalogVersion;
+  const allProducts = catalog?.products ?? [];
+  const keyword = search.trim().toLowerCase();
+  const matches = keyword ? allProducts.filter(product =>
+    `${product.name} ${product.brand} ${product.category} ${product.stock}`.toLowerCase().includes(keyword)
+  ) : allProducts;
+  const productsForView = (section: (typeof VIEWS)[number]) => section === "All Products"
+    ? matches
+    : matches.filter(product => belongsToCatalogSection(product, section));
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadProductCatalog(controller.signal).then(products => {
+      if (!controller.signal.aborted) setCatalog({ version: catalogVersion, products, error: "" });
+    }).catch(error => {
+      if (!controller.signal.aborted) setCatalog(previous => ({
+        version: catalogVersion,
+        products: previous?.products ?? null,
+        error: error instanceof Error ? error.message : "Could not load products.",
+      }));
+    });
+    return () => controller.abort();
+  }, [catalogVersion]);
+
   const categoryOptions = categoriesForSheet(allProducts, productForm.sourceSheet);
   // A category typed by hand, or one the list does not know yet, uses the text box.
   const typesCategory =
@@ -57,13 +85,9 @@ export default function ProductsPanel({
 
   return (
     <>
-      <section
-        className={`mt-6 grid gap-6 ${
-          isProductFormOpen ? "2xl:grid-cols-[minmax(0,520px)_minmax(0,1fr)]" : ""
-        }`}
-      >
+      <section className="grid min-w-0 gap-6">
         {isProductFormOpen && (
-        <div className="rounded-2xl bg-white shadow-sm ring-1 ring-zinc-100">
+        <div className="w-full max-w-3xl rounded-2xl bg-white shadow-sm ring-1 ring-zinc-100">
           <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
             <div>
               <h2 className="font-bold">
@@ -389,25 +413,24 @@ export default function ProductsPanel({
         </div>
         )}
 
-        <div className="rounded-2xl bg-white shadow-sm ring-1 ring-zinc-100">
-          <div className="flex flex-col gap-4 border-b px-5 py-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="font-bold">{a("Product List")}</h2>
-              <p className="text-sm text-zinc-500">
-                 {a("Edit price, stock and product information.")} </p>
-            </div>
+        <div className="min-w-0 rounded-2xl bg-white shadow-sm ring-1 ring-zinc-100">
+          <div className="flex flex-col gap-4 px-4 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+            <h2 className="text-2xl font-bold tracking-tight">{a("Product List")}</h2>
 
             <div className="flex flex-wrap items-center gap-2">
               <input
+                type="search"
+                aria-label={a("Search products")}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                className="rounded-full border px-4 py-2 text-sm outline-none focus:border-red-500"
+                className="min-w-0 flex-1 rounded-full border border-zinc-300 px-4 py-2.5 outline-none focus:border-red-500 sm:w-64"
                 placeholder={a("Search products...")}
               />
               {isAdmin && !isProductFormOpen && (
                 <button
                   onClick={() => {
-                    setProductForm(emptyProductForm());
+                    const form = emptyProductForm();
+                    setProductForm(view === "All Products" ? form : switchSheetTab(form, view));
                     setIsNewCategory(false);
                     setIsProductFormOpen(true);
                   }}
@@ -418,16 +441,48 @@ export default function ProductsPanel({
             </div>
           </div>
 
-          <ProductsTable
-            products={filteredProducts}
-            onEdit={(product) => {
-              setProductForm(productToForm(product));
-              setIsNewCategory(false);
-                    setIsProductFormOpen(true);
-              window.scrollTo({ top: 0, behavior: "smooth" });
-            }}
-            onDelete={isAdmin ? handleDeleteProduct : undefined}
-          />
+          <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 px-4 pb-4 sm:px-6" role="group" aria-label={a("Product categories")}>
+            {VIEWS.map(section => (
+              <button
+                type="button"
+                key={section}
+                aria-pressed={view === section}
+                onClick={() => setView(section)}
+                className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${view === section ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 text-zinc-700 hover:bg-zinc-100"}`}
+              >
+                {a(section)}
+                {catalog?.products && (
+                  <span className={`rounded-full px-2 py-0.5 text-xs tabular-nums ${view === section ? "bg-white/15" : "bg-zinc-100"}`}>
+                    {productsForView(section).length.toLocaleString()}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          {isLoading && (
+            <p role="status" className="px-4 py-4 text-sm text-zinc-600 sm:px-6">{a("Loading products…")}</p>
+          )}
+          {!isLoading && catalog?.error && (
+            <div role="alert" className="flex flex-wrap items-center gap-3 bg-red-50 px-4 py-4 text-sm text-red-700 sm:px-6">
+              <p>{a(catalog.products ? "Could not refresh the product list." : "Could not load products.")} {a(catalog.error)}</p>
+              <button type="button" onClick={() => void onProductsChanged?.()} className="rounded-full border border-red-200 px-3 py-1 font-semibold">{a("Retry")}</button>
+            </div>
+          )}
+          {catalog?.products && (
+            <ProductCatalogList
+              key={`${view}:${keyword}`}
+              products={productsForView(view)}
+              pageSize={pageSize}
+              onPageSize={setPageSize}
+              onEdit={(product) => {
+                setProductForm(productToForm(product));
+                setIsNewCategory(false);
+                setIsProductFormOpen(true);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              onDelete={isAdmin ? handleDeleteProduct : undefined}
+            />
+          )}
         </div>
       </section>
       {isAdmin && (
