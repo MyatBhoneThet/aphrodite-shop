@@ -2,6 +2,7 @@
 
 import { useLanguage } from "../lib/language";
 import ProductPrice from "../components/ProductPrice";
+import ProductGradeBadge from "../components/ProductGradeBadge";
 import { effectiveProductPrice } from "../lib/promotions";
 
 import Image from "next/image";
@@ -374,6 +375,7 @@ function ComparePageContent() {
                             <p className="truncate text-xs text-zinc-500">
                               {product.brand} · {product.category}
                             </p>
+                            <ProductGradeBadge product={product} />
                           </div>
                           <span className="hidden shrink-0 text-sm font-semibold text-zinc-500 sm:block">
                             {formatProductPrice(effectiveProductPrice(product))}
@@ -467,7 +469,10 @@ function ComparePageContent() {
                                 {product.name}
                               </Link>
                               <p className="mt-1 text-xs text-zinc-500">{product.brand}</p>
-                              <div className="mt-2"><ProductPrice price={effectiveProductPrice(product)} regularPrice={product.price} /></div>
+                              <div className="mt-2">
+                                <ProductGradeBadge product={product} />
+                                <ProductPrice price={effectiveProductPrice(product)} regularPrice={product.price} />
+                              </div>
 
                               {product.tiers?.[0] && (
                                 <p className="mt-1 text-xs font-semibold text-red-600">

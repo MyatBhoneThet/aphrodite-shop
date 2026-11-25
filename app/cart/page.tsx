@@ -3,6 +3,7 @@
 import Link from "next/link";
 import BrandLogo from "../components/BrandLogo";
 import ProductPrice from "../components/ProductPrice";
+import ProductGradeBadge from "../components/ProductGradeBadge";
 import { usePathname, useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Product } from "../data/products";
@@ -779,6 +780,7 @@ export default function CartPage() {
       <img src={item.product.image} alt={item.product.name} className="h-12 w-12 rounded-xl bg-zinc-50 object-contain sm:h-20 sm:w-20" />
       <div className="min-w-0">
         <p className="text-sm font-bold leading-5 sm:text-base">{item.product.name}</p>
+        <ProductGradeBadge product={item.product} />
         {item.product.price > 0
           ? <ProductPrice price={item.pricing.unitPrice} regularPrice={item.pricing.retailUnitPrice} />
           : <p className="font-bold text-zinc-500">{text("Price pending")}</p>}

@@ -71,6 +71,18 @@ describe("grouping versions of one model", () => {
     ])).toHaveLength(2);
   });
 
+  it("keeps prices for different grades on separate cards even within a spec variant group", () => {
+    const regular = laptop(14, { price: 3_750_000, fullSpecs: {
+      condition: "Brand New", variant: { group: GROUP, model: "Dell Latitude 3420", label: "256 GB SSD" },
+    } });
+    const clearance = laptop(217, { price: 3_000_000, fullSpecs: {
+      condition: "Brand New (Clearnace Sales)", variant: { group: GROUP, model: "Dell Latitude 3420", label: "512 GB SSD" },
+    } });
+
+    expect(groupProductVariants([regular, clearance]).map(({ product }) => product.price))
+      .toEqual([3_750_000, 3_000_000]);
+  });
+
   it("shows one card for all versions, linking to the first in stock", () => {
     const products = [
       laptop(1),

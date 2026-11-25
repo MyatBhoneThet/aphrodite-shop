@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Product } from "../app/data/products";
+import { availableProductGrades } from "../app/lib/product-grades";
 import {
   EMPTY_PRODUCT_FILTERS,
   filterAndSortProducts,
@@ -43,6 +44,23 @@ const products = [
 ];
 
 describe("storefront product filters", () => {
+  it("offers the workbook grades only for in-stock laptops and keeps their own prices", () => {
+    const catalog = [
+      product(1, 3_000_000, { fullSpecs: { condition: "Brand New" } }),
+      product(2, 2_900_000, { fullSpecs: { condition: "Commercial - Brand New" } }),
+      product(3, 2_750_000, { fullSpecs: { condition: "Brand New (Clearnace Sales)" } }),
+      product(4, 2_250_000, { fullSpecs: { condition: "Brand New (Clearance Sales B)" } }),
+      product(5, 2_100_000, { stock: "Out of Stock", fullSpecs: { condition: "Brand New (Clearance Sales B)" } }),
+      product(6, 50_000, { type: "accessory", fullSpecs: { condition: "Brand New" } }),
+      product(7, 1_900_000, { fullSpecs: { condition: "Used - Grade B" } }),
+    ];
+
+    expect(availableProductGrades(catalog)).toEqual(["brand-new", "commercial-new", "new-clearance", "clearance-b"]);
+    expect(availableProductGrades(catalog.slice(4))).toEqual([]);
+    expect(filterAndSortProducts(catalog, { ...EMPTY_PRODUCT_FILTERS, grade: "clearance-b" }))
+      .toEqual([catalog[3]]);
+  });
+
   it("combines price, type, brand, and stock filters", () => {
     const result = filterAndSortProducts(products, {
       ...EMPTY_PRODUCT_FILTERS,

@@ -22,6 +22,7 @@ import ProductSection from "./ProductSection";
 import { useLanguage } from "../lib/language";
 import { activePromotion } from "../lib/promotions";
 import { groupProductVariants } from "../lib/product-variants";
+import { availableProductGrades } from "../lib/product-grades";
 import { useDeliveryEstimate } from "../lib/useDeliveryEstimate";
 
 type Props = {
@@ -256,6 +257,7 @@ export default function CategoryCatalogPage({ section }: Props) {
         <ProductFilters
           brands={brands}
           categories={categories}
+          grades={availableProductGrades(products)}
           filters={filters}
           resultCount={resultCount}
           onChange={setFilters}

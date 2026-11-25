@@ -1,5 +1,6 @@
 import { effectiveProductPrice } from "./promotions";
 import type { Product } from "../data/products";
+import { availableProductGrade, type ProductGrade } from "./product-grades";
 
 /**
  * Written into full_specs by the sheet sync when rows of one model differ
@@ -15,6 +16,7 @@ export type ProductVariantOption = {
   price: number;
   regularPrice?: number;
   stock: Product["stock"];
+  grade?: ProductGrade;
 };
 
 const GROUP_PATTERN = /^[a-f0-9]{16}$/;
@@ -52,12 +54,14 @@ export function variantOptions(products: Product[]): ProductVariantOption[] {
       const variant = productVariant(product);
       if (!variant) return [];
       const price = effectiveProductPrice(product);
+      const grade = availableProductGrade(product);
       return [{
         id: product.id,
         label: variant.label,
         price,
         ...(price < product.price ? { regularPrice: product.price } : {}),
         stock: product.stock,
+        ...(grade ? { grade } : {}),
       }];
     })
     .sort((left, right) => byLabel.compare(left.label, right.label));
@@ -95,7 +99,7 @@ export function productListingKey(product: Product): string {
   const variant = productVariant(product);
   return JSON.stringify(normalizeListingValue([
     ...scope,
-    variant ? ["variant", variant.group] : [
+    variant ? ["variant", variant.group, product.type === "laptop" ? product.fullSpecs?.condition ?? "" : ""] : [
       "product", product.name || product.id, product.specs, product.fullSpecs,
     ],
   ]));

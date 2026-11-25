@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import ProductPrice from "./ProductPrice";
+import ProductGradeBadge from "./ProductGradeBadge";
+import { availableProductGrade } from "../lib/product-grades";
 import { effectiveProductPrice } from "../lib/promotions";
 import type { Product, UserRole } from "../data/products";
 import type { ProductVariantOption } from "../lib/product-variants";
@@ -25,7 +27,8 @@ type Props = {
 export default function ProductCard({ product, model, options = [], deliveryEstimate = null, compactMobile = false }: Props) {
   const { text } = useLanguage();
   const hasVersions = options.length > 1;
-  const pricedOptions = options.filter((option) => option.price > 0);
+  const grade = availableProductGrade(product);
+  const pricedOptions = options.filter((option) => option.price > 0 && (!grade || option.stock === "In Stock"));
   const prices = pricedOptions.map((option) => option.price);
   const regularPrices = pricedOptions.map((option) => option.regularPrice ?? option.price);
   const minPrice = hasVersions && prices.length ? Math.min(...prices) : effectiveProductPrice(product);
@@ -72,6 +75,7 @@ export default function ProductCard({ product, model, options = [], deliveryEsti
             </dl>
           )}
           <div className={compactMobile ? "mt-2 sm:mt-4" : "mt-4"}>
+            <ProductGradeBadge product={product} />
             <ProductPrice
               price={minPrice}
               priceMax={maxPrice}

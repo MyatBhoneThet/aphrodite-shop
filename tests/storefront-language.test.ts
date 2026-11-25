@@ -71,6 +71,21 @@ describe("storefront language rendering", () => {
     }
   });
 
+  it("shows a translated grade alongside the in-stock price", () => {
+    locale.value = "my";
+    const product: Product = {
+      id: 1, name: "Acer Aspire Lite 15", type: "laptop", category: "Laptop", brand: "Acer",
+      price: 2_250_000, image: "/products/test.png", stock: "In Stock",
+      specs: {}, fullSpecs: { condition: "Brand New (Clearance Sales B)" },
+    };
+    const label = translateStorefrontText("my", "Clearance · Grade B");
+    const render = () => renderToStaticMarkup(React.createElement(ProductCard, { product, userRole: "normal" }));
+    expect(render()).toContain(label);
+    expect(render()).toContain("2,250,000");
+    product.stock = "Out of Stock";
+    expect(render()).not.toContain(label);
+  });
+
   it("still renders English after switching back", () => {
     locale.value = "en";
     const html = renderToStaticMarkup(React.createElement(ProductFilters, {

@@ -5,6 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Product, UserRole } from "../../data/products";
 import ProductPrice from "../../components/ProductPrice";
+import ProductGradeBadge from "../../components/ProductGradeBadge";
+import { availableProductGrade, PRODUCT_GRADES } from "../../lib/product-grades";
 import ProductShare from "../../components/ProductShare";
 import { effectiveProductPrice } from "../../lib/promotions";
 import ProductGallery from "../../components/ProductGallery";
@@ -460,6 +462,7 @@ export default function ProductDetailsClient({
                         }`}
                       >
                         <span className="block text-sm font-bold leading-5 sm:text-base sm:leading-normal">{option.label}</span>
+                        {option.grade && <span className="block text-xs font-semibold text-zinc-700">{text(PRODUCT_GRADES[option.grade].label)}</span>}
                         <span
                           className={`mt-0.5 block text-[11px] font-semibold sm:mt-1 sm:text-xs ${
                             soldOut ? "text-red-600" : "text-zinc-500"
@@ -476,7 +479,11 @@ export default function ProductDetailsClient({
             )}
 
             <div className={`mt-6 sm:mt-8 ${isChangingVariant ? "opacity-50" : ""}`}>
+              <ProductGradeBadge product={product} />
               <ProductPrice price={product.price > 0 ? displayPrice : 0} regularPrice={product.price} large />
+              {availableProductGrade(product) === "clearance-b" && (
+                <p className="mt-2 text-sm text-zinc-600">{text("Contact us for details about this unit’s condition.")}</p>
+              )}
               {pricing?.tierMinQuantity && <p className="mt-2 text-sm font-semibold text-zinc-500">{pricing.label}</p>}
 
               {product.price > 0 && pricing?.wholesaleEligible && !pricing.tierMinQuantity && !pricing.promotional && (
@@ -721,7 +728,10 @@ export default function ProductDetailsClient({
 
                   <h3 className="mt-3 flex-1 text-sm font-medium leading-5 sm:mt-4 sm:text-base sm:leading-normal">{item.name}</h3>
 
-                  <div className="mt-4"><ProductPrice price={effectiveProductPrice(item)} regularPrice={item.price} /></div>
+                  <div className="mt-4">
+                    <ProductGradeBadge product={item} />
+                    <ProductPrice price={effectiveProductPrice(item)} regularPrice={item.price} />
+                  </div>
                   <DeliveryEstimateBadge estimate={deliveryEstimate} product={item} compact />
                 </Link>
               ))}

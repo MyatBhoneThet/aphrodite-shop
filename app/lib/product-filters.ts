@@ -1,6 +1,7 @@
 import { effectiveProductPrice } from "./promotions";
 import type { Product } from "../data/products";
 import { getProductFamily, type ProductFamily } from "./product-specifications";
+import { availableProductGrade, type ProductGrade } from "./product-grades";
 
 export type ProductFilterState = {
   minPrice: string;
@@ -8,6 +9,7 @@ export type ProductFilterState = {
   type: "all" | ProductFamily;
   category: string;
   stock: "all" | Product["stock"];
+  grade: "all" | ProductGrade;
   brand: string;
   sort: "recommended" | "price-asc" | "price-desc" | "name";
 };
@@ -18,6 +20,7 @@ export const EMPTY_PRODUCT_FILTERS: ProductFilterState = {
   type: "all",
   category: "all",
   stock: "all",
+  grade: "all",
   brand: "all",
   sort: "recommended",
 };
@@ -29,6 +32,7 @@ export function countActiveProductFilters(filters: ProductFilterState) {
     filters.type !== "all",
     filters.category !== "all",
     filters.stock !== "all",
+    filters.grade !== "all",
     filters.brand !== "all",
     filters.sort !== "recommended",
   ].filter(Boolean).length;
@@ -70,6 +74,10 @@ export function filterAndSortProducts(
       }
 
       if (filters.stock !== "all" && product.stock !== filters.stock) {
+        return false;
+      }
+
+      if (filters.grade !== "all" && availableProductGrade(product) !== filters.grade) {
         return false;
       }
 

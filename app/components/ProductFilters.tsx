@@ -7,10 +7,12 @@ import {
   type ProductFilterState,
 } from "../lib/product-filters";
 import { useLanguage } from "../lib/language";
+import { PRODUCT_GRADES, type ProductGrade } from "../lib/product-grades";
 
 type Props = {
   brands: string[];
   categories: string[];
+  grades?: ProductGrade[];
   filters: ProductFilterState;
   resultCount: number;
   onChange: (filters: ProductFilterState) => void;
@@ -22,6 +24,7 @@ const fieldClassName =
 export default function ProductFilters({
   brands,
   categories,
+  grades = [],
   filters,
   resultCount,
   onChange,
@@ -35,6 +38,7 @@ export default function ProductFilters({
     ...(filters.type !== "all" ? [{ key: "type" as const, label: `${text("Product type")}: ${text(filters.type === "pc_part" ? "PC Parts" : filters.type === "laptop" ? "Laptops" : "Accessories")}` }] : []),
     ...(filters.category !== "all" ? [{ key: "category" as const, label: `${text("Category")}: ${text(filters.category)}` }] : []),
     ...(filters.stock !== "all" ? [{ key: "stock" as const, label: `${text("Stock")}: ${text(filters.stock)}` }] : []),
+    ...(filters.grade !== "all" && !grades.includes(filters.grade) ? [{ key: "grade" as const, label: text(PRODUCT_GRADES[filters.grade].label) }] : []),
     ...(filters.brand !== "all" ? [{ key: "brand" as const, label: `${text("Brand")}: ${filters.brand}` }] : []),
     ...(filters.sort !== "recommended" ? [{ key: "sort" as const, label: `${text("Sort")}: ${t(filters.sort === "price-asc" ? "filter.priceLowHigh" : filters.sort === "price-desc" ? "filter.priceHighLow" : "filter.nameAZ")}` }] : []),
   ];
@@ -43,7 +47,10 @@ export default function ProductFilters({
     key: K,
     value: ProductFilterState[K]
   ) {
-    onChange({ ...filters, [key]: value });
+    const next = { ...filters, [key]: value };
+    if (key === "grade" && next.grade !== "all" && next.stock === "Out of Stock") next.stock = "all";
+    if (key === "stock" && next.stock === "Out of Stock") next.grade = "all";
+    onChange(next);
   }
 
   return (
@@ -70,6 +77,25 @@ export default function ProductFilters({
             <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" className={`h-5 w-5 shrink-0 text-zinc-400 transition-transform duration-300 motion-reduce:transition-none ${open ? "rotate-180" : ""}`}><path d="m5 7 5 5 5-5" /></svg>
           </span>
         </button>
+
+        {grades.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-zinc-100 px-4 py-3 sm:px-5" role="group" aria-label={text("In-stock laptop grades")}>
+            <span className="text-xs font-semibold text-zinc-600">{text("In-stock laptop grades")}</span>
+            {grades.map((grade) => (
+              <button
+                key={grade}
+                type="button"
+                aria-pressed={filters.grade === grade}
+                onClick={() => update("grade", filters.grade === grade ? "all" : grade)}
+                className={`rounded-full border px-2.5 py-1.5 text-xs font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 ${
+                  filters.grade === grade ? "border-zinc-950 bg-zinc-950 text-white" : "border-transparent hover:border-current " + PRODUCT_GRADES[grade].color
+                }`}
+              >
+                {text(PRODUCT_GRADES[grade].label)}
+              </button>
+            ))}
+          </div>
+        )}
 
         {activeFilters.length > 0 && <div className="flex flex-wrap gap-2 border-t border-zinc-100 px-4 py-3 sm:px-5" aria-label={text("Product filters")}>
           {activeFilters.map(({ key, label }) => <button key={key} type="button" onClick={() => onChange({ ...filters, [key]: EMPTY_PRODUCT_FILTERS[key] })} aria-label={`${text("Clear all filters")}: ${label}`} className="filter-chip-pop inline-flex max-w-full items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition duration-200 hover:-translate-y-0.5 hover:border-red-400 hover:bg-red-100 motion-reduce:transform-none motion-reduce:transition-none"><span className="truncate">{label}</span><span aria-hidden="true" className="text-base leading-none">×</span></button>)}
